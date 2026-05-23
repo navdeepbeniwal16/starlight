@@ -1,0 +1,27 @@
+{
+  "name": "starlight",
+  "private": true,
+  "packageManager": "npm@11.12.1",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "type-check": "turbo run type-check",
+    "lint": "turbo run lint"
+  },
+  "devDependencies": {
+    "expo-router": "~55.0.16",
+    "react": "19.2.0",
+    "react-native": "0.83.6",
+    "react-native-screens": "4.23.0",
+    "turbo": "latest"
+  },
+  "overrides": {
+    "react": "19.2.0",
+    "react-native": "0.83.6",
+    "react-native-screens": "4.23.0"
+  }
+}
