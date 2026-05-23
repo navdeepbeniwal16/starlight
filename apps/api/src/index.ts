@@ -1,10 +1,9 @@
 import "dotenv/config";
-import express from "express";
+import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
 import helmet from "helmet";
-import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { appRouter } from "./router";
-import { createContext } from "./context";
+import healthRouter from "./routes/health";
+import appConfigRouter from "./routes/app";
 
 const app = express();
 
@@ -12,21 +11,16 @@ app.use(helmet());
 app.use(cors());
 app.use(express.json());
 
-app.use(
-  "/trpc",
-  createExpressMiddleware({
-    router: appRouter,
-    createContext,
-  })
-);
+app.use("/health", healthRouter);
+app.use("/app", appConfigRouter);
 
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  console.error(err);
+  res.status(500).json({ error: err.message });
 });
 
 const port = process.env.PORT ?? 3000;
 app.listen(port, () => {
   console.log(`API running on port ${port}`);
 });
-
-export type { AppRouter } from "./router";

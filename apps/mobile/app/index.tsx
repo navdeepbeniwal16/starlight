@@ -1,14 +1,23 @@
 import { View, Text, StyleSheet } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { trpc } from "../lib/trpc";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../lib/api";
 
 export default function HomeScreen() {
-  const { data: appName, isLoading, error } = trpc.appName.useQuery();
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["appName"],
+    queryFn: api.getAppName,
+  });
+  const appName = data?.name;
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>
-        {isLoading ? "Loading..." : error ? "Error" : appName}
+        {isLoading
+          ? "Loading..."
+          : error
+          ? String(error)
+          : appName}
       </Text>
       <StatusBar style="auto" />
     </View>
