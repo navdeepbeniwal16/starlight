@@ -1,5 +1,5 @@
 import { Router, Request, Response} from "express";
-import { EmailAlreadyInUseError, signup } from "../services/auth.service";
+import { EmailAlreadyInUseError, InvalidCredentialsError, login, signup } from "../services/auth.service";
 
 const router = Router();
 
@@ -57,10 +57,42 @@ router.post("/signup", async (req: Request, res: Response): Promise<void> => {
         if(error instanceof EmailAlreadyInUseError) {
             res.status(409).json({error: "Email already in use"});
             return;
-        } else {
-            throw error;
         }
+        
+        throw error;
     }
 });
+
+router.post("/login", async (req: Request, res: Response): Promise<void> => {
+    if(!req.body || typeof req.body !== 'object') {
+        res.status(400).json({error: "Request body is required"});
+        return;
+    }
+
+    const { email, password } = req.body;
+
+    if(typeof email !== 'string' || typeof password !== 'string') {
+        res.status(400).json({error: 'Invalid request body'});
+        return;
+    }
+
+    try {
+        const result = await login({
+            email: email.trim(),
+            password: password
+        });
+
+        res.status(200).json(result);
+        return;
+    } catch (error) {
+        if(error instanceof InvalidCredentialsError) {
+            res.status(401).json({error: "Invalid credentials"}); // Unauthorized
+            return;
+        }
+
+        throw error;
+    }
+
+})
 
 export default router;
