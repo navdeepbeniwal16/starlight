@@ -4,43 +4,26 @@ import { useAuthStore } from '../../stores/auth.store';
 import { useState } from 'react';
 import { api } from '../../lib/api';
 
-export default function SignupScreen() {
+export default function LoginScreen() {
     const router = useRouter();
     const setAuth = useAuthStore((state) => state.setAuth);
 
-    const [fullName, setFullName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
 
-    async function handleSignup() {
+    async function handleLogin() {
         setError(null);
 
-        const trimmedName = fullName.trim();
         const trimmedEmail = email.trim();
-        if(!trimmedName || !trimmedEmail || !password || !confirmPassword) {
+        if(!trimmedEmail || !password) {
             setError('All fields are required');
             return;
         }
 
-        if(password !== confirmPassword) {
-            setError('Passwords do not match');
-            return;
-        }
-
-        const nameParts = trimmedName.split(' ');
-        const firstName = nameParts[0];
-        const lastName = nameParts.slice(1).join(' ');
-
-        if(!lastName) {
-            setError('Please enter your full name.');
-            return;
-        }
-
         setIsLoading(true);
-        const result = await api.signup({email: trimmedEmail, password, firstName, lastName});
+        const result = await api.login({email: trimmedEmail, password});
         setIsLoading(false);
 
         if(!result.ok) {
@@ -63,11 +46,6 @@ export default function SignupScreen() {
         {/* Form */}
         <View style={styles.form}>
         <View style={styles.fieldContainer}>
-        <Text style={styles.label}>Full Name</Text>
-        <TextInput value={fullName} onChangeText={setFullName} style={styles.input} placeholder="John Doe" placeholderTextColor="rgba(122,115,106,0.5)" />
-        </View>
-        
-        <View style={styles.fieldContainer}>
         <Text style={styles.label}>Email</Text>
         <TextInput value={email} onChangeText={setEmail} style={styles.input} placeholder="you@example.com" placeholderTextColor="rgba(122,115,106,0.5)" keyboardType="email-address" autoCapitalize="none" />
         </View>
@@ -77,21 +55,16 @@ export default function SignupScreen() {
         <TextInput value={password} onChangeText={setPassword} style={styles.input} placeholder="••••••••" placeholderTextColor="rgba(122,115,106,0.5)" secureTextEntry />
         </View>
         
-        <View style={styles.fieldContainer}>
-        <Text style={styles.label}>Confirm Password</Text>
-        <TextInput value={confirmPassword} onChangeText={setConfirmPassword} style={styles.input} placeholder="••••••••" placeholderTextColor="rgba(122,115,106,0.5)" secureTextEntry />
-        </View>
-        
-        <TouchableOpacity style={styles.button} onPress={handleSignup} disabled={isLoading}>
-        <Text style={styles.buttonText}>{isLoading ? 'Creating account...' : 'Create Account'}</Text>
+        <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={isLoading}>
+        <Text style={styles.buttonText}>{isLoading ? 'Logging...' : 'Login'}</Text>
         </TouchableOpacity>
 
         {error && <Text style={styles.errorText}>{error}</Text>}
 
-        <View style={styles.loginRow}>
-        <Text style={styles.loginText}>Already have an account? </Text>
-        <TouchableOpacity onPress={() => router.replace('/(auth)/login')}>
-        <Text style={styles.loginLink}>Log in</Text>
+        <View style={styles.signupRow}>
+        <Text style={styles.signupText}>Don't have an account? </Text>
+        <TouchableOpacity onPress={() => router.replace('/(auth)/signup')}>
+        <Text style={styles.signupLink}>Sign up</Text>
         </TouchableOpacity>
         </View>
         </View>
@@ -158,16 +131,16 @@ const styles = StyleSheet.create({
         color: '#2a2621',
         letterSpacing: -0.31,
     },
-    loginRow: {
+    signupRow: {
         flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
     },
-    loginText: {
+    signupText: {
         fontSize: 14,
         color: '#7a736a',
     },
-    loginLink: {
+    signupLink: {
         fontSize: 16,
         fontWeight: '500',
         color: '#2a2621',

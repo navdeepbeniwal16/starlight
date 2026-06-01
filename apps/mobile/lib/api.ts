@@ -1,4 +1,4 @@
-import { SignupResponse } from "./api.types";
+import { LoginResponse, SignupResponse } from "./api.types";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
 
@@ -18,6 +18,28 @@ export const api = {
   }): Promise<SignupResponse> => {
     try {
       const response = await fetch(`${API_URL}/auth/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+      });
+
+      const responseJson = await response.json();
+      if(!response.ok) {
+        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
+      }
+
+      return { ok: true, data: responseJson };
+    } catch (error) {
+      return { ok: false, error: 'Network error. Please check your connection.'};
+    }
+  },
+
+  login: async (data: {
+    email: string;
+    password: string;
+  }): Promise<LoginResponse> => {
+    try {
+      const response = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json'},
         body: JSON.stringify(data)

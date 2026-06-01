@@ -8,4 +8,14 @@ export type SignupResponse = ApiResult<{
         firstName: string;
         lastName: string;
     }
-  }>;
+}>;
+
+export type LoginResponse = ApiResult<{
+    token: string;
+    user: {
+        id: string;
+        email: string;
+        firstName: string;
+        lastName: string;
+    }
+}>;
