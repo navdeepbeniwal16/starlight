@@ -28,7 +28,7 @@ export const api = {
         return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
       }
 
-      return { ok: true, data: responseJson };
+      return { ok: true, data: responseJson.data };
     } catch (error) {
       return { ok: false, error: 'Network error. Please check your connection.'};
     }
@@ -50,7 +50,7 @@ export const api = {
         return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
       }
 
-      return { ok: true, data: responseJson };
+      return { ok: true, data: responseJson.data };
     } catch (error) {
       return { ok: false, error: 'Network error. Please check your connection.'};
     }

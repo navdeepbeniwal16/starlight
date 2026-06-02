@@ -4,6 +4,7 @@ import bcrypt from "bcrypt";
 
 export class EmailAlreadyInUseError extends Error {}
 export class InvalidCredentialsError extends Error {}
+export class UserNotFoundError extends Error {}
 
 const HASHING_SALT = 12;
 
@@ -67,4 +68,15 @@ export async function login( data:{
             lastName: user.lastName
         }
     };
+}
+
+export async function getMe(userId:string) {
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true, email: true, firstName: true, lastName: true }
+        });
+
+        if (!user) throw new UserNotFoundError();
+
+        return user;
 }
