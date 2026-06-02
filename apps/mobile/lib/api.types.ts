@@ -19,3 +19,10 @@ export type LoginResponse = ApiResult<{
         lastName: string;
     }
 }>;
+
+export type MeResponse = ApiResult<{
+    id: string,
+    email: string,
+    firstName: string,
+    lastName: string
+}>;

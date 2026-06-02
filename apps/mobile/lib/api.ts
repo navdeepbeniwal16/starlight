@@ -1,4 +1,5 @@
-import { LoginResponse, SignupResponse } from "./api.types";
+import { LoginResponse, MeResponse, SignupResponse } from "./api.types";
+import { getToken } from "./auth-token";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
 
@@ -54,5 +55,29 @@ export const api = {
     } catch (error) {
       return { ok: false, error: 'Network error. Please check your connection.'};
     }
-  }
+  },
+
+  getMe: async (): Promise<MeResponse> => {
+    const token = await getToken();
+
+    if(!token) {
+      return { ok: false, error: 'No token found' };
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/auth/me`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      });
+
+      const responseJson = await response.json();
+      if(!response.ok) {
+        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
+      }
+
+      return { ok: true, data: responseJson.data };
+    } catch (error) {
+      return { ok: false, error: 'Network error. Please check your connection.'};
+    }
+  },
 };
