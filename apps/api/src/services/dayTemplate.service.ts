@@ -1,10 +1,22 @@
 import { prisma } from "../lib/prisma";
 import { BlockInput } from "../types/dayTemplate.types";
 
+export class DayTemplateNotFoundError extends Error {};
 export class ContainerBlockNotFoundError extends Error {};
 export class BlockOverlapError extends Error {};
 export class OutOfAwakeBoundsError extends Error {};
 export class DayTemplateAlreadyExistsError extends Error {};
+
+export async function getDayTemplate(userId: string) {
+    const template = await prisma.dayTemplate.findUnique({
+        where: { userId },
+        include: { blocks: true }
+    });
+
+    if (!template) throw new DayTemplateNotFoundError();
+
+    return template;
+}
 
 export async function createDayTemplate(data:{
     userId: string,

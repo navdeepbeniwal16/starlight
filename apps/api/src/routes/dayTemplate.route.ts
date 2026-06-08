@@ -2,9 +2,11 @@ import { Router, Request, Response } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
 import {
     createDayTemplate,
+    getDayTemplate,
     BlockOverlapError,
     ContainerBlockNotFoundError,
     DayTemplateAlreadyExistsError,
+    DayTemplateNotFoundError,
     OutOfAwakeBoundsError
 } from "../services/dayTemplate.service";
 import { BlockType, EnergyLevel } from "../types/dayTemplate.types";
@@ -14,6 +16,20 @@ const router = Router();
 const timeRegex = /^\d{2}:\d{2}$/;
 const validBlockTypes = Object.values(BlockType);
 const validEnergyLevels = Object.values(EnergyLevel);
+
+router.get("/", authenticate, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const template = await getDayTemplate(req.user!.sub);
+        res.status(200).json({ success: true, data: template });
+    } catch (error) {
+        if (error instanceof DayTemplateNotFoundError) {
+            res.status(404).json({ success: false, error: "Day template not found" });
+            return;
+        }
+
+        throw error;
+    }
+});
 
 router.post("/", authenticate, async (req: Request, res: Response): Promise<void> => {
     if (!req.body || typeof req.body !== "object") {
