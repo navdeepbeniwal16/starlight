@@ -15,6 +15,8 @@ model User {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   dayTemplate  DayTemplate?
+  dayPlans     DayPlan[]
+  tasks        Task[]
 }
 
 model DayTemplate {
@@ -52,6 +54,59 @@ enum EnergyLevel {
   HIGH
   MEDIUM
   LOW
+}
+
+model DayPlan {
+  id        String         @id @default(cuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id])
+  date      String
+  wakeTime  String
+  sleepTime String
+  status    DayPlanStatus  @default(DRAFT)
+  blocks    PlannedBlock[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@unique([userId, date])
+}
+
+model PlannedBlock {
+  id          String       @id @default(cuid())
+  dayPlanId   String
+  dayPlan     DayPlan      @relation(fields: [dayPlanId], references: [id])
+  type        BlockType
+  name        String
+  startTime   String
+  endTime     String
+  energyLevel EnergyLevel?
+  tasks       Task[]
+}
+
+model Task {
+  id             String        @id @default(cuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id])
+  title          String
+  estimatedMins  Int
+  status         TaskStatus    @default(TODO)
+  order          Int
+  plannedBlockId String?
+  plannedBlock   PlannedBlock? @relation(fields: [plannedBlockId], references: [id])
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+enum DayPlanStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
 }
 
 model AppConfig {
