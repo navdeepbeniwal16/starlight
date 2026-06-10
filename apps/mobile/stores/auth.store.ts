@@ -15,11 +15,6 @@ type AuthState = {
     clearAuth: () => Promise<void>;
 }
 
-/* 
-create() builds the store and returns a hook (useAuthStore) for use in components.
-It takes a function that receives Zustand's set updater and returns the initial state + actions.
-Calling set() merges the new values into state and notifies all subscribed components to re-render.
-*/
 export const useAuthStore = create<AuthState>((set) => ({
     // Initial state
     user: null,
