@@ -49,3 +49,35 @@ export type DayTemplate = {
 
 export type GetDayTemplateResponse = ApiResult<DayTemplate>;
 export type CreateDayTemplateResponse = ApiResult<DayTemplate>;
+
+export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'DONE';
+export type DayPlanStatus = 'DRAFT' | 'ACTIVE' | 'COMPLETED';
+
+export type PlannedTask = {
+    id: string;
+    title: string;
+    estimatedMins: number;
+    order: number;
+    status: TaskStatus;
+};
+
+export type PlannedBlock = {
+    id: string;
+    type: BlockType;
+    name: string;
+    startTime: string;
+    endTime: string;
+    energyLevel: EnergyLevel | null;
+    tasks: PlannedTask[];
+};
+
+export type DayPlan = {
+    id: string;
+    date: string;
+    wakeTime: string;
+    sleepTime: string;
+    status: DayPlanStatus;
+    blocks: PlannedBlock[];
+};
+
+export type GetDayPlanResponse = ApiResult<DayPlan>;

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useOnboardingStore } from "../../stores/onboarding.store";
@@ -26,7 +27,7 @@ function GapIndicator({ startTime, endTime }: { startTime: string; endTime: stri
     return (
         <View style={styles.gapRow}>
             <View style={styles.gapPill}>
-                <Text style={styles.gapText}>{formatTime(startTime)} – {formatTime(endTime)}  ·  {formatDuration(startTime, endTime)}  ·  unplanned</Text>
+                <Text style={styles.gapText}>{formatTime(startTime)} – {formatTime(endTime)}  ·  {formatDuration(startTime, endTime)}  ·  free slot</Text>
             </View>
         </View>
     );
@@ -73,7 +74,12 @@ function DayBoundaryMarker({ label, time }: { label: 'Wake' | 'Sleep'; time: str
     const isWake = label === 'Wake';
     return (
         <View style={styles.boundaryRow}>
-            <Text style={styles.boundaryIcon}>{isWake ? '☀️' : '🌙'}</Text>
+            <Ionicons
+                name={isWake ? 'sunny-outline' : 'moon-outline'}
+                size={16}
+                color={isWake ? '#d4a574' : '#9b8c7f'}
+                style={styles.boundaryIcon}
+            />
             <Text style={[styles.boundaryLabel, !isWake && styles.boundaryLabelSleep]}>
                 {label.toLowerCase()}
             </Text>
@@ -336,8 +342,6 @@ const styles = StyleSheet.create({
         paddingVertical: 2,
     },
     boundaryIcon: {
-        fontSize: 14,
-        lineHeight: 18,
         width: 22,
         textAlign: 'center',
     },

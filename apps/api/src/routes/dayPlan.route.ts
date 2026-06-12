@@ -6,8 +6,18 @@ const router = Router();
 
 const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
 
-function todayDateString(): string {
+// Accepts an optional UTC offset in minutes via X-Timezone-Offset header
+// (e.g. +600 for UTC+10, -300 for UTC-5). Falls back to server local time
+// if the header is absent or out of the valid timezone range [-720, 840].
+function todayDateString(utcOffsetMins?: number): string {
     const now = new Date();
+    if (utcOffsetMins !== undefined) {
+        const localNow = new Date(now.getTime() + utcOffsetMins * 60 * 1000);
+        const year = localNow.getUTCFullYear();
+        const month = String(localNow.getUTCMonth() + 1).padStart(2, "0");
+        const day = String(localNow.getUTCDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+    }
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, "0");
     const day = String(now.getDate()).padStart(2, "0");
@@ -24,7 +34,13 @@ router.get("/", authenticate, async (req: Request, res: Response): Promise<void>
         return;
     }
 
-    const date = dateParam ?? todayDateString();
+    const offsetHeader = req.headers['x-timezone-offset'];
+    const parsedOffset = typeof offsetHeader === 'string' ? parseInt(offsetHeader, 10) : NaN;
+    const utcOffsetMins = Number.isInteger(parsedOffset) && parsedOffset >= -720 && parsedOffset <= 840
+        ? parsedOffset
+        : undefined;
+
+    const date = dateParam ?? todayDateString(utcOffsetMins);
 
     const plan = await getDayPlan(req.user!.sub, date);
 

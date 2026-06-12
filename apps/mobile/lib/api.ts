@@ -1,4 +1,4 @@
-import { BlockInput, CreateDayTemplateResponse, GetDayTemplateResponse, LoginResponse, MeResponse, SignupResponse } from "./api.types";
+import { BlockInput, CreateDayTemplateResponse, GetDayPlanResponse, GetDayTemplateResponse, LoginResponse, MeResponse, SignupResponse } from "./api.types";
 import { getToken } from "./auth-token";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
@@ -67,7 +67,7 @@ export const api = {
     try {
       const response = await fetch(`${API_URL}/day-template`, {
         method: 'GET',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Authorization': `Bearer ${token}` },
       });
 
       const responseJson = await response.json();
@@ -106,6 +106,33 @@ export const api = {
     }
   },
 
+  getDayPlan: async (): Promise<GetDayPlanResponse> => {
+    const token = await getToken();
+
+    if (!token) {
+      return { ok: false, error: 'No token found' };
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/day-plan`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-Timezone-Offset': String(-new Date().getTimezoneOffset()),
+        },
+      });
+
+      const responseJson = await response.json();
+      if (!response.ok) {
+        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
+      }
+
+      return { ok: true, data: responseJson.data };
+    } catch (error) {
+      return { ok: false, error: 'Network error. Please check your connection.' };
+    }
+  },
+
   getMe: async (): Promise<MeResponse> => {
     const token = await getToken();
 
@@ -116,7 +143,7 @@ export const api = {
     try {
       const response = await fetch(`${API_URL}/auth/me`, {
         method: 'GET',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Authorization': `Bearer ${token}` },
       });
 
       const responseJson = await response.json();
