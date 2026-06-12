@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from "react";
+import { useFocusEffect } from "expo-router";
 import {
     View,
     Text,
@@ -11,8 +12,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
-import { DayPlan, DayTemplate, DayTemplateBlock } from "../../lib/api.types";
-import { toMins, formatTime } from "../../lib/time";
+import { DayPlan, DayTemplate, DayTemplateBlock, PlannedBlock } from "../../lib/api.types";
+import { toMins, toHHmm, formatTime } from "../../lib/time";
 
 function formatDuration(startTime: string, endTime: string): string {
     const mins = toMins(endTime) - toMins(startTime);
@@ -23,11 +24,22 @@ function formatDuration(startTime: string, endTime: string): string {
     return `${h}h ${m}m`;
 }
 
+function formatEstimatedMins(mins: number): string {
+    if (mins < 60) return `${mins}m`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+// ─── Screen state ─────────────────────────────────────────────────────────────
+
 type ScreenState =
     | { status: 'loading' }
     | { status: 'error'; message: string }
     | { status: 'empty'; template: DayTemplate | null }
     | { status: 'loaded'; plan: DayPlan };
+
+// ─── Shared timeline primitives ───────────────────────────────────────────────
 
 function ThreadSegment() {
     return (
@@ -57,9 +69,9 @@ function DayBoundaryMarker({ label, time }: { label: 'Wake' | 'Sleep'; time: str
     );
 }
 
-function FreeSlotIndicator({ startTime, endTime }: { startTime: string; endTime: string }) {
+function FreeSlotIndicator({ startTime, endTime, elapsed }: { startTime: string; endTime: string; elapsed?: boolean }) {
     return (
-        <View style={styles.freeSlotRow}>
+        <View style={[styles.freeSlotRow, elapsed && styles.elapsedOpacity]}>
             <View style={styles.freeSlotPill}>
                 <Text style={styles.freeSlotText}>
                     {formatTime(startTime)} – {formatTime(endTime)}  ·  {formatDuration(startTime, endTime)}  ·  free slot
@@ -68,6 +80,8 @@ function FreeSlotIndicator({ startTime, endTime }: { startTime: string; endTime:
         </View>
     );
 }
+
+// ─── Empty state components ───────────────────────────────────────────────────
 
 function GhostAnchorBlock({ block }: { block: DayTemplateBlock }) {
     return (
@@ -167,23 +181,185 @@ function EmptyState({ template }: { template: DayTemplate | null }) {
             </View>
 
             {listItems.length > 0 && (
-                <>
-                    <View style={styles.templateTimeline}>
-                        {timelineElements}
-                    </View>
-                </>
+                <View style={styles.templateTimeline}>
+                    {timelineElements}
+                </View>
             )}
         </>
     );
 }
 
+// ─── Populated timeline components ───────────────────────────────────────────
+
+function CurrentTimeIndicator({ time }: { time: string }) {
+    return (
+        <View style={styles.currentTimeRow}>
+            <View style={styles.currentTimeDot} />
+            <View style={styles.currentTimeLine} />
+            <Text style={styles.currentTimeLabel}>{formatTime(time)}</Text>
+        </View>
+    );
+}
+
+function AnchorBlockCard({ block, elapsed }: { block: PlannedBlock; elapsed: boolean }) {
+    return (
+        <View style={[styles.anchorCard, elapsed && styles.elapsedOpacity]}>
+            <Text style={styles.blockName}>{block.name}</Text>
+            <Text style={styles.blockTime}>{formatTime(block.startTime)} – {formatTime(block.endTime)}</Text>
+        </View>
+    );
+}
+
+function ContainerBlockCard({ block, elapsed }: { block: PlannedBlock; elapsed: boolean }) {
+    const energyLabel = block.energyLevel
+        ? block.energyLevel.charAt(0) + block.energyLevel.slice(1).toLowerCase() + ' energy'
+        : null;
+
+    return (
+        <View style={[styles.containerCard, elapsed && styles.elapsedOpacity]}>
+            <View style={styles.containerCardHeader}>
+                <View style={styles.containerCardHeaderLeft}>
+                    <Text style={styles.blockName}>{block.name}</Text>
+                    <Text style={styles.blockTime}>{formatTime(block.startTime)} – {formatTime(block.endTime)}</Text>
+                </View>
+                {energyLabel && (
+                    <View style={styles.energyBadge}>
+                        <Text style={styles.energyBadgeText}>{energyLabel}</Text>
+                    </View>
+                )}
+            </View>
+            {block.tasks.length > 0 && (
+                <View style={styles.taskList}>
+                    {block.tasks.map(task => (
+                        <View key={task.id} style={styles.taskCard}>
+                            <Text style={styles.taskTitle} numberOfLines={2}>{task.title}</Text>
+                            <Text style={styles.taskEstimate}>{formatEstimatedMins(task.estimatedMins)}</Text>
+                        </View>
+                    ))}
+                </View>
+            )}
+        </View>
+    );
+}
+
+type TimelineItem =
+    | { kind: 'block'; block: PlannedBlock; elapsed: boolean }
+    | { kind: 'gap'; start: string; end: string; elapsed: boolean }
+    | { kind: 'boundary'; label: 'Wake' | 'Sleep'; time: string }
+    | { kind: 'current-time'; time: string };
+
+function buildTimelineItems(plan: DayPlan, currentTime: string): TimelineItem[] {
+    const items: TimelineItem[] = [];
+    const nowMins = toMins(currentTime);
+    const wakeMins = toMins(plan.wakeTime);
+    const sleepMins = toMins(plan.sleepTime);
+
+    const sorted = [...plan.blocks].sort((a, b) => toMins(a.startTime) - toMins(b.startTime));
+
+    items.push({ kind: 'boundary', label: 'Wake', time: plan.wakeTime });
+
+    let prev = plan.wakeTime;
+    for (const block of sorted) {
+        if (toMins(block.startTime) > toMins(prev)) {
+            items.push({
+                kind: 'gap',
+                start: prev,
+                end: block.startTime,
+                elapsed: nowMins >= toMins(block.startTime),
+            });
+        }
+        items.push({
+            kind: 'block',
+            block,
+            elapsed: nowMins >= toMins(block.endTime),
+        });
+        prev = block.endTime;
+    }
+
+    if (toMins(prev) < sleepMins) {
+        items.push({
+            kind: 'gap',
+            start: prev,
+            end: plan.sleepTime,
+            elapsed: nowMins >= sleepMins,
+        });
+    }
+
+    items.push({ kind: 'boundary', label: 'Sleep', time: plan.sleepTime });
+
+    // Insert current-time indicator between the last elapsed item and the first
+    // non-elapsed one. Default to after wake boundary (index 0) so the indicator
+    // still appears when nothing has elapsed yet.
+    if (nowMins >= wakeMins && nowMins < sleepMins) {
+        let insertAfter = 0;
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if ((item.kind === 'block' || item.kind === 'gap') && item.elapsed) {
+                insertAfter = i;
+            }
+        }
+        items.splice(insertAfter + 1, 0, { kind: 'current-time', time: currentTime });
+    }
+
+    return items;
+}
+
+function Timeline({
+    plan,
+    currentTime,
+    onNowLayout,
+}: {
+    plan: DayPlan;
+    currentTime: string;
+    onNowLayout: (y: number) => void;
+}) {
+    const items = buildTimelineItems(plan, currentTime);
+
+    const elements: ReactNode[] = [];
+    items.forEach((item, i) => {
+        // Skip the thread segment on either side of the current-time indicator —
+        // it serves as its own visual separator.
+        if (i > 0) {
+            const prev = items[i - 1];
+            if (item.kind !== 'current-time' && prev.kind !== 'current-time') {
+                elements.push(<ThreadSegment key={`sep-${i}`} />);
+            }
+        }
+
+        if (item.kind === 'boundary') {
+            elements.push(<DayBoundaryMarker key={`item-${i}`} label={item.label} time={item.time} />);
+        } else if (item.kind === 'gap') {
+            elements.push(<FreeSlotIndicator key={`item-${i}`} startTime={item.start} endTime={item.end} elapsed={item.elapsed} />);
+        } else if (item.kind === 'current-time') {
+            elements.push(
+                <View key={`item-${i}`} onLayout={(e) => onNowLayout(e.nativeEvent.layout.y)}>
+                    <CurrentTimeIndicator time={item.time} />
+                </View>
+            );
+        } else if (item.block.type === 'CONTAINER') {
+            elements.push(<ContainerBlockCard key={`item-${i}`} block={item.block} elapsed={item.elapsed} />);
+        } else {
+            elements.push(<AnchorBlockCard key={`item-${i}`} block={item.block} elapsed={item.elapsed} />);
+        }
+    });
+
+    return <View>{elements}</View>;
+}
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
+
 export default function TodayScreen() {
     const [state, setState] = useState<ScreenState>({ status: 'loading' });
+    const [currentTime, setCurrentTime] = useState(() => toHHmm(new Date()));
+    const scrollRef = useRef<ScrollView>(null);
+    const scrollViewHeight = useRef(0);
+    const hasScrolledToNow = useRef(false);
 
     const dayOfWeek = useMemo(() => new Date().toLocaleDateString('en-US', { weekday: 'long' }), []);
     const date = useMemo(() => new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }), []);
 
     const load = useCallback(async () => {
+        hasScrolledToNow.current = false;
         setState({ status: 'loading' });
 
         const planResult = await api.getDayPlan();
@@ -202,25 +378,40 @@ export default function TodayScreen() {
             return;
         }
 
-        // Expose the message only for network errors (no HTTP status); hide
-        // raw server error strings behind a generic message.
         const message = planResult.status !== undefined
             ? 'Something went wrong. Please try again.'
             : planResult.error;
         setState({ status: 'error', message });
     }, []);
 
+    useFocusEffect(
+        useCallback(() => {
+            load();
+        }, [load])
+    );
+
+    // Keep current time fresh; re-renders the now indicator every minute.
     useEffect(() => {
-        load();
-    }, [load]);
+        const interval = setInterval(() => {
+            setCurrentTime(toHHmm(new Date()));
+        }, 60_000);
+        return () => clearInterval(interval);
+    }, []);
 
-    const handlePlanDay = () => {
-        Alert.alert('Planning coming soon');
-    };
+    // Scroll so the now indicator is centred on screen. Only fires once per load
+    // to avoid fighting the user if they scroll manually.
+    const handleNowLayout = useCallback((y: number) => {
+        if (hasScrolledToNow.current || scrollViewHeight.current === 0) return;
+        hasScrolledToNow.current = true;
+        // y is relative to the timeline View; scrollContent adds 16px top padding.
+        // Use the measured ScrollView height (not screen height) so the header,
+        // safe area, and tab bar are excluded from the centring calculation.
+        const targetY = Math.max(0, y + 16 - scrollViewHeight.current / 2);
+        scrollRef.current?.scrollTo({ y: targetY, animated: true });
+    }, []);
 
-    const handleAddTask = () => {
-        Alert.alert('Add task coming soon');
-    };
+    const handlePlanDay = () => Alert.alert('Planning coming soon');
+    const handleAddTask = () => Alert.alert('Add task coming soon');
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -257,8 +448,13 @@ export default function TodayScreen() {
             )}
 
             {state.status === 'loaded' && (
-                <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-                    <Text style={styles.comingSoon}>Timeline coming soon.</Text>
+                <ScrollView
+                    ref={scrollRef}
+                    contentContainerStyle={styles.scrollContent}
+                    showsVerticalScrollIndicator={false}
+                    onLayout={(e) => { scrollViewHeight.current = e.nativeEvent.layout.height; }}
+                >
+                    <Timeline plan={state.plan} currentTime={currentTime} onNowLayout={handleNowLayout} />
                 </ScrollView>
             )}
 
@@ -270,6 +466,8 @@ export default function TodayScreen() {
         </SafeAreaView>
     );
 }
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
     safeArea: {
@@ -352,41 +550,7 @@ const styles = StyleSheet.create({
         color: '#2a2621',
     },
 
-    // Empty state banner
-    emptyBanner: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        backgroundColor: '#fffef9',
-        borderWidth: 1,
-        borderColor: 'rgba(42,38,33,0.04)',
-        borderRadius: 16,
-        padding: 17,
-    },
-    emptyIconCircle: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: 'rgba(212,165,116,0.1)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    emptyIcon: {
-        fontSize: 14,
-        color: '#d4a574',
-    },
-    emptyBannerText: {
-        fontSize: 14,
-        color: '#7a736a',
-        letterSpacing: -0.15,
-    },
-
-    // Template section
-    templateTimeline: {
-        marginTop: 12,
-    },
-
-    // Thread segment
+    // Thread primitives
     threadSegment: {
         height: 12,
         paddingLeft: 10,
@@ -450,7 +614,133 @@ const styles = StyleSheet.create({
         color: 'rgba(122,115,106,0.8)',
     },
 
-    // Ghost anchor/no-task card
+    // Current time indicator
+    currentTimeRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 6,
+    },
+    currentTimeDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#d4a574',
+    },
+    currentTimeLine: {
+        flex: 1,
+        height: 1,
+        borderTopWidth: 1,
+        borderStyle: 'dashed',
+        borderColor: 'rgba(212,165,116,0.5)',
+        marginHorizontal: 6,
+    },
+    currentTimeLabel: {
+        fontSize: 11,
+        fontWeight: '500',
+        color: '#d4a574',
+    },
+
+    // Elapsed opacity (shared)
+    elapsedOpacity: {
+        opacity: 0.35,
+    },
+
+    // Populated timeline
+    anchorCard: {
+        backgroundColor: 'rgba(232,228,221,0.45)',
+        borderRadius: 16,
+        padding: 16,
+    },
+    containerCard: {
+        backgroundColor: '#fdfcfa',
+        borderWidth: 1.5,
+        borderColor: 'rgba(42,38,33,0.16)',
+        borderStyle: 'dashed',
+        borderRadius: 16,
+        padding: 16,
+    },
+    containerCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+    },
+    containerCardHeaderLeft: {
+        flex: 1,
+        marginRight: 8,
+    },
+    blockName: {
+        fontSize: 15,
+        fontWeight: '500',
+        color: '#2a2621',
+        letterSpacing: -0.23,
+    },
+    blockTime: {
+        fontSize: 12,
+        color: '#9a9389',
+        letterSpacing: -0.15,
+        marginTop: 2,
+    },
+    taskList: {
+        gap: 6,
+        marginTop: 12,
+    },
+    taskCard: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        backgroundColor: '#fffef9',
+        borderWidth: 1,
+        borderColor: 'rgba(42,38,33,0.04)',
+        borderRadius: 16,
+        padding: 15,
+    },
+    taskTitle: {
+        flex: 1,
+        fontSize: 15,
+        color: '#2a2621',
+        letterSpacing: -0.23,
+        marginRight: 12,
+    },
+    taskEstimate: {
+        fontSize: 14,
+        color: '#7a736a',
+        letterSpacing: -0.15,
+    },
+
+    // Empty state banner
+    emptyBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        backgroundColor: '#fffef9',
+        borderWidth: 1,
+        borderColor: 'rgba(42,38,33,0.04)',
+        borderRadius: 16,
+        padding: 17,
+    },
+    emptyIconCircle: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: 'rgba(212,165,116,0.1)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    emptyIcon: {
+        fontSize: 14,
+        color: '#d4a574',
+    },
+    emptyBannerText: {
+        fontSize: 14,
+        color: '#7a736a',
+        letterSpacing: -0.15,
+    },
+
+    // Template section (empty state)
+    templateTimeline: {
+        marginTop: 12,
+    },
+
+    // Ghost anchor / no-task card
     ghostAnchorCard: {
         backgroundColor: 'rgba(232,228,221,0.2)',
         borderRadius: 16,
@@ -551,13 +841,5 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.12,
         shadowRadius: 8,
         elevation: 4,
-    },
-
-    // Populated state placeholder
-    comingSoon: {
-        fontSize: 15,
-        color: '#7a736a',
-        textAlign: 'center',
-        marginTop: 32,
     },
 });
