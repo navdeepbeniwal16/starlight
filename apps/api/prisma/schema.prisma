@@ -94,8 +94,10 @@ model Task {
   plannedBlockId String?
   plannedBlock   PlannedBlock? @relation(fields: [plannedBlockId], references: [id])
   priority       Priority?
-  deadline       DateTime?     @db.Date
+  deadline       DateTime?
   progress       Int?
+  notes          String?
+  effort         EnergyLevel?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 }

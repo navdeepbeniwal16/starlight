@@ -95,3 +95,15 @@ export type BacklogTask = {
 };
 
 export type GetBacklogResponse = ApiResult<BacklogTask[]>;
+
+export type CreateTaskInput = {
+    title: string;
+    estimatedMins: number;
+    priority?: Priority;
+    effort?: EnergyLevel;
+    deadline?: string;   // ISO datetime string
+    progress?: number;   // 0–100
+    notes?: string;
+};
+
+export type CreateTaskResponse = ApiResult<BacklogTask>;

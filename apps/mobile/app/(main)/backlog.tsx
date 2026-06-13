@@ -13,6 +13,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
 import type { BacklogTask, Priority } from "../../lib/api.types";
+import CreateTaskModal from "../../components/CreateTaskModal";
 
 const PRIORITY_ORDER: Record<Priority, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
 
@@ -50,7 +51,7 @@ function groupByPriority(tasks: BacklogTask[]): PriorityGroup[] {
 function formatDeadline(isoString: string): string {
     const d = new Date(isoString);
     const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return `Due ${months[d.getUTCMonth()]} ${d.getUTCDate()}`;
+    return `Due ${months[d.getMonth()]} ${d.getDate()}`;
 }
 
 function PriorityDot({ priority }: { priority: Priority | null }) {
@@ -125,6 +126,7 @@ export default function BacklogScreen() {
     const [tasks, setTasks] = useState<BacklogTask[] | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [showCreateModal, setShowCreateModal] = useState(false);
 
     useFocusEffect(
         useCallback(() => {
@@ -194,7 +196,7 @@ export default function BacklogScreen() {
                     <Text style={styles.emptySubtitle}>Add tasks to track and prioritise your work</Text>
                     <TouchableOpacity
                         style={styles.addFirstButton}
-                        onPress={() => Alert.alert('Add task', 'Coming soon')}
+                        onPress={() => setShowCreateModal(true)}
                     >
                         <Ionicons name="add" size={16} color="rgba(42,38,33,0.7)" />
                         <Text style={styles.addFirstLabel}>Add your first task</Text>
@@ -225,12 +227,23 @@ export default function BacklogScreen() {
             {showFab && (
                 <TouchableOpacity
                     style={styles.fab}
-                    onPress={() => Alert.alert('Add task', 'Coming soon')}
+                    onPress={() => setShowCreateModal(true)}
                     activeOpacity={0.8}
                 >
                     <Ionicons name="add" size={24} color="#2a2621" />
                 </TouchableOpacity>
             )}
+
+            <CreateTaskModal
+                visible={showCreateModal}
+                onClose={() => setShowCreateModal(false)}
+                onCreated={(task) => {
+                    if (task.status !== 'DONE') {
+                        setTasks(prev => sortTasks([...(prev ?? []), task]));
+                    }
+                    setShowCreateModal(false);
+                }}
+            />
         </SafeAreaView>
     );
 }

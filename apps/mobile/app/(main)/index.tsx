@@ -9,6 +9,7 @@ import {
     Alert,
     ActivityIndicator,
 } from "react-native";
+import CreateTaskModal from "../../components/CreateTaskModal";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
@@ -351,6 +352,7 @@ function Timeline({
 export default function TodayScreen() {
     const [state, setState] = useState<ScreenState>({ status: 'loading' });
     const [currentTime, setCurrentTime] = useState(() => toHHmm(new Date()));
+    const [showCreateModal, setShowCreateModal] = useState(false);
     const scrollRef = useRef<ScrollView>(null);
     const scrollViewHeight = useRef(0);
     const hasScrolledToNow = useRef(false);
@@ -411,7 +413,7 @@ export default function TodayScreen() {
     }, []);
 
     const handlePlanDay = () => Alert.alert('Planning coming soon');
-    const handleAddTask = () => Alert.alert('Add task coming soon');
+    const handleAddTask = () => setShowCreateModal(true);
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -463,6 +465,12 @@ export default function TodayScreen() {
                     <Ionicons name="add" size={24} color="#2a2621" />
                 </TouchableOpacity>
             )}
+
+            <CreateTaskModal
+                visible={showCreateModal}
+                onClose={() => setShowCreateModal(false)}
+                onCreated={() => setShowCreateModal(false)}
+            />
         </SafeAreaView>
     );
 }
