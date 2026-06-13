@@ -1,7 +1,23 @@
-import { Tabs } from "expo-router";
+import { Tabs, useRouter } from "expo-router";
+import { useEffect, useRef } from "react";
 import { Ionicons } from "@expo/vector-icons";
+import { useAuthStore } from "../../stores/auth.store";
 
 export default function MainLayout() {
+    const router = useRouter();
+    const user = useAuthStore(state => state.user);
+    const prevUserRef = useRef(user);
+
+    useEffect(() => {
+        // Only redirect when user transitions from set → null (i.e. after logout).
+        // Skipping the initial-mount case avoids a spurious redirect if this layout
+        // somehow renders before app/index.tsx has finished calling setAuth.
+        if (prevUserRef.current !== null && user === null) {
+            router.replace('/(auth)/login');
+        }
+        prevUserRef.current = user;
+    }, [user, router]);
+
     return (
         <Tabs
             screenOptions={{

@@ -650,7 +650,7 @@ const styles = StyleSheet.create({
 
     // Elapsed opacity (shared)
     elapsedOpacity: {
-        opacity: 0.35,
+        opacity: 1,
     },
 
     // Populated timeline
