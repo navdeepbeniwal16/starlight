@@ -1,4 +1,4 @@
-import { BlockInput, CreateDayTemplateResponse, GetDayPlanResponse, GetDayTemplateResponse, LoginResponse, MeResponse, SignupResponse } from "./api.types";
+import { BlockInput, CreateDayTemplateResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, LoginResponse, MeResponse, SignupResponse } from "./api.types";
 import { getToken } from "./auth-token";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
@@ -120,6 +120,30 @@ export const api = {
           'Authorization': `Bearer ${token}`,
           'X-Timezone-Offset': String(-new Date().getTimezoneOffset()),
         },
+      });
+
+      const responseJson = await response.json();
+      if (!response.ok) {
+        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
+      }
+
+      return { ok: true, data: responseJson.data };
+    } catch (error) {
+      return { ok: false, error: 'Network error. Please check your connection.' };
+    }
+  },
+
+  getBacklog: async (): Promise<GetBacklogResponse> => {
+    const token = await getToken();
+
+    if (!token) {
+      return { ok: false, error: 'No token found' };
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/tasks`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}` },
       });
 
       const responseJson = await response.json();

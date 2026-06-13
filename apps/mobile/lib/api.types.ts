@@ -81,3 +81,17 @@ export type DayPlan = {
 };
 
 export type GetDayPlanResponse = ApiResult<DayPlan>;
+
+export type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
+
+export type BacklogTask = {
+    id: string;
+    title: string;
+    status: TaskStatus;
+    priority: Priority | null;
+    deadline: string | null;  // ISO datetime string (YYYY-MM-DDT00:00:00.000Z)
+    progress: number | null;  // 0–100
+    estimatedMins: number;
+};
+
+export type GetBacklogResponse = ApiResult<BacklogTask[]>;

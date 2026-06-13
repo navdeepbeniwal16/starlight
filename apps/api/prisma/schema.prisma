@@ -93,6 +93,9 @@ model Task {
   order          Int
   plannedBlockId String?
   plannedBlock   PlannedBlock? @relation(fields: [plannedBlockId], references: [id])
+  priority       Priority?
+  deadline       DateTime?     @db.Date
+  progress       Int?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 }
@@ -107,6 +110,12 @@ enum TaskStatus {
   TODO
   IN_PROGRESS
   DONE
+}
+
+enum Priority {
+  HIGH
+  MEDIUM
+  LOW
 }
 
 model AppConfig {
