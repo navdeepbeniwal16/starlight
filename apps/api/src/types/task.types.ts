@@ -32,3 +32,13 @@ export type CreateTaskInput = {
     progress?: number;   // 0–100
     notes?: string;
 };
+
+export type UpdateTaskInput = {
+    title?: string;
+    notes?: string | null;
+    estimatedMins?: number;
+    priority?: Priority | null;
+    effort?: EnergyLevel | null;
+    deadline?: string | null;  // null = clear deadline
+    progress?: number;
+};

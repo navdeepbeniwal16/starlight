@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma";
-import type { BacklogTask, TaskDetail, CreateTaskInput } from "../types/task.types";
+import type { BacklogTask, TaskDetail, CreateTaskInput, UpdateTaskInput } from "../types/task.types";
 import { TaskStatus } from "@prisma/client";
 
 export class InvalidProgressError extends Error {}
@@ -96,4 +96,51 @@ export async function getTaskById(userId: string, taskId: string): Promise<TaskD
 export async function deleteTask(userId: string, taskId: string): Promise<void> {
     const result = await prisma.task.deleteMany({ where: { id: taskId, userId } });
     if (result.count === 0) throw new TaskNotFoundError();
+}
+
+export async function updateTask(userId: string, taskId: string, input: UpdateTaskInput): Promise<TaskDetail> {
+    const existing = await prisma.task.findFirst({ where: { id: taskId, userId }, select: { id: true } });
+    if (!existing) throw new TaskNotFoundError();
+
+    const data: Record<string, unknown> = {};
+
+    if (input.title !== undefined) data.title = input.title.trim();
+    if (input.notes !== undefined) data.notes = input.notes;
+    if (input.estimatedMins !== undefined) data.estimatedMins = input.estimatedMins;
+    if (input.priority !== undefined) data.priority = input.priority;
+    if (input.effort !== undefined) data.effort = input.effort;
+
+    if (input.deadline !== undefined) {
+        if (input.deadline === null) {
+            data.deadline = null;
+        } else {
+            const d = new Date(input.deadline);
+            if (isNaN(d.getTime())) throw new InvalidDeadlineError();
+            data.deadline = d;
+        }
+    }
+
+    if (input.progress !== undefined) {
+        if (input.progress < 0 || input.progress > 100 || !Number.isInteger(input.progress)) {
+            throw new InvalidProgressError();
+        }
+        data.progress = input.progress;
+        data.status = deriveStatus(input.progress);
+    }
+
+    return prisma.task.update({
+        where: { id: taskId },
+        data,
+        select: {
+            id: true,
+            title: true,
+            status: true,
+            priority: true,
+            deadline: true,
+            progress: true,
+            estimatedMins: true,
+            notes: true,
+            effort: true,
+        },
+    });
 }

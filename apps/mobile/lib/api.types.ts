@@ -113,3 +113,14 @@ export type TaskDetail = BacklogTask & {
     effort: EnergyLevel | null;
 };
 export type GetTaskDetailResponse = ApiResult<TaskDetail>;
+
+export type UpdateTaskInput = {
+    title?: string;
+    notes?: string | null;
+    estimatedMins?: number;
+    priority?: Priority | null;
+    effort?: EnergyLevel | null;
+    deadline?: string | null;
+    progress?: number;
+};
+export type UpdateTaskResponse = ApiResult<TaskDetail>;
