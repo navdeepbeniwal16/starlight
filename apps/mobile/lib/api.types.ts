@@ -107,3 +107,9 @@ export type CreateTaskInput = {
 };
 
 export type CreateTaskResponse = ApiResult<BacklogTask>;
+
+export type TaskDetail = BacklogTask & {
+    notes: string | null;
+    effort: EnergyLevel | null;
+};
+export type GetTaskDetailResponse = ApiResult<TaskDetail>;

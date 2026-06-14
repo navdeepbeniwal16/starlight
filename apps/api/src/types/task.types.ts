@@ -11,6 +11,18 @@ export type BacklogTask = {
     estimatedMins: number;
 };
 
+export type TaskDetail = {
+    id: string;
+    title: string;
+    status: TaskStatus;
+    priority: Priority | null;
+    deadline: Date | null;
+    progress: number | null;
+    estimatedMins: number;
+    notes: string | null;
+    effort: EnergyLevel | null;
+};
+
 export type CreateTaskInput = {
     title: string;
     estimatedMins: number;

@@ -1,4 +1,4 @@
-import { BlockInput, CreateDayTemplateResponse, CreateTaskInput, CreateTaskResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, LoginResponse, MeResponse, SignupResponse } from "./api.types";
+import { ApiResult, BlockInput, CreateDayTemplateResponse, CreateTaskInput, CreateTaskResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, GetTaskDetailResponse, LoginResponse, MeResponse, SignupResponse } from "./api.types";
 import { getToken } from "./auth-token";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
@@ -177,6 +177,54 @@ export const api = {
       }
 
       return { ok: true, data: responseJson.data };
+    } catch (error) {
+      return { ok: false, error: 'Network error. Please check your connection.' };
+    }
+  },
+
+  getTaskDetail: async (taskId: string): Promise<GetTaskDetailResponse> => {
+    const token = await getToken();
+
+    if (!token) {
+      return { ok: false, error: 'No token found' };
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/tasks/${taskId}`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+
+      const responseJson = await response.json();
+      if (!response.ok) {
+        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
+      }
+
+      return { ok: true, data: responseJson.data };
+    } catch (error) {
+      return { ok: false, error: 'Network error. Please check your connection.' };
+    }
+  },
+
+  deleteTask: async (taskId: string): Promise<ApiResult<null>> => {
+    const token = await getToken();
+
+    if (!token) {
+      return { ok: false, error: 'No token found' };
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/tasks/${taskId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        const responseJson = await response.json().catch(() => ({}));
+        return { ok: false, error: (responseJson as { error?: string }).error ?? `HTTP ${response.status}` };
+      }
+
+      return { ok: true, data: null };
     } catch (error) {
       return { ok: false, error: 'Network error. Please check your connection.' };
     }

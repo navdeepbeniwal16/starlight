@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
+import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
 import type { BacklogTask, Priority } from "../../lib/api.types";
@@ -82,12 +83,12 @@ function PriorityBadge({ priority }: { priority: Priority }) {
     );
 }
 
-function TaskCard({ task }: { task: BacklogTask }) {
+function TaskCard({ task, onPress }: { task: BacklogTask; onPress: () => void }) {
     return (
         <TouchableOpacity
             style={styles.taskCard}
             activeOpacity={0.7}
-            onPress={() => Alert.alert('Task detail', 'Coming soon')}
+            onPress={onPress}
         >
             <PriorityDot priority={task.priority} />
             <View style={styles.taskCardContent}>
@@ -123,6 +124,7 @@ function EmptyIllustration() {
 }
 
 export default function BacklogScreen() {
+    const router = useRouter();
     const [tasks, setTasks] = useState<BacklogTask[] | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -216,7 +218,7 @@ export default function BacklogScreen() {
                             </Text>
                             <View style={styles.cardGroup}>
                                 {group.tasks.map(task => (
-                                    <TaskCard key={task.id} task={task} />
+                                    <TaskCard key={task.id} task={task} onPress={() => router.push(`/task/${task.id}`)} />
                                 ))}
                             </View>
                         </View>

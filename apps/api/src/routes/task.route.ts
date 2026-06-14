@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
-import { getBacklog, createTask, InvalidProgressError, InvalidDeadlineError } from "../services/task.service";
+import { getBacklog, createTask, getTaskById, deleteTask, InvalidProgressError, InvalidDeadlineError, TaskNotFoundError } from "../services/task.service";
 import type { CreateTaskInput } from "../types/task.types";
 
 const router = Router();
@@ -46,6 +46,29 @@ router.post("/", authenticate, async (req: Request, res: Response): Promise<void
             return;
         }
 
+        throw error;
+    }
+});
+
+router.get("/:id", authenticate, async (req: Request, res: Response): Promise<void> => {
+    res.set("Cache-Control", "no-store, private");
+    const task = await getTaskById(req.user!.sub, req.params.id as string);
+    if (!task) {
+        res.status(404).json({ success: false, error: 'Task not found' });
+        return;
+    }
+    res.json({ success: true, data: task });
+});
+
+router.delete("/:id", authenticate, async (req: Request, res: Response): Promise<void> => {
+    try {
+        await deleteTask(req.user!.sub, req.params.id as string);
+        res.status(204).send();
+    } catch (error) {
+        if (error instanceof TaskNotFoundError) {
+            res.status(404).json({ success: false, error: 'Task not found' });
+            return;
+        }
         throw error;
     }
 });

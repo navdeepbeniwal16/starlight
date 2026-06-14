@@ -1,9 +1,10 @@
 import { prisma } from "../lib/prisma";
-import type { BacklogTask, CreateTaskInput } from "../types/task.types";
+import type { BacklogTask, TaskDetail, CreateTaskInput } from "../types/task.types";
 import { TaskStatus } from "@prisma/client";
 
 export class InvalidProgressError extends Error {}
 export class InvalidDeadlineError extends Error {}
+export class TaskNotFoundError extends Error {}
 
 export async function getBacklog(userId: string): Promise<BacklogTask[]> {
     return prisma.task.findMany({
@@ -73,4 +74,26 @@ export async function createTask(userId: string, input: CreateTaskInput): Promis
             },
         });
     });
+}
+
+export async function getTaskById(userId: string, taskId: string): Promise<TaskDetail | null> {
+    return prisma.task.findFirst({
+        where: { id: taskId, userId },
+        select: {
+            id: true,
+            title: true,
+            status: true,
+            priority: true,
+            deadline: true,
+            progress: true,
+            estimatedMins: true,
+            notes: true,
+            effort: true,
+        },
+    });
+}
+
+export async function deleteTask(userId: string, taskId: string): Promise<void> {
+    const result = await prisma.task.deleteMany({ where: { id: taskId, userId } });
+    if (result.count === 0) throw new TaskNotFoundError();
 }
