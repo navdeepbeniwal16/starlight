@@ -251,18 +251,18 @@ export function ProgressSlider({ value, onChange, onRelease }: {
 
 // ─── FieldRow ─────────────────────────────────────────────────────────────────
 
-export function FieldRow({ label, subLabel, value, isOpen, onPress }: {
-    label: string; subLabel?: string; value: string; isOpen: boolean; onPress: () => void;
+export function FieldRow({ label, subLabel, value, isOpen, onPress, hasError }: {
+    label: string; subLabel?: string; value: string; isOpen: boolean; onPress: () => void; hasError?: boolean;
 }) {
     const isSet = value !== 'Not set';
     return (
         <TouchableOpacity style={tf.fieldRow} onPress={onPress} activeOpacity={0.7}>
             <View>
-                <Text style={tf.fieldLabel}>{label}</Text>
-                {subLabel ? <Text style={tf.fieldSub}>{subLabel}</Text> : null}
+                <Text style={[tf.fieldLabel, hasError && tf.fieldLabelError]}>{label}</Text>
+                {subLabel ? <Text style={[tf.fieldSub, hasError && tf.fieldSubError]}>{subLabel}</Text> : null}
             </View>
             <View style={tf.fieldRight}>
-                <Text style={isSet ? tf.fieldValSet : tf.fieldValUnset}>{value}</Text>
+                <Text style={isSet ? tf.fieldValSet : hasError ? tf.fieldValError : tf.fieldValUnset}>{value}</Text>
                 <Ionicons name={isOpen ? 'chevron-down' : 'chevron-forward'} size={13} color="rgba(122,115,106,0.4)" />
             </View>
         </TouchableOpacity>
@@ -283,6 +283,9 @@ export const tf = StyleSheet.create({
     fieldRight: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     fieldValSet: { ...BASE_TXT, fontWeight: '500' },
     fieldValUnset: { ...BASE_TXT, color: 'rgba(122,115,106,0.45)', fontStyle: 'italic' },
+    fieldValError: { ...BASE_TXT, color: 'rgba(200,80,80,0.75)', fontStyle: 'italic' },
+    fieldLabelError: { color: 'rgba(200,80,80,0.75)' },
+    fieldSubError: { color: 'rgba(200,80,80,0.5)' },
 
     pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 14, paddingBottom: 14, paddingTop: 2 },
     pill: {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
     Modal,
     View,
@@ -26,6 +26,7 @@ type Props = { visible: boolean; onClose: () => void; onCreated: (task: BacklogT
 
 export default function CreateTaskModal({ visible, onClose, onCreated }: Props) {
     const insets = useSafeAreaInsets();
+    const scrollViewRef = useRef<ScrollView>(null);
 
     const [activeField, setActiveField] = useState<FieldKey | null>(null);
     const [title, setTitle]             = useState('');
@@ -38,16 +39,17 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
     const [tempDay, setTempDay]         = useState<Date>(() => new Date());
     const [showTimePicker, setShowTimePicker] = useState(false);
     const [progress, setProgress]       = useState(0);
-    const [submitting, setSubmitting]   = useState(false);
-    const [titleError, setTitleError]   = useState(false);
-    const [submitError, setSubmitError] = useState<string | null>(null);
+    const [submitting, setSubmitting]     = useState(false);
+    const [titleError, setTitleError]     = useState(false);
+    const [estimateError, setEstimateError] = useState(false);
+    const [submitError, setSubmitError]   = useState<string | null>(null);
 
     function resetForm() {
         setActiveField(null); setTitle(''); setNotes('');
         setEstimatedMins(null); setPriority(null); setEffort(null);
         setDeadlineDay(null); setDeadlineTime(defaultTime()); setTempDay(new Date()); setShowTimePicker(false);
         setProgress(0);
-        setSubmitting(false); setTitleError(false); setSubmitError(null);
+        setSubmitting(false); setTitleError(false); setEstimateError(false); setSubmitError(null);
     }
 
     function handleClose() { resetForm(); onClose(); }
@@ -59,8 +61,14 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
     }
 
     async function handleSubmit() {
-        if (!title.trim()) { setTitleError(true); return; }
-        if (!estimatedMins) return;
+        const trimmedTitle = title.trim();
+        if (!trimmedTitle) setTitleError(true);
+        if (!estimatedMins) {
+            setEstimateError(true);
+            setActiveField('estimate');
+            scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+        }
+        if (!trimmedTitle || !estimatedMins) return;
         setSubmitting(true); setSubmitError(null);
 
         let deadline: string | undefined;
@@ -100,6 +108,7 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                 </View>
 
                 <ScrollView
+                    ref={scrollViewRef}
                     contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + 32 }]}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
@@ -121,6 +130,7 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                             value={estimatedMins !== null ? getEstimateLabel(estimatedMins) : 'Not set'}
                             isOpen={activeField === 'estimate'}
                             onPress={() => toggleField('estimate')}
+                            hasError={estimateError}
                         />
                         {activeField === 'estimate' && (
                             <View style={tf.pills}>
@@ -128,7 +138,7 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                                     <TouchableOpacity
                                         key={o.value}
                                         style={[tf.pill, estimatedMins === o.value && tf.pillOn]}
-                                        onPress={() => { setEstimatedMins(o.value); setActiveField(null); }}
+                                        onPress={() => { setEstimatedMins(o.value); setEstimateError(false); setActiveField(null); }}
                                     >
                                         <Text style={[tf.pillTxt, estimatedMins === o.value && tf.pillTxtOn]}>{o.label}</Text>
                                     </TouchableOpacity>
@@ -258,7 +268,7 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                     {submitError && <Text style={s.submitError}>{submitError}</Text>}
 
                     <TouchableOpacity
-                        style={[s.createBtn, !canSubmit && s.createBtnOff]}
+                        style={[s.createBtn, !canSubmit && s.createBtnSubmitting]}
                         onPress={handleSubmit}
                         activeOpacity={0.8}
                     >
@@ -317,7 +327,7 @@ const s = StyleSheet.create({
         backgroundColor: '#2a2621', borderRadius: 14,
         height: 48, justifyContent: 'center', alignItems: 'center',
     },
-    createBtnOff: { opacity: 0.35 },
+    createBtnSubmitting: { opacity: 0.35 },
     createBtnTxt: { ...BASE_TXT, fontWeight: '500', color: '#fdfcfa', letterSpacing: -0.1 },
 });
 

@@ -8,12 +8,13 @@ import {
     Alert,
     ActivityIndicator,
 } from "react-native";
+import Svg, { Circle } from "react-native-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
-import type { BacklogTask, Priority } from "../../lib/api.types";
+import type { BacklogTask, TaskDetail, Priority } from "../../lib/api.types";
 import CreateTaskModal from "../../components/CreateTaskModal";
 
 const PRIORITY_ORDER: Record<Priority, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
@@ -55,21 +56,46 @@ function formatDeadline(isoString: string): string {
     return `Due ${months[d.getMonth()]} ${d.getDate()}`;
 }
 
-function PriorityDot({ priority }: { priority: Priority | null }) {
-    const color =
-        priority === 'HIGH'   ? '#d4a574' :
-        priority === 'MEDIUM' ? '#7a736a' :
-                                'rgba(122,115,106,0.4)';
-    return <View style={[styles.priorityDot, { backgroundColor: color }]} />;
+function DoneToggle({ task, onDone }: { task: BacklogTask; onDone: (updated: TaskDetail) => void }) {
+    const [completing, setCompleting] = useState(false);
+    const isDone = task.status === 'DONE' || completing;
+
+    async function handlePress() {
+        if (completing || task.status === 'DONE') return;
+        setCompleting(true);
+        const result = await api.updateTask(task.id, { progress: 100 });
+        if (result.ok) {
+            setCompleting(false);
+            onDone(result.data);
+        } else {
+            setCompleting(false);
+        }
+    }
+
+    return (
+        <TouchableOpacity
+            onPress={handlePress}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.6}
+        >
+            <Ionicons
+                name={isDone ? 'checkmark-circle' : 'checkmark-circle-outline'}
+                size={22}
+                color={isDone ? '#5c5248' : 'rgba(122,115,106,0.3)'}
+            />
+        </TouchableOpacity>
+    );
 }
 
 function StatusBadge({ status }: { status: BacklogTask['status'] }) {
     const inProgress = status === 'IN_PROGRESS';
+    const done = status === 'DONE';
+    const label = done ? 'Done' : inProgress ? 'In Progress' : 'Todo';
+    const badgeStyle = inProgress ? styles.badgeInProgress : done ? styles.badgeDone : styles.badgeMuted;
+    const textStyle = inProgress ? styles.badgeTextInProgress : done ? styles.badgeTextDone : styles.badgeTextMuted;
     return (
-        <View style={[styles.badge, inProgress ? styles.badgeInProgress : styles.badgeMuted]}>
-            <Text style={[styles.badgeText, inProgress ? styles.badgeTextInProgress : styles.badgeTextMuted]}>
-                {inProgress ? 'In Progress' : 'Todo'}
-            </Text>
+        <View style={[styles.badge, badgeStyle]}>
+            <Text style={[styles.badgeText, textStyle]}>{label}</Text>
         </View>
     );
 }
@@ -83,14 +109,47 @@ function PriorityBadge({ priority }: { priority: Priority }) {
     );
 }
 
-function TaskCard({ task, onPress }: { task: BacklogTask; onPress: () => void }) {
+const RING_SIZE = 32;
+const RING_STROKE = 2.5;
+const RING_R = (RING_SIZE - RING_STROKE) / 2;
+const RING_CIRC = 2 * Math.PI * RING_R;
+
+function CircularProgress({ progress }: { progress: number }) {
+    const isDone = progress === 100;
+    const fillColor = isDone ? '#5c5248' : 'rgba(212,165,116,0.85)';
+    const offset = RING_CIRC * (1 - progress / 100);
+    return (
+        <View style={styles.ringWrap}>
+            <Svg width={RING_SIZE} height={RING_SIZE}>
+                <Circle
+                    cx={RING_SIZE / 2} cy={RING_SIZE / 2} r={RING_R}
+                    stroke="rgba(232,228,221,0.7)" strokeWidth={RING_STROKE} fill="none"
+                />
+                {progress > 0 && (
+                    <Circle
+                        cx={RING_SIZE / 2} cy={RING_SIZE / 2} r={RING_R}
+                        stroke={fillColor} strokeWidth={RING_STROKE} fill="none"
+                        strokeDasharray={RING_CIRC} strokeDashoffset={offset}
+                        strokeLinecap="round"
+                        transform={`rotate(-90 ${RING_SIZE / 2} ${RING_SIZE / 2})`}
+                    />
+                )}
+            </Svg>
+            <Text style={[styles.ringLabel, isDone && styles.ringLabelDone]}>
+                {progress}%
+            </Text>
+        </View>
+    );
+}
+
+function TaskCard({ task, onPress, onComplete }: { task: BacklogTask; onPress: () => void; onComplete: (updated: TaskDetail) => void }) {
     return (
         <TouchableOpacity
             style={styles.taskCard}
             activeOpacity={0.7}
             onPress={onPress}
         >
-            <PriorityDot priority={task.priority} />
+            <DoneToggle task={task} onDone={onComplete} />
             <View style={styles.taskCardContent}>
                 <Text style={styles.taskTitle}>{task.title}</Text>
                 <View style={styles.badgeRow}>
@@ -100,15 +159,8 @@ function TaskCard({ task, onPress }: { task: BacklogTask; onPress: () => void })
                         <Text style={styles.deadlineText}>{formatDeadline(task.deadline)}</Text>
                     )}
                 </View>
-                {(task.progress ?? 0) > 0 && (
-                    <View style={styles.progressRow}>
-                        <View style={styles.progressTrack}>
-                            <View style={[styles.progressFill, { width: `${task.progress ?? 0}%` }]} />
-                        </View>
-                        <Text style={styles.progressLabel}>{task.progress ?? 0}%</Text>
-                    </View>
-                )}
             </View>
+            <CircularProgress progress={task.progress ?? 0} />
         </TouchableOpacity>
     );
 }
@@ -138,7 +190,7 @@ export default function BacklogScreen() {
             api.getBacklog().then(result => {
                 if (!active) return;
                 if (result.ok) {
-                    setTasks(sortTasks(result.data.filter(t => t.status !== 'DONE')));
+                    setTasks(sortTasks(result.data));
                 } else {
                     setError(result.error);
                 }
@@ -218,7 +270,17 @@ export default function BacklogScreen() {
                             </Text>
                             <View style={styles.cardGroup}>
                                 {group.tasks.map(task => (
-                                    <TaskCard key={task.id} task={task} onPress={() => router.push(`/task/${task.id}`)} />
+                                    <TaskCard
+                                        key={task.id}
+                                        task={task}
+                                        onPress={() => router.push(`/task/${task.id}`)}
+                                        onComplete={(updated) => setTasks(prev =>
+                                            sortTasks((prev ?? []).map(t => t.id === task.id
+                                                ? { ...t, status: updated.status, progress: updated.progress }
+                                                : t
+                                            ))
+                                        )}
+                                    />
                                 ))}
                             </View>
                         </View>
@@ -328,10 +390,9 @@ const styles = StyleSheet.create({
         borderRadius: 16,
         padding: 16,
         flexDirection: 'row',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         gap: 12,
     },
-    priorityDot: { width: 8, height: 8, borderRadius: 4, marginTop: 5 },
     taskCardContent: { flex: 1 },
     taskTitle: { fontSize: 15, fontWeight: '500', color: '#2a2621', letterSpacing: -0.23 },
     badgeRow: {
@@ -346,19 +407,22 @@ const styles = StyleSheet.create({
     badgeText: { fontSize: 11, fontWeight: '500' },
     badgeInProgress: { backgroundColor: 'rgba(212,165,116,0.1)' },
     badgeTextInProgress: { color: '#d4a574' },
+    badgeDone: { backgroundColor: 'rgba(92,82,72,0.10)' },
+    badgeTextDone: { color: '#5c5248' },
     badgeMuted: { backgroundColor: 'rgba(232,228,221,0.4)' },
     badgeTextMuted: { color: 'rgba(122,115,106,0.6)' },
     deadlineText: { fontSize: 11, fontWeight: '500', color: 'rgba(122,115,106,0.5)' },
 
-    progressRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
-    progressTrack: {
-        flex: 1,
-        height: 4,
-        backgroundColor: 'rgba(232,228,221,0.5)',
-        borderRadius: 999,
+    ringWrap: {
+        width: RING_SIZE, height: RING_SIZE,
+        justifyContent: 'center', alignItems: 'center',
     },
-    progressFill: { height: 4, backgroundColor: 'rgba(212,165,116,0.6)', borderRadius: 999 },
-    progressLabel: { fontSize: 11, fontWeight: '500', color: 'rgba(122,115,106,0.4)' },
+    ringLabel: {
+        position: 'absolute',
+        fontSize: 7, fontWeight: '600',
+        color: 'rgba(122,115,106,0.5)',
+    },
+    ringLabelDone: { color: '#5c5248' },
 
     fab: {
         position: 'absolute',

@@ -314,7 +314,7 @@ export default function TaskDetailScreen() {
                             <Ionicons
                                 name={isDone ? 'checkmark-circle' : 'checkmark-circle-outline'}
                                 size={28}
-                                color={isDone ? '#7a9e7a' : 'rgba(122,115,106,0.3)'}
+                                color={isDone ? '#5c5248' : 'rgba(122,115,106,0.3)'}
                             />
                         </TouchableOpacity>
                     </View>
@@ -534,12 +534,12 @@ const s = StyleSheet.create({
         paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, borderWidth: 1,
     },
     statusBadgeActive: { backgroundColor: 'rgba(212,165,116,0.1)', borderColor: 'rgba(212,165,116,0.2)' },
-    statusBadgeDone:   { backgroundColor: 'rgba(122,158,122,0.12)', borderColor: 'rgba(122,158,122,0.25)' },
+    statusBadgeDone:   { backgroundColor: 'rgba(92,82,72,0.10)', borderColor: 'rgba(92,82,72,0.20)' },
     statusBadgeMuted:  { backgroundColor: 'rgba(232,228,221,0.4)', borderColor: 'rgba(42,38,33,0.06)'   },
     statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#d4a574' },
     statusText: { fontSize: 12, fontWeight: '500' },
     statusTextActive: { color: '#d4a574' },
-    statusTextDone:   { color: '#7a9e7a' },
+    statusTextDone:   { color: '#5c5248' },
     statusTextMuted:  { color: 'rgba(122,115,106,0.6)' },
 
     card: {
