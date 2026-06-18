@@ -26,7 +26,7 @@ export default function MainLayout() {
                 tabBarInactiveTintColor: '#7a736a',
                 tabBarStyle: {
                     backgroundColor: 'rgba(255,254,249,0.5)',
-                    borderTopColor: 'rgba(42,38,33,0.04)',
+                    borderTopColor: 'rgba(42,38,33,0.10)',
                     borderTopWidth: 1,
                     height: 70,
                 },

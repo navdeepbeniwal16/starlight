@@ -289,12 +289,12 @@ const s = StyleSheet.create({
     header: {
         flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
         paddingHorizontal: 20, paddingVertical: 14,
-        borderBottomWidth: 1, borderBottomColor: 'rgba(42,38,33,0.05)',
+        borderBottomWidth: 1, borderBottomColor: 'rgba(42,38,33,0.10)',
     },
     headerTitle: { ...BASE_TXT, fontSize: 16, fontWeight: '500', letterSpacing: -0.2 },
     closeBtn: {
         width: 30, height: 30, borderRadius: 15,
-        backgroundColor: 'rgba(42,38,33,0.06)',
+        backgroundColor: 'rgba(42,38,33,0.10)',
         justifyContent: 'center', alignItems: 'center',
     },
 
@@ -309,14 +309,14 @@ const s = StyleSheet.create({
 
     card: {
         backgroundColor: '#fffef9', borderWidth: 1,
-        borderColor: 'rgba(42,38,33,0.06)', borderRadius: 16,
+        borderColor: 'rgba(42,38,33,0.10)', borderRadius: 16,
         overflow: 'hidden', marginBottom: 12,
     },
     sep: { height: 1, backgroundColor: 'rgba(42,38,33,0.04)' },
 
     notesCard: {
         backgroundColor: '#fffef9', borderWidth: 1,
-        borderColor: 'rgba(42,38,33,0.06)', borderRadius: 16,
+        borderColor: 'rgba(42,38,33,0.10)', borderRadius: 16,
         paddingHorizontal: 16, paddingVertical: 14, marginBottom: 14,
     },
     notesLabel: { fontSize: 10, color: 'rgba(122,115,106,0.4)', letterSpacing: 1.1, marginBottom: 8 },

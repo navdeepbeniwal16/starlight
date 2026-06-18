@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from "react";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import {
     View,
     Text,
@@ -13,7 +13,7 @@ import CreateTaskModal from "../../components/CreateTaskModal";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
-import { DayPlan, DayTemplate, DayTemplateBlock, PlannedBlock } from "../../lib/api.types";
+import { DayPlan, DayTemplate, DayTemplateBlock, PlannedBlock, PlannedTask, TaskStatus } from "../../lib/api.types";
 import { toMins, toHHmm, formatTime } from "../../lib/time";
 
 function formatDuration(startTime: string, endTime: string): string {
@@ -211,7 +211,38 @@ function AnchorBlockCard({ block, elapsed }: { block: PlannedBlock; elapsed: boo
     );
 }
 
-function ContainerBlockCard({ block, elapsed }: { block: PlannedBlock; elapsed: boolean }) {
+function TaskDoneToggle({ task, onDone }: { task: PlannedTask; onDone: () => void }) {
+    const [completing, setCompleting] = useState(false);
+    const isDone = task.status === 'DONE' || completing;
+
+    async function handlePress() {
+        if (completing || task.status === 'DONE') return;
+        setCompleting(true);
+        const result = await api.updateTask(task.id, { progress: 100 });
+        if (result.ok) {
+            setCompleting(false);
+            onDone();
+        } else {
+            setCompleting(false);
+        }
+    }
+
+    return (
+        <TouchableOpacity
+            onPress={handlePress}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.6}
+        >
+            <Ionicons
+                name={isDone ? 'checkmark-circle' : 'checkmark-circle-outline'}
+                size={20}
+                color={isDone ? '#5c5248' : 'rgba(122,115,106,0.3)'}
+            />
+        </TouchableOpacity>
+    );
+}
+
+function ContainerBlockCard({ block, elapsed, onTaskDone, onTaskPress }: { block: PlannedBlock; elapsed: boolean; onTaskDone: (taskId: string) => void; onTaskPress: (taskId: string) => void }) {
     const energyLabel = block.energyLevel
         ? block.energyLevel.charAt(0) + block.energyLevel.slice(1).toLowerCase() + ' energy'
         : null;
@@ -232,10 +263,11 @@ function ContainerBlockCard({ block, elapsed }: { block: PlannedBlock; elapsed: 
             {block.tasks.length > 0 && (
                 <View style={styles.taskList}>
                     {block.tasks.map(task => (
-                        <View key={task.id} style={styles.taskCard}>
+                        <TouchableOpacity key={task.id} style={styles.taskCard} activeOpacity={0.7} onPress={() => onTaskPress(task.id)}>
+                            <TaskDoneToggle task={task} onDone={() => onTaskDone(task.id)} />
                             <Text style={styles.taskTitle} numberOfLines={2}>{task.title}</Text>
                             <Text style={styles.taskEstimate}>{formatEstimatedMins(task.estimatedMins)}</Text>
-                        </View>
+                        </TouchableOpacity>
                     ))}
                 </View>
             )}
@@ -309,10 +341,14 @@ function Timeline({
     plan,
     currentTime,
     onNowLayout,
+    onTaskDone,
+    onTaskPress,
 }: {
     plan: DayPlan;
     currentTime: string;
     onNowLayout: (y: number) => void;
+    onTaskDone: (taskId: string) => void;
+    onTaskPress: (taskId: string) => void;
 }) {
     const items = buildTimelineItems(plan, currentTime);
 
@@ -338,7 +374,7 @@ function Timeline({
                 </View>
             );
         } else if (item.block.type === 'CONTAINER') {
-            elements.push(<ContainerBlockCard key={`item-${i}`} block={item.block} elapsed={item.elapsed} />);
+            elements.push(<ContainerBlockCard key={`item-${i}`} block={item.block} elapsed={item.elapsed} onTaskDone={onTaskDone} onTaskPress={onTaskPress} />);
         } else {
             elements.push(<AnchorBlockCard key={`item-${i}`} block={item.block} elapsed={item.elapsed} />);
         }
@@ -350,6 +386,7 @@ function Timeline({
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function TodayScreen() {
+    const router = useRouter();
     const [state, setState] = useState<ScreenState>({ status: 'loading' });
     const [currentTime, setCurrentTime] = useState(() => toHHmm(new Date()));
     const [showCreateModal, setShowCreateModal] = useState(false);
@@ -412,6 +449,26 @@ export default function TodayScreen() {
         scrollRef.current?.scrollTo({ y: targetY, animated: true });
     }, []);
 
+    function handleTaskDone(taskId: string) {
+        setState(prev => {
+            if (prev.status !== 'loaded') return prev;
+            return {
+                ...prev,
+                plan: {
+                    ...prev.plan,
+                    blocks: prev.plan.blocks.map(block => ({
+                        ...block,
+                        tasks: block.tasks.map(task =>
+                            task.id === taskId ? { ...task, status: 'DONE' as TaskStatus } : task
+                        ),
+                    })),
+                },
+            };
+        });
+    }
+
+    const handleTaskPress = (taskId: string) => router.push(`/task/${taskId}`);
+
     const handlePlanDay = () => Alert.alert('Planning coming soon');
     const handleAddTask = () => setShowCreateModal(true);
 
@@ -456,7 +513,7 @@ export default function TodayScreen() {
                     showsVerticalScrollIndicator={false}
                     onLayout={(e) => { scrollViewHeight.current = e.nativeEvent.layout.height; }}
                 >
-                    <Timeline plan={state.plan} currentTime={currentTime} onNowLayout={handleNowLayout} />
+                    <Timeline plan={state.plan} currentTime={currentTime} onNowLayout={handleNowLayout} onTaskDone={handleTaskDone} onTaskPress={handleTaskPress} />
                 </ScrollView>
             )}
 
@@ -693,8 +750,8 @@ const styles = StyleSheet.create({
     },
     taskCard: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
+        gap: 10,
         backgroundColor: '#fffef9',
         borderWidth: 1,
         borderColor: 'rgba(42,38,33,0.04)',

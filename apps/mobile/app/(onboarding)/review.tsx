@@ -388,7 +388,7 @@ const styles = StyleSheet.create({
     footer: {
         paddingTop: 16,
         borderTopWidth: 1,
-        borderTopColor: 'rgba(42,38,33,0.04)',
+        borderTopColor: 'rgba(42,38,33,0.10)',
         gap: 4,
     },
     errorBanner: {

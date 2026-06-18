@@ -501,9 +501,9 @@ const styles = StyleSheet.create({
     listContent: { gap: 12, paddingBottom: 16 },
 
     blockItem: { borderRadius: 16, overflow: 'hidden' },
-    blockItemContainer: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.08)', borderStyle: 'dashed' },
+    blockItemContainer: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.10)', borderStyle: 'dashed' },
     blockItemAnchor: { backgroundColor: 'rgba(232,228,221,0.3)' },
-    blockItemNoTask: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.08)', borderStyle: 'dashed', backgroundColor: 'rgba(232,228,221,0.18)' },
+    blockItemNoTask: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.10)', borderStyle: 'dashed', backgroundColor: 'rgba(232,228,221,0.18)' },
     blockItemInner: { flexDirection: 'row', alignItems: 'center', padding: 17 },
     blockItemContent: { flex: 1, gap: 4 },
     blockItemHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -513,7 +513,7 @@ const styles = StyleSheet.create({
     energyBadgeText: { fontSize: 12, color: '#d4a574' },
     blockItemChevron: { fontSize: 18, color: '#c0b8b0', paddingLeft: 12 },
 
-    addRow: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.08)', borderStyle: 'dashed', borderRadius: 16, height: 50, justifyContent: 'center', alignItems: 'center' },
+    addRow: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.10)', borderStyle: 'dashed', borderRadius: 16, height: 50, justifyContent: 'center', alignItems: 'center' },
     addRowText: { fontSize: 14, fontWeight: '500', color: '#7a736a', letterSpacing: -0.15 },
 
     errorText: { fontSize: 13, color: '#c0392b', textAlign: 'center', marginTop: 10, marginHorizontal: 24 },
@@ -529,8 +529,8 @@ const styles = StyleSheet.create({
     modalTitle: { fontSize: 18, fontWeight: '500', color: '#2a2621' },
     modalCloseButton: { position: 'absolute', right: 24 },
     modalClose: { fontSize: 22, color: '#7a736a' },
-    modalDivider: { height: 1, backgroundColor: 'rgba(42,38,33,0.06)' },
-    modalDividerLight: { height: 1, backgroundColor: 'rgba(42,38,33,0.06)', marginHorizontal: 24 },
+    modalDivider: { height: 1, backgroundColor: 'rgba(42,38,33,0.10)' },
+    modalDividerLight: { height: 1, backgroundColor: 'rgba(42,38,33,0.10)', marginHorizontal: 24 },
     modalSection: { paddingHorizontal: 24, paddingVertical: 20, gap: 12 },
     modalLabel: { fontSize: 14, fontWeight: '500', color: '#7a736a', letterSpacing: -0.15 },
 
@@ -551,11 +551,11 @@ const styles = StyleSheet.create({
     legendTitle: { fontSize: 13, fontWeight: '500', color: '#2a2621' },
     legendDesc: { fontSize: 11, color: 'rgba(122,115,106,0.8)', marginTop: 1 },
 
-    textInput: { height: 52, backgroundColor: '#fffef9', borderWidth: 1, borderColor: 'rgba(42,38,33,0.08)', borderRadius: 14, paddingHorizontal: 16, fontSize: 15, color: '#2a2621' },
+    textInput: { height: 52, backgroundColor: '#fffef9', borderWidth: 1, borderColor: 'rgba(42,38,33,0.10)', borderRadius: 14, paddingHorizontal: 16, fontSize: 15, color: '#2a2621' },
 
     timeRow: { flexDirection: 'row', gap: 12 },
     timeField: { flex: 1, gap: 12 },
-    timeInput: { height: 52, backgroundColor: '#fffef9', borderWidth: 1, borderColor: 'rgba(42,38,33,0.08)', borderRadius: 14, justifyContent: 'center', paddingHorizontal: 16 },
+    timeInput: { height: 52, backgroundColor: '#fffef9', borderWidth: 1, borderColor: 'rgba(42,38,33,0.10)', borderRadius: 14, justifyContent: 'center', paddingHorizontal: 16 },
     timeInputValueRow: { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
     timeInputValue: { fontSize: 15, fontWeight: '500', color: '#2a2621' },
     timeInputPeriod: { fontSize: 11, fontWeight: '500', color: '#d4a574' },

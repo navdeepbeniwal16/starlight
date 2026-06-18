@@ -290,7 +290,7 @@ export const tf = StyleSheet.create({
     pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 14, paddingBottom: 14, paddingTop: 2 },
     pill: {
         flexDirection: 'row', alignItems: 'center',
-        backgroundColor: 'rgba(42,38,33,0.06)',
+        backgroundColor: 'rgba(42,38,33,0.10)',
         borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9, gap: 6,
     },
     pillOn: { backgroundColor: '#2a2621' },
@@ -301,24 +301,24 @@ export const tf = StyleSheet.create({
     deadlineSection: {
         marginHorizontal: 12, marginTop: 4, marginBottom: 12,
         borderRadius: 12, borderWidth: 1,
-        borderColor: 'rgba(42,38,33,0.06)',
+        borderColor: 'rgba(42,38,33,0.10)',
         backgroundColor: 'rgba(245,243,239,0.5)',
         overflow: 'hidden',
     },
     timeRow: {
         flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
         paddingHorizontal: 14, paddingVertical: 10,
-        borderTopWidth: 1, borderTopColor: 'rgba(42,38,33,0.06)',
+        borderTopWidth: 1, borderTopColor: 'rgba(42,38,33,0.10)',
     },
     timeLeft: { flexDirection: 'row', alignItems: 'center', gap: 7 },
     timeLabel: { ...BASE_TXT, color: 'rgba(122,115,106,0.7)' },
     timeRight: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     timeValue: { ...BASE_TXT, fontWeight: '500' },
-    spinnerWrap: { height: 130, overflow: 'hidden', borderTopWidth: 1, borderTopColor: 'rgba(42,38,33,0.06)' },
+    spinnerWrap: { height: 130, overflow: 'hidden', borderTopWidth: 1, borderTopColor: 'rgba(42,38,33,0.10)' },
     deadlineActions: {
         paddingHorizontal: 14, paddingTop: 10, paddingBottom: 14,
         gap: 10, alignItems: 'center',
-        borderTopWidth: 1, borderTopColor: 'rgba(42,38,33,0.06)',
+        borderTopWidth: 1, borderTopColor: 'rgba(42,38,33,0.10)',
     },
     setBtn: {
         backgroundColor: '#2a2621', borderRadius: 12, height: 42,

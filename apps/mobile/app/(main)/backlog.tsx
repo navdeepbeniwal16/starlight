@@ -320,7 +320,7 @@ const styles = StyleSheet.create({
         paddingTop: 16,
         paddingBottom: 12,
         borderBottomWidth: 1,
-        borderBottomColor: 'rgba(42,38,33,0.04)',
+        borderBottomColor: 'rgba(42,38,33,0.10)',
     },
     headerTop: {
         flexDirection: 'row',
@@ -386,7 +386,7 @@ const styles = StyleSheet.create({
     taskCard: {
         backgroundColor: '#fffef9',
         borderWidth: 1,
-        borderColor: 'rgba(42,38,33,0.04)',
+        borderColor: 'rgba(42,38,33,0.10)',
         borderRadius: 16,
         padding: 16,
         flexDirection: 'row',
