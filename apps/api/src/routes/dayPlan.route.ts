@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
-import { getDayPlan } from "../services/dayPlan.service";
+import { getDayPlan, createDraftPlan, NoTemplateError, NoContainerBlocksError } from "../services/dayPlan.service";
 
 const router = Router();
 
@@ -24,6 +24,43 @@ function todayDateString(utcOffsetMins?: number): string {
     return `${year}-${month}-${day}`;
 }
 
+function nowTimeString(utcOffsetMins?: number): string {
+    const now = new Date();
+    if (utcOffsetMins !== undefined) {
+        const localNow = new Date(now.getTime() + utcOffsetMins * 60 * 1000);
+        return `${String(localNow.getUTCHours()).padStart(2, '0')}:${String(localNow.getUTCMinutes()).padStart(2, '0')}`;
+    }
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+}
+
+function parseTimezoneOffset(req: Request): number | undefined {
+    const header = req.headers['x-timezone-offset'];
+    const parsed = typeof header === 'string' ? parseInt(header, 10) : NaN;
+    return Number.isInteger(parsed) && parsed >= -720 && parsed <= 840 ? parsed : undefined;
+}
+
+router.post("/", authenticate, async (req: Request, res: Response): Promise<void> => {
+    const utcOffsetMins = parseTimezoneOffset(req);
+
+    const date = todayDateString(utcOffsetMins);
+    const nowHHmm = nowTimeString(utcOffsetMins);
+
+    try {
+        const result = await createDraftPlan(req.user!.sub, date, nowHHmm);
+        res.status(201).json({ success: true, data: { id: result.id } });
+    } catch (error) {
+        if (error instanceof NoTemplateError) {
+            res.status(400).json({ success: false, error: 'No day template found. Please set up your day template first.' });
+            return;
+        }
+        if (error instanceof NoContainerBlocksError) {
+            res.status(400).json({ success: false, error: 'No time blocks remain for today — all your available blocks have passed.' });
+            return;
+        }
+        throw error;
+    }
+});
+
 router.get("/", authenticate, async (req: Request, res: Response): Promise<void> => {
     res.set("Cache-Control", "no-store, private");
 
@@ -34,11 +71,7 @@ router.get("/", authenticate, async (req: Request, res: Response): Promise<void>
         return;
     }
 
-    const offsetHeader = req.headers['x-timezone-offset'];
-    const parsedOffset = typeof offsetHeader === 'string' ? parseInt(offsetHeader, 10) : NaN;
-    const utcOffsetMins = Number.isInteger(parsedOffset) && parsedOffset >= -720 && parsedOffset <= 840
-        ? parsedOffset
-        : undefined;
+    const utcOffsetMins = parseTimezoneOffset(req);
 
     const date = dateParam ?? todayDateString(utcOffsetMins);
 

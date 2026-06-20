@@ -1,4 +1,4 @@
-import { ApiResult, BlockInput, CreateDayTemplateResponse, CreateTaskInput, CreateTaskResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, GetTaskDetailResponse, LoginResponse, MeResponse, SignupResponse, UpdateTaskInput, UpdateTaskResponse } from "./api.types";
+import { ApiResult, BlockInput, CreateDayPlanResponse, CreateDayTemplateResponse, CreateTaskInput, CreateTaskResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, GetTaskDetailResponse, LoginResponse, MeResponse, SignupResponse, UpdateTaskInput, UpdateTaskResponse } from "./api.types";
 import { getToken } from "./auth-token";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
@@ -93,6 +93,33 @@ export const api = {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+      });
+
+      const responseJson = await response.json();
+      if (!response.ok) {
+        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
+      }
+
+      return { ok: true, data: responseJson.data };
+    } catch (error) {
+      return { ok: false, error: 'Network error. Please check your connection.' };
+    }
+  },
+
+  createDayPlan: async (): Promise<CreateDayPlanResponse> => {
+    const token = await getToken();
+
+    if (!token) {
+      return { ok: false, error: 'No token found' };
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/day-plan`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-Timezone-Offset': String(-new Date().getTimezoneOffset()),
+        },
       });
 
       const responseJson = await response.json();

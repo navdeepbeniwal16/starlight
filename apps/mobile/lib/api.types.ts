@@ -81,6 +81,7 @@ export type DayPlan = {
 };
 
 export type GetDayPlanResponse = ApiResult<DayPlan>;
+export type CreateDayPlanResponse = ApiResult<{ id: string }>;
 
 export type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
 
