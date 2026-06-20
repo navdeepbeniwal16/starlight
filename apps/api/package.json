@@ -33,6 +33,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@swc/core": "^1.15.41",
+    "@swc/jest": "^0.2.39",
     "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
@@ -42,9 +44,10 @@
     "@types/pg": "^8.20.0",
     "@types/supertest": "^7.2.0",
     "jest": "^30.4.2",
+    "jest-environment-node": "^30.4.1",
     "prisma": "^7.8.0",
     "supertest": "^7.2.2",
-    "ts-jest": "^29.4.10",
+    "ts-jest": "^29.4.11",
     "tsx": "^4.22.3",
     "typescript": "^6.0.3"
   }
