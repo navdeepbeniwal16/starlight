@@ -8,7 +8,7 @@ export class TaskNotFoundError extends Error {}
 
 export async function getBacklog(userId: string): Promise<BacklogTask[]> {
     return prisma.task.findMany({
-        where: { userId },
+        where: { userId, plannedBlockId: null },
         select: {
             id: true,
             title: true,
@@ -42,37 +42,27 @@ export async function createTask(userId: string, input: CreateTaskInput): Promis
         }
     }
 
-    return prisma.$transaction(async (tx) => {
-        const last = await tx.task.findFirst({
-            where: { userId },
-            orderBy: { order: 'desc' },
-            select: { order: true },
-        });
-        const order = (last?.order ?? 0) + 1;
-
-        return tx.task.create({
-            data: {
-                userId,
-                title: input.title.trim(),
-                estimatedMins: input.estimatedMins,
-                status: deriveStatus(progress),
-                progress,
-                order,
-                ...(input.priority && { priority: input.priority }),
-                ...(input.effort   && { effort: input.effort }),
-                ...(deadlineDate   && { deadline: deadlineDate }),
-                ...(input.notes    && { notes: input.notes }),
-            },
-            select: {
-                id: true,
-                title: true,
-                status: true,
-                priority: true,
-                deadline: true,
-                progress: true,
-                estimatedMins: true,
-            },
-        });
+    return prisma.task.create({
+        data: {
+            userId,
+            title: input.title.trim(),
+            estimatedMins: input.estimatedMins,
+            status: deriveStatus(progress),
+            progress,
+            ...(input.priority && { priority: input.priority }),
+            ...(input.effort   && { effort: input.effort }),
+            ...(deadlineDate   && { deadline: deadlineDate }),
+            ...(input.notes    && { notes: input.notes }),
+        },
+        select: {
+            id: true,
+            title: true,
+            status: true,
+            priority: true,
+            deadline: true,
+            progress: true,
+            estimatedMins: true,
+        },
     });
 }
 

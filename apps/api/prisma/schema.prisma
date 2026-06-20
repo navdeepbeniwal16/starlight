@@ -68,7 +68,7 @@ model DayPlan {
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
-  @@unique([userId, date])
+  @@unique([userId, date, status])
 }
 
 model PlannedBlock {
@@ -90,7 +90,7 @@ model Task {
   title          String
   estimatedMins  Int
   status         TaskStatus    @default(TODO)
-  order          Int
+  blockOrder     Int?
   plannedBlockId String?
   plannedBlock   PlannedBlock? @relation(fields: [plannedBlockId], references: [id])
   priority       Priority?

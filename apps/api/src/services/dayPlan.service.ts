@@ -2,8 +2,8 @@ import { prisma } from "../lib/prisma";
 import type { DayPlan } from "../types/dayPlan.types";
 
 export async function getDayPlan(userId: string, date: string): Promise<DayPlan | null> {
-    return prisma.dayPlan.findUnique({
-        where: { userId_date: { userId, date } },
+    return prisma.dayPlan.findFirst({
+        where: { userId, date, status: 'ACTIVE' },
         select: {
             id: true,
             date: true,
@@ -20,12 +20,12 @@ export async function getDayPlan(userId: string, date: string): Promise<DayPlan 
                     endTime: true,
                     energyLevel: true,
                     tasks: {
-                        orderBy: { order: 'asc' },
+                        orderBy: { blockOrder: 'asc' },
                         select: {
                             id: true,
                             title: true,
                             estimatedMins: true,
-                            order: true,
+                            blockOrder: true,
                             status: true,
                         }
                     }

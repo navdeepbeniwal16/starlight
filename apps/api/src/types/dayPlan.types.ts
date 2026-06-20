@@ -5,7 +5,7 @@ export type PlannedTask = {
     id: string;
     title: string;
     estimatedMins: number;
-    order: number;
+    blockOrder: number | null;
     status: TaskStatus;
 };
 
