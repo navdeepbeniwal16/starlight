@@ -39,7 +39,8 @@ function deadlineToParts(iso: string): { day: Date; time: Date } {
 export default function TaskDetailScreen() {
     const router = useRouter();
     const navigation = useNavigation();
-    const { taskId } = useLocalSearchParams<{ taskId: string }>();
+    const { taskId, from } = useLocalSearchParams<{ taskId: string; from?: string }>();
+    const backLabel = from ?? 'Backlog';
 
     // Server state
     const [task, setTask] = useState<TaskDetail | null>(null);
@@ -269,7 +270,7 @@ export default function TaskDetailScreen() {
             <View style={s.backRow}>
                 <TouchableOpacity style={s.backButton} onPress={() => router.back()} activeOpacity={0.7}>
                     <Ionicons name="chevron-back" size={20} color="#7a736a" />
-                    <Text style={s.backLabel}>Backlog</Text>
+                    <Text style={s.backLabel}>{backLabel}</Text>
                 </TouchableOpacity>
             </View>
 
@@ -500,7 +501,7 @@ const BASE_TXT: { fontSize: number; color: string } = { fontSize: 14, color: '#2
 const s = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: '#fdfcfa' },
 
-    backRow: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 2 },
+    backRow: { paddingHorizontal: 12, paddingTop: 20, paddingBottom: 2 },
     backButton: {
         flexDirection: 'row', alignItems: 'center', gap: 2,
         alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 4,

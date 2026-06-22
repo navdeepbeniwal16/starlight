@@ -10,7 +10,6 @@ import {
     ActivityIndicator,
 } from "react-native";
 import CreateTaskModal from "../../components/CreateTaskModal";
-import PlanningSessionModal from "../../components/PlanningSessionModal";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
@@ -391,8 +390,6 @@ export default function TodayScreen() {
     const [state, setState] = useState<ScreenState>({ status: 'loading' });
     const [currentTime, setCurrentTime] = useState(() => toHHmm(new Date()));
     const [showCreateModal, setShowCreateModal] = useState(false);
-    const [showPlanningModal, setShowPlanningModal] = useState(false);
-    const [draftPlanId, setDraftPlanId] = useState<string | null>(null);
     const [isPlanningLoading, setIsPlanningLoading] = useState(false);
     const scrollRef = useRef<ScrollView>(null);
     const scrollViewHeight = useRef(0);
@@ -484,8 +481,7 @@ export default function TodayScreen() {
             return;
         }
 
-        setDraftPlanId(result.data.id);
-        setShowPlanningModal(true);
+        router.push(`/planning/${result.data.id}`);
     };
     const handleAddTask = () => setShowCreateModal(true);
 
@@ -552,12 +548,6 @@ export default function TodayScreen() {
                 visible={showCreateModal}
                 onClose={() => setShowCreateModal(false)}
                 onCreated={() => setShowCreateModal(false)}
-            />
-
-            <PlanningSessionModal
-                visible={showPlanningModal}
-                planId={draftPlanId}
-                onClose={() => setShowPlanningModal(false)}
             />
         </SafeAreaView>
     );

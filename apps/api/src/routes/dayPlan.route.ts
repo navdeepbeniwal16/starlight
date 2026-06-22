@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
-import { getDayPlan, createDraftPlan, NoTemplateError, NoContainerBlocksError } from "../services/dayPlan.service";
+import { getDayPlan, createDraftPlan, getPlanTasks, NoTemplateError, NoContainerBlocksError, PlanNotFoundError } from "../services/dayPlan.service";
 
 const router = Router();
 
@@ -83,6 +83,20 @@ router.get("/", authenticate, async (req: Request, res: Response): Promise<void>
     }
 
     res.status(200).json({ success: true, data: plan });
+});
+
+router.get("/:id/tasks", authenticate, async (req: Request, res: Response): Promise<void> => {
+    res.set("Cache-Control", "no-store, private");
+    try {
+        const result = await getPlanTasks(req.user!.sub, req.params.id as string);
+        res.status(200).json({ success: true, data: result });
+    } catch (error) {
+        if (error instanceof PlanNotFoundError) {
+            res.status(404).json({ success: false, error: 'Plan not found' });
+            return;
+        }
+        throw error;
+    }
 });
 
 export default router;

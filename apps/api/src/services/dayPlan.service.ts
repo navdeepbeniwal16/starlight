@@ -1,8 +1,9 @@
 import { prisma } from "../lib/prisma";
-import type { DayPlan } from "../types/dayPlan.types";
+import type { DayPlan, ReviewTasks } from "../types/dayPlan.types";
 
 export class NoTemplateError extends Error {}
 export class NoContainerBlocksError extends Error {}
+export class PlanNotFoundError extends Error {}
 
 export async function createDraftPlan(
     userId: string,
@@ -66,6 +67,56 @@ export async function createDraftPlan(
     });
 
     return { id: plan.id };
+}
+
+function yesterdayOf(dateStr: string): string {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    dt.setUTCDate(dt.getUTCDate() - 1);
+    return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+
+export async function getPlanTasks(userId: string, planId: string): Promise<ReviewTasks> {
+    const plan = await prisma.dayPlan.findFirst({
+        where: { id: planId, userId },
+        select: { date: true },
+    });
+    if (!plan) throw new PlanNotFoundError();
+
+    const yesterday = yesterdayOf(plan.date);
+
+    const taskSelect = {
+        id: true,
+        title: true,
+        status: true,
+        priority: true,
+        deadline: true,
+        progress: true,
+        estimatedMins: true,
+    } as const;
+
+    const [carriedOver, backlog] = await Promise.all([
+        prisma.task.findMany({
+            where: {
+                userId,
+                status: { not: 'DONE' },
+                plannedBlock: {
+                    dayPlan: { date: yesterday, status: 'ACTIVE' },
+                },
+            },
+            select: taskSelect,
+        }),
+        prisma.task.findMany({
+            where: {
+                userId,
+                plannedBlockId: null,
+                status: { not: 'DONE' },
+            },
+            select: taskSelect,
+        }),
+    ]);
+
+    return { carriedOver, backlog };
 }
 
 export async function getDayPlan(userId: string, date: string): Promise<DayPlan | null> {

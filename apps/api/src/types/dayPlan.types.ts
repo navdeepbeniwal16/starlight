@@ -1,5 +1,11 @@
 import { BlockType, EnergyLevel, DayPlanStatus, TaskStatus } from '@prisma/client';
 export { BlockType, EnergyLevel, DayPlanStatus, TaskStatus } from '@prisma/client';
+import type { BacklogTask } from './task.types';
+
+export type ReviewTasks = {
+    carriedOver: BacklogTask[];
+    backlog: BacklogTask[];
+};
 
 export type PlannedTask = {
     id: string;

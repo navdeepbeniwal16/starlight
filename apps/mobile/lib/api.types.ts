@@ -115,6 +115,14 @@ export type TaskDetail = BacklogTask & {
 };
 export type GetTaskDetailResponse = ApiResult<TaskDetail>;
 
+export type ReviewTask = BacklogTask;
+
+export type PlanTasksData = {
+    carriedOver: ReviewTask[];
+    backlog: ReviewTask[];
+};
+export type GetPlanTasksResponse = ApiResult<PlanTasksData>;
+
 export type UpdateTaskInput = {
     title?: string;
     notes?: string | null;

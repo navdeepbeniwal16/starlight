@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma";
-import { getDayPlan, createDraftPlan, NoTemplateError, NoContainerBlocksError } from "./dayPlan.service";
+import { getDayPlan, createDraftPlan, getPlanTasks, NoTemplateError, NoContainerBlocksError, PlanNotFoundError } from "./dayPlan.service";
 
 const TEST_EMAIL = "test-dayplan-service@starlight.test";
 const TEST_EMAIL_CREATE = "test-create-draft-plan@starlight.test";
@@ -225,6 +225,168 @@ describe("createDraftPlan", () => {
 
     it("throws NoTemplateError when the user has no day template", async () => {
         await expect(createDraftPlan(userId, DATE, "09:00")).rejects.toThrow(NoTemplateError);
+    });
+});
+
+// ─── getPlanTasks ─────────────────────────────────────────────────────────────
+
+const TEST_EMAIL_PLAN_TASKS = "test-get-plan-tasks@starlight.test";
+
+async function seedPlanTasksUser() {
+    return prisma.user.upsert({
+        where: { email: TEST_EMAIL_PLAN_TASKS },
+        update: {},
+        create: {
+            email: TEST_EMAIL_PLAN_TASKS,
+            passwordHash: "not-a-real-hash",
+            firstName: "PlanTasks",
+            lastName: "User",
+        },
+    });
+}
+
+async function cleanupPlanTasksUser(userId: string) {
+    const plans = await prisma.dayPlan.findMany({
+        where: { userId },
+        select: { blocks: { select: { id: true } } },
+    });
+    const blockIds = plans.flatMap(p => p.blocks.map(b => b.id));
+    if (blockIds.length > 0) {
+        await prisma.task.updateMany({
+            where: { plannedBlockId: { in: blockIds } },
+            data: { plannedBlockId: null, blockOrder: null },
+        });
+        await prisma.plannedBlock.deleteMany({ where: { id: { in: blockIds } } });
+    }
+    await prisma.task.deleteMany({ where: { userId } });
+    await prisma.dayPlan.deleteMany({ where: { userId } });
+}
+
+describe("getPlanTasks", () => {
+    let userId: string;
+    const TODAY = "2026-06-20";
+    const YESTERDAY = "2026-06-19";
+
+    beforeEach(async () => {
+        const user = await seedPlanTasksUser();
+        userId = user.id;
+        await cleanupPlanTasksUser(userId);
+    });
+
+    afterAll(async () => {
+        const user = await prisma.user.findUnique({ where: { email: TEST_EMAIL_PLAN_TASKS } });
+        if (user) {
+            await cleanupPlanTasksUser(user.id);
+            await prisma.user.delete({ where: { id: user.id } });
+        }
+    });
+
+    it("throws PlanNotFoundError when plan does not exist", async () => {
+        await expect(getPlanTasks(userId, "nonexistent-id")).rejects.toThrow(PlanNotFoundError);
+    });
+
+    it("throws PlanNotFoundError when plan belongs to a different user", async () => {
+        const otherUser = await prisma.user.create({
+            data: { email: "other-plan-tasks@starlight.test", passwordHash: "x", firstName: "Other", lastName: "User" },
+        });
+        const plan = await prisma.dayPlan.create({
+            data: { userId: otherUser.id, date: TODAY, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT" },
+        });
+        try {
+            await expect(getPlanTasks(userId, plan.id)).rejects.toThrow(PlanNotFoundError);
+        } finally {
+            await prisma.dayPlan.delete({ where: { id: plan.id } });
+            await prisma.user.delete({ where: { id: otherUser.id } });
+        }
+    });
+
+    it("returns carried-over non-DONE tasks from yesterday's ACTIVE plan", async () => {
+        const draftPlan = await prisma.dayPlan.create({
+            data: { userId, date: TODAY, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT" },
+        });
+        const yesterdayPlan = await prisma.dayPlan.create({
+            data: { userId, date: YESTERDAY, wakeTime: "07:00", sleepTime: "23:00", status: "ACTIVE" },
+        });
+        const block = await prisma.plannedBlock.create({
+            data: { dayPlanId: yesterdayPlan.id, type: "CONTAINER", name: "Work", startTime: "09:00", endTime: "12:00" },
+        });
+
+        const todoTask = await prisma.task.create({
+            data: { userId, title: "Todo task", estimatedMins: 30, status: "TODO", plannedBlockId: block.id },
+        });
+        const inProgressTask = await prisma.task.create({
+            data: { userId, title: "In-progress task", estimatedMins: 60, status: "IN_PROGRESS", plannedBlockId: block.id },
+        });
+        await prisma.task.create({
+            data: { userId, title: "Done task", estimatedMins: 30, status: "DONE", plannedBlockId: block.id },
+        });
+
+        const result = await getPlanTasks(userId, draftPlan.id);
+
+        const ids = result.carriedOver.map(t => t.id).sort();
+        expect(ids).toEqual([todoTask.id, inProgressTask.id].sort());
+        expect(result.carriedOver.every(t => t.status !== 'DONE')).toBe(true);
+        expect(result.backlog).toHaveLength(0);
+    });
+
+    it("omits carried-over section (returns empty array) when no yesterday ACTIVE plan exists", async () => {
+        const draftPlan = await prisma.dayPlan.create({
+            data: { userId, date: TODAY, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT" },
+        });
+        await prisma.task.create({
+            data: { userId, title: "Backlog task", estimatedMins: 30, status: "TODO" },
+        });
+
+        const result = await getPlanTasks(userId, draftPlan.id);
+
+        expect(result.carriedOver).toHaveLength(0);
+        expect(result.backlog).toHaveLength(1);
+    });
+
+    it("backlog includes unscheduled non-DONE tasks and excludes tasks with a plannedBlockId", async () => {
+        const draftPlan = await prisma.dayPlan.create({
+            data: { userId, date: TODAY, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT" },
+        });
+        const activePlan = await prisma.dayPlan.create({
+            data: { userId, date: TODAY, wakeTime: "07:00", sleepTime: "23:00", status: "ACTIVE" },
+        });
+        const block = await prisma.plannedBlock.create({
+            data: { dayPlanId: activePlan.id, type: "CONTAINER", name: "Work", startTime: "09:00", endTime: "12:00" },
+        });
+
+        const backlogTask = await prisma.task.create({
+            data: { userId, title: "Free task", estimatedMins: 30, status: "TODO" },
+        });
+        await prisma.task.create({
+            data: { userId, title: "Done backlog", estimatedMins: 30, status: "DONE" },
+        });
+        await prisma.task.create({
+            data: { userId, title: "Planned task", estimatedMins: 30, status: "TODO", plannedBlockId: block.id },
+        });
+
+        const result = await getPlanTasks(userId, draftPlan.id);
+
+        expect(result.backlog).toHaveLength(1);
+        expect(result.backlog[0].id).toBe(backlogTask.id);
+    });
+
+    it("does not include yesterday DRAFT plan tasks in carried-over", async () => {
+        const draftPlan = await prisma.dayPlan.create({
+            data: { userId, date: TODAY, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT" },
+        });
+        const yesterdayDraft = await prisma.dayPlan.create({
+            data: { userId, date: YESTERDAY, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT" },
+        });
+        const block = await prisma.plannedBlock.create({
+            data: { dayPlanId: yesterdayDraft.id, type: "CONTAINER", name: "Work", startTime: "09:00", endTime: "12:00" },
+        });
+        await prisma.task.create({
+            data: { userId, title: "Draft plan task", estimatedMins: 30, status: "TODO", plannedBlockId: block.id },
+        });
+
+        const result = await getPlanTasks(userId, draftPlan.id);
+
+        expect(result.carriedOver).toHaveLength(0);
     });
 });
 
