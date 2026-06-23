@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
-import { getDayPlan, createDraftPlan, getPlanTasks, NoTemplateError, NoContainerBlocksError, PlanNotFoundError } from "../services/dayPlan.service";
+import { getDayPlan, createDraftPlan, getPlanTasks, generatePlan, NoTemplateError, NoContainerBlocksError, PlanNotFoundError, PlanNotInDraftError } from "../services/dayPlan.service";
+import { AgentError } from "../services/planAgent.service";
 
 const router = Router();
 
@@ -93,6 +94,28 @@ router.get("/:id/tasks", authenticate, async (req: Request, res: Response): Prom
     } catch (error) {
         if (error instanceof PlanNotFoundError) {
             res.status(404).json({ success: false, error: 'Plan not found' });
+            return;
+        }
+        throw error;
+    }
+});
+
+router.post("/:id/generate", authenticate, async (req: Request, res: Response): Promise<void> => {
+    res.set("Cache-Control", "no-store, private");
+    try {
+        const result = await generatePlan(req.user!.sub, req.params.id as string);
+        res.status(200).json({ success: true, data: result });
+    } catch (error) {
+        if (error instanceof PlanNotFoundError) {
+            res.status(404).json({ success: false, error: 'Plan not found' });
+            return;
+        }
+        if (error instanceof PlanNotInDraftError) {
+            res.status(409).json({ success: false, error: 'Plan is not a draft and cannot be generated' });
+            return;
+        }
+        if (error instanceof AgentError) {
+            res.status(502).json({ success: false, error: 'The planning agent could not generate a plan. Please try again.' });
             return;
         }
         throw error;

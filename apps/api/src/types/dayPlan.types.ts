@@ -33,3 +33,8 @@ export type DayPlan = {
     status: DayPlanStatus;
     blocks: PlannedBlock[];
 };
+
+export type GeneratePlanResult = {
+    plan: DayPlan;
+    unschedulable: { taskId: string; reason: string }[];
+};

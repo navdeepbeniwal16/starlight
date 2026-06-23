@@ -18,6 +18,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
 import type { Priority, ReviewTask, TaskDetail } from "../../lib/api.types";
+import { setGeneratedPlan } from "../../lib/planningSession";
 import CreateTaskModal from "../../components/CreateTaskModal";
 
 // ─── Motion primitives ────────────────────────────────────────────────────────
@@ -180,6 +181,25 @@ export default function PlanningReviewScreen() {
     const [error, setError] = useState<string | null>(null);
     const [showCreateModal, setShowCreateModal] = useState(false);
 
+    // Agent plan generation (T-06): full-screen while the agent runs, retry on error.
+    const [generating, setGenerating] = useState(false);
+    const [generateError, setGenerateError] = useState<string | null>(null);
+
+    const handleDoneReviewing = useCallback(async () => {
+        if (!planId || generating) return;
+        setGenerating(true);
+        setGenerateError(null);
+        const result = await api.generatePlan(planId);
+        if (result.ok) {
+            setGeneratedPlan(result.data);
+            setGenerating(false);
+            router.push(`/planning/plan/${planId}`);
+        } else {
+            setGenerating(false);
+            setGenerateError(result.error);
+        }
+    }, [planId, generating, router]);
+
     // Refetch whenever the screen regains focus (e.g. returning from task detail)
     // so edits made there are reflected on the review cards. The full-screen
     // loader only shows on the first load (carriedOver === null).
@@ -296,7 +316,7 @@ export default function PlanningReviewScreen() {
                 <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
                     <PressableScale
                         style={s.doneButton}
-                        // T-06: advances to agent generation step
+                        onPress={handleDoneReviewing}
                     >
                         <Text style={s.doneButtonLabel}>Done reviewing</Text>
                     </PressableScale>
@@ -313,6 +333,32 @@ export default function PlanningReviewScreen() {
                     setShowCreateModal(false);
                 }}
             />
+
+            {(generating || generateError) && (
+                <View style={s.generateOverlay}>
+                    {generating ? (
+                        <>
+                            <ActivityIndicator color="#d4a574" size="large" />
+                            <Text style={s.generateTitle}>Building your plan</Text>
+                            <Text style={s.generateSubtitle}>The agent is scheduling your tasks into the day.</Text>
+                        </>
+                    ) : (
+                        <>
+                            <View style={s.generateErrorIcon}>
+                                <Ionicons name="alert-circle-outline" size={24} color="#d4a574" />
+                            </View>
+                            <Text style={s.generateTitle}>Couldn't build your plan</Text>
+                            <Text style={s.generateSubtitle}>{generateError}</Text>
+                            <PressableScale style={s.retryButton} onPress={handleDoneReviewing}>
+                                <Text style={s.retryButtonLabel}>Try again</Text>
+                            </PressableScale>
+                            <TouchableOpacity onPress={() => setGenerateError(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                                <Text style={s.retryDismiss}>Back to review</Text>
+                            </TouchableOpacity>
+                        </>
+                    )}
+                </View>
+            )}
         </SafeAreaView>
     );
 }
@@ -486,5 +532,55 @@ const s = StyleSheet.create({
         fontWeight: '600',
         color: '#fdfcfa',
         letterSpacing: -0.2,
+    },
+
+    generateOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: '#fdfcfa',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 40,
+        gap: 12,
+    },
+    generateErrorIcon: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: 'rgba(212,165,116,0.12)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    generateTitle: {
+        fontSize: 17,
+        fontWeight: '600',
+        color: '#2a2621',
+        letterSpacing: -0.3,
+        marginTop: 4,
+    },
+    generateSubtitle: {
+        fontSize: 13,
+        color: '#7a736a',
+        textAlign: 'center',
+        lineHeight: 18,
+        maxWidth: 260,
+    },
+    retryButton: {
+        backgroundColor: '#2a2621',
+        borderRadius: 14,
+        paddingVertical: 14,
+        paddingHorizontal: 32,
+        alignItems: 'center',
+        marginTop: 12,
+    },
+    retryButtonLabel: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#fdfcfa',
+        letterSpacing: -0.2,
+    },
+    retryDismiss: {
+        fontSize: 14,
+        color: '#7a736a',
+        marginTop: 4,
     },
 });

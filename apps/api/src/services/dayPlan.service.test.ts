@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma";
-import { getDayPlan, createDraftPlan, getPlanTasks, NoTemplateError, NoContainerBlocksError, PlanNotFoundError } from "./dayPlan.service";
+import { getDayPlan, createDraftPlan, getPlanTasks, generatePlan, NoTemplateError, NoContainerBlocksError, PlanNotFoundError, PlanNotDraftError } from "./dayPlan.service";
+import type { AgentInput } from "./planAgent.service";
 
 const TEST_EMAIL = "test-dayplan-service@starlight.test";
 const TEST_EMAIL_CREATE = "test-create-draft-plan@starlight.test";
@@ -432,5 +433,188 @@ describe("getDayPlan", () => {
     it("returns null when no plan exists for the date", async () => {
         const result = await getDayPlan(userId, "2026-01-17");
         expect(result).toBeNull();
+    });
+});
+
+// ─── generatePlan ─────────────────────────────────────────────────────────────
+
+const TEST_EMAIL_GENERATE = "test-generate-plan@starlight.test";
+
+async function seedGenerateUser() {
+    return prisma.user.upsert({
+        where: { email: TEST_EMAIL_GENERATE },
+        update: {},
+        create: {
+            email: TEST_EMAIL_GENERATE,
+            passwordHash: "not-a-real-hash",
+            firstName: "Generate",
+            lastName: "User",
+        },
+    });
+}
+
+async function cleanupGenerateUser(userId: string) {
+    const plans = await prisma.dayPlan.findMany({
+        where: { userId },
+        select: { blocks: { select: { id: true } } },
+    });
+    const blockIds = plans.flatMap(p => p.blocks.map(b => b.id));
+    if (blockIds.length > 0) {
+        await prisma.task.updateMany({
+            where: { plannedBlockId: { in: blockIds } },
+            data: { plannedBlockId: null, blockOrder: null },
+        });
+        await prisma.plannedBlock.deleteMany({ where: { id: { in: blockIds } } });
+    }
+    await prisma.task.deleteMany({ where: { userId } });
+    await prisma.dayPlan.deleteMany({ where: { userId } });
+}
+
+type AgentFixture = {
+    assignments: { taskId: string; blockId: string; blockOrder: number }[];
+    unschedulable: { taskId: string; reason: string }[];
+};
+
+// An injectable agent that records the input it was handed and returns a fixture.
+function recordingAgent(result: AgentFixture) {
+    const calls: AgentInput[] = [];
+    return {
+        calls,
+        deps: { callAgent: async (input: AgentInput) => { calls.push(input); return result; } },
+    };
+}
+
+describe("generatePlan", () => {
+    let userId: string;
+    const TODAY = "2026-06-22";
+    const YESTERDAY = "2026-06-21";
+
+    beforeEach(async () => {
+        const user = await seedGenerateUser();
+        userId = user.id;
+        await cleanupGenerateUser(userId);
+    });
+
+    afterAll(async () => {
+        const user = await prisma.user.findUnique({ where: { email: TEST_EMAIL_GENERATE } });
+        if (user) {
+            await cleanupGenerateUser(user.id);
+            await prisma.user.delete({ where: { id: user.id } });
+        }
+    });
+
+    async function createDraftWithBlocks() {
+        const draft = await prisma.dayPlan.create({
+            data: {
+                userId, date: TODAY, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT",
+                blocks: {
+                    create: [
+                        { type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" },
+                        { type: "ANCHOR", name: "Lunch", startTime: "12:00", endTime: "13:00" },
+                    ],
+                },
+            },
+            select: { id: true, blocks: { select: { id: true, type: true } } },
+        });
+        const container = draft.blocks.find(b => b.type === "CONTAINER")!;
+        return { draftId: draft.id, containerId: container.id };
+    }
+
+    it("passes CONTAINER-only blocks and pre-computed remainingMins to the agent", async () => {
+        const { draftId } = await createDraftWithBlocks();
+        await prisma.task.create({
+            data: { userId, title: "Half done", estimatedMins: 60, progress: 50, status: "IN_PROGRESS" },
+        });
+
+        const agent = recordingAgent({ assignments: [], unschedulable: [] });
+        await generatePlan(userId, draftId, agent.deps);
+
+        expect(agent.calls).toHaveLength(1);
+        const input = agent.calls[0];
+        expect(input.blocks.map(b => b.name)).toEqual(["Deep Work"]); // ANCHOR excluded
+        expect(input.tasks).toHaveLength(1);
+        expect(input.tasks[0]).toMatchObject({ title: "Half done", remainingMins: 30 });
+    });
+
+    it("writes agent assignments to the DB and returns the populated draft", async () => {
+        const { draftId, containerId } = await createDraftWithBlocks();
+        const taskA = await prisma.task.create({
+            data: { userId, title: "A", estimatedMins: 30, status: "TODO" },
+        });
+        const taskB = await prisma.task.create({
+            data: { userId, title: "B", estimatedMins: 45, status: "TODO" },
+        });
+
+        const agent = recordingAgent({
+            assignments: [
+                { taskId: taskB.id, blockId: containerId, blockOrder: 0 },
+                { taskId: taskA.id, blockId: containerId, blockOrder: 1 },
+            ],
+            unschedulable: [],
+        });
+
+        const result = await generatePlan(userId, draftId, agent.deps);
+
+        const writtenA = await prisma.task.findUnique({ where: { id: taskA.id } });
+        const writtenB = await prisma.task.findUnique({ where: { id: taskB.id } });
+        expect(writtenA).toMatchObject({ plannedBlockId: containerId, blockOrder: 1 });
+        expect(writtenB).toMatchObject({ plannedBlockId: containerId, blockOrder: 0 });
+
+        const containerBlock = result.plan.blocks.find(b => b.id === containerId)!;
+        expect(containerBlock.tasks.map(t => t.title)).toEqual(["B", "A"]); // ordered by blockOrder
+    });
+
+    it("returns the unschedulable list and ignores assignments to unknown blocks/tasks", async () => {
+        const { draftId, containerId } = await createDraftWithBlocks();
+        const taskA = await prisma.task.create({
+            data: { userId, title: "A", estimatedMins: 30, status: "TODO" },
+        });
+
+        const agent = recordingAgent({
+            assignments: [
+                { taskId: taskA.id, blockId: "nonexistent-block", blockOrder: 0 },
+                { taskId: "nonexistent-task", blockId: containerId, blockOrder: 0 },
+            ],
+            unschedulable: [{ taskId: taskA.id, reason: "no fit" }],
+        });
+
+        const result = await generatePlan(userId, draftId, agent.deps);
+
+        const written = await prisma.task.findUnique({ where: { id: taskA.id } });
+        expect(written!.plannedBlockId).toBeNull();
+        expect(written!.blockOrder).toBeNull();
+        expect(result.unschedulable).toEqual([{ taskId: taskA.id, reason: "no fit" }]);
+    });
+
+    it("includes carry-over tasks from yesterday's ACTIVE plan in the agent input", async () => {
+        const { draftId } = await createDraftWithBlocks();
+        const yesterdayActive = await prisma.dayPlan.create({
+            data: {
+                userId, date: YESTERDAY, wakeTime: "07:00", sleepTime: "23:00", status: "ACTIVE",
+                blocks: { create: [{ type: "CONTAINER", name: "Y", startTime: "09:00", endTime: "12:00" }] },
+            },
+            select: { blocks: { select: { id: true } } },
+        });
+        await prisma.task.create({
+            data: { userId, title: "Carry", estimatedMins: 40, status: "IN_PROGRESS", plannedBlockId: yesterdayActive.blocks[0].id },
+        });
+
+        const agent = recordingAgent({ assignments: [], unschedulable: [] });
+        await generatePlan(userId, draftId, agent.deps);
+
+        expect(agent.calls[0].tasks.map(t => t.title)).toContain("Carry");
+    });
+
+    it("throws PlanNotFoundError when the plan does not exist", async () => {
+        const agent = recordingAgent({ assignments: [], unschedulable: [] });
+        await expect(generatePlan(userId, "nonexistent", agent.deps)).rejects.toThrow(PlanNotFoundError);
+    });
+
+    it("throws PlanNotDraftError when the plan is not a DRAFT", async () => {
+        const active = await prisma.dayPlan.create({
+            data: { userId, date: TODAY, wakeTime: "07:00", sleepTime: "23:00", status: "ACTIVE" },
+        });
+        const agent = recordingAgent({ assignments: [], unschedulable: [] });
+        await expect(generatePlan(userId, active.id, agent.deps)).rejects.toThrow(PlanNotDraftError);
     });
 });

@@ -83,6 +83,13 @@ export type DayPlan = {
 export type GetDayPlanResponse = ApiResult<DayPlan>;
 export type CreateDayPlanResponse = ApiResult<{ id: string }>;
 
+export type UnschedulableTask = { taskId: string; reason: string };
+export type GeneratePlanResult = {
+    plan: DayPlan;
+    unschedulable: UnschedulableTask[];
+};
+export type GeneratePlanResponse = ApiResult<GeneratePlanResult>;
+
 export type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
 
 export type BacklogTask = {
