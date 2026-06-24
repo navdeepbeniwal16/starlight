@@ -15,6 +15,7 @@ export function authenticate(req: Request, res: Response, next: NextFunction) : 
     try {
         const payload = verifyToken(token);
         req.user = { sub: payload.sub as string, email: payload.email as string};
+        res.locals["userId"] = payload.sub;
         next();
     } catch (error) {
         if(error instanceof JsonWebTokenError) {
