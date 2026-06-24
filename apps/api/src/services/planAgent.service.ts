@@ -62,6 +62,17 @@ export type RawTask = {
 
 // ─── Helpers (independently testable) ────────────────────────────────────
 
+/**
+ * Work left on a task: its estimate scaled down by how far it's progressed.
+ *
+ * @param estimatedMins - The task's full time estimate, in minutes.
+ * @param progress - Completion percentage (0–100), or null (treated as 0).
+ * @returns Remaining minutes, rounded to the nearest integer.
+ */
+export function remainingMinsOf(estimatedMins: number, progress: number | null): number {
+    return Math.round(estimatedMins * (1 - (progress ?? 0) / 100));
+}
+
 // Shapes the agent input: only CONTAINER blocks are schedulable, and each task's
 // remaining work is pre-computed server-side as estimatedMins × (1 − progress/100).
 export function buildAgentInput(blocks: RawBlock[], tasks: RawTask[]): AgentInput {
@@ -78,7 +89,7 @@ export function buildAgentInput(blocks: RawBlock[], tasks: RawTask[]): AgentInpu
         tasks: tasks.map(t => ({
             id: t.id,
             title: t.title,
-            remainingMins: Math.round(t.estimatedMins * (1 - (t.progress ?? 0) / 100)),
+            remainingMins: remainingMinsOf(t.estimatedMins, t.progress),
             effort: t.effort,
             priority: t.priority,
             deadline: t.deadline ? t.deadline.toISOString() : null,

@@ -11,6 +11,7 @@ export type PlannedTask = {
     id: string;
     title: string;
     estimatedMins: number;
+    remainingMins: number;
     blockOrder: number | null;
     status: TaskStatus;
 };
@@ -34,7 +35,21 @@ export type DayPlan = {
     blocks: PlannedBlock[];
 };
 
+export type UnschedulableTask = {
+    taskId: string;
+    title: string;
+    estimatedMins: number;
+    remainingMins: number;
+    reason: string;
+};
+
 export type GeneratePlanResult = {
     plan: DayPlan;
-    unschedulable: { taskId: string; reason: string }[];
+    unschedulable: UnschedulableTask[];
+};
+
+export type PlannedTaskPlacement = {
+    id: string;
+    plannedBlockId: string | null;
+    blockOrder: number | null;
 };

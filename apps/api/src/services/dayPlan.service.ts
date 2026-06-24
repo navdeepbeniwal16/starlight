@@ -1,11 +1,13 @@
 import { prisma } from "../lib/prisma";
-import type { DayPlan, GeneratePlanResult, ReviewTasks } from "../types/dayPlan.types";
-import { generateSchedule, type RawTask, type ScheduleDeps } from "./planAgent.service";
+import type { DayPlan, GeneratePlanResult, PlannedTaskPlacement, ReviewTasks } from "../types/dayPlan.types";
+import { generateSchedule, remainingMinsOf, type RawTask, type ScheduleDeps } from "./planAgent.service";
+import { TaskNotFoundError } from "./task.service";
 
 export class NoTemplateError extends Error {}
 export class NoContainerBlocksError extends Error {}
 export class PlanNotFoundError extends Error {}
 export class PlanNotInDraftError extends Error {}
+export class InvalidBlockError extends Error {}
 
 export async function createDraftPlan(
     userId: string,
@@ -143,6 +145,7 @@ const populatedPlanSelect = {
                     id: true,
                     title: true,
                     estimatedMins: true,
+                    progress: true,
                     blockOrder: true,
                     status: true,
                 }
@@ -151,11 +154,28 @@ const populatedPlanSelect = {
     }
 } as const;
 
+function fetchPopulatedPlan(where: { id: string } | { userId: string; date: string; status: 'ACTIVE' }) {
+    return prisma.dayPlan.findFirst({ where, select: populatedPlanSelect });
+}
+type RawPopulatedPlan = NonNullable<Awaited<ReturnType<typeof fetchPopulatedPlan>>>;
+
+// Derives each task's remainingMins and drops the raw progress field.
+function toDayPlan(raw: RawPopulatedPlan): DayPlan {
+    return {
+        ...raw,
+        blocks: raw.blocks.map(b => ({
+            ...b,
+            tasks: b.tasks.map(({ progress, ...t }) => ({
+                ...t,
+                remainingMins: remainingMinsOf(t.estimatedMins, progress),
+            })),
+        })),
+    };
+}
+
 export async function getDayPlan(userId: string, date: string): Promise<DayPlan | null> {
-    return prisma.dayPlan.findFirst({
-        where: { userId, date, status: 'ACTIVE' },
-        select: populatedPlanSelect,
-    });
+    const raw = await fetchPopulatedPlan({ userId, date, status: 'ACTIVE' });
+    return raw ? toDayPlan(raw) : null;
 }
 
 // Fetches schedulable tasks for a draft: carry-over (from yesterday's ACTIVE plan,
@@ -241,10 +261,100 @@ export async function generatePlan(
         await prisma.$transaction(writes);
     }
 
-    const populated = await prisma.dayPlan.findUnique({
-        where: { id: planId },
-        select: populatedPlanSelect,
+    const populated = await fetchPopulatedPlan({ id: planId });
+
+    // The agent returns only taskIds + reason; enrich with display fields so the
+    // response is self-contained (the reason isn't persisted anywhere).
+    const taskById = new Map(tasks.map(t => [t.id, t]));
+    const unschedulable = result.unschedulable.flatMap(u => {
+        const t = taskById.get(u.taskId);
+        return t ? [{
+            taskId: u.taskId,
+            title: t.title,
+            estimatedMins: t.estimatedMins,
+            remainingMins: remainingMinsOf(t.estimatedMins, t.progress),
+            reason: u.reason,
+        }] : [];
     });
 
-    return { plan: populated as DayPlan, unschedulable: result.unschedulable };
+    return { plan: toDayPlan(populated as RawPopulatedPlan), unschedulable };
+}
+
+/**
+ * Moves a task within a DRAFT plan, or returns it to the backlog.
+ *
+ * The server owns ordering: each affected block is renumbered to a contiguous
+ * 0..n-1 sequence, so blockOrder never collides or leaves gaps regardless of the
+ * caller. Callers should issue one call per move — not a batch of per-task renumbers.
+ *
+ * @param userId - Owner of the plan and task.
+ * @param planId - The DRAFT plan being adjusted.
+ * @param taskId - The task to place.
+ * @param blockId - Target CONTAINER block, or null to return the task to the backlog.
+ * @param blockOrder - Desired slot within the block, clamped into range. Ignored when blockId is null.
+ * @returns The task's resulting placement (plannedBlockId and blockOrder).
+ * @throws {PlanNotFoundError} If the plan does not exist or is not owned by the user.
+ * @throws {PlanNotInDraftError} If the plan is not a DRAFT.
+ * @throws {TaskNotFoundError} If the task does not exist or is not owned by the user.
+ * @throws {InvalidBlockError} If blockId is set but is not a CONTAINER block of the plan.
+ */
+export async function adjustPlanTask(
+    userId: string,
+    planId: string,
+    taskId: string,
+    blockId: string | null,
+    blockOrder: number,
+): Promise<PlannedTaskPlacement> {
+    const plan = await prisma.dayPlan.findFirst({
+        where: { id: planId, userId },
+        select: { status: true, blocks: { select: { id: true, type: true } } },
+    });
+    if (!plan) throw new PlanNotFoundError();
+    if (plan.status !== 'DRAFT') throw new PlanNotInDraftError();
+
+    const task = await prisma.task.findFirst({
+        where: { id: taskId, userId },
+        select: { id: true, plannedBlockId: true },
+    });
+    if (!task) throw new TaskNotFoundError();
+
+    if (blockId !== null) {
+        const block = plan.blocks.find(b => b.id === blockId);
+        if (!block || block.type !== 'CONTAINER') throw new InvalidBlockError();
+    }
+
+    const sourceBlockId = task.plannedBlockId;
+
+    return prisma.$transaction(async (tx) => {
+        const orderedIds = async (blk: string, exceptId?: string): Promise<string[]> => {
+            const rows = await tx.task.findMany({
+                where: { plannedBlockId: blk, ...(exceptId ? { id: { not: exceptId } } : {}) },
+                orderBy: { blockOrder: 'asc' },
+                select: { id: true },
+            });
+            return rows.map(r => r.id);
+        };
+        const renumber = async (ids: string[]): Promise<void> => {
+            for (let i = 0; i < ids.length; i++) {
+                await tx.task.update({ where: { id: ids[i] }, data: { blockOrder: i } });
+            }
+        };
+
+        if (blockId === null) {
+            await tx.task.update({ where: { id: taskId }, data: { plannedBlockId: null, blockOrder: null } });
+            if (sourceBlockId) await renumber(await orderedIds(sourceBlockId));
+        } else {
+            const siblings = await orderedIds(blockId, taskId);
+            const insertAt = Math.min(Math.max(blockOrder, 0), siblings.length);
+            const next = [...siblings.slice(0, insertAt), taskId, ...siblings.slice(insertAt)];
+            await tx.task.update({ where: { id: taskId }, data: { plannedBlockId: blockId } });
+            await renumber(next);
+            if (sourceBlockId && sourceBlockId !== blockId) await renumber(await orderedIds(sourceBlockId));
+        }
+
+        return tx.task.findUniqueOrThrow({
+            where: { id: taskId },
+            select: { id: true, plannedBlockId: true, blockOrder: true },
+        });
+    });
 }

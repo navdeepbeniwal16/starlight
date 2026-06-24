@@ -57,6 +57,7 @@ export type PlannedTask = {
     id: string;
     title: string;
     estimatedMins: number;
+    remainingMins: number;
     blockOrder: number | null;
     status: TaskStatus;
 };
@@ -83,12 +84,25 @@ export type DayPlan = {
 export type GetDayPlanResponse = ApiResult<DayPlan>;
 export type CreateDayPlanResponse = ApiResult<{ id: string }>;
 
-export type UnschedulableTask = { taskId: string; reason: string };
+export type UnschedulableTask = {
+    taskId: string;
+    title: string;
+    estimatedMins: number;
+    remainingMins: number;
+    reason: string;
+};
 export type GeneratePlanResult = {
     plan: DayPlan;
     unschedulable: UnschedulableTask[];
 };
 export type GeneratePlanResponse = ApiResult<GeneratePlanResult>;
+
+export type PlannedTaskPlacement = {
+    id: string;
+    plannedBlockId: string | null;
+    blockOrder: number | null;
+};
+export type AdjustPlanTaskResponse = ApiResult<PlannedTaskPlacement>;
 
 export type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
 

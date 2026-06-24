@@ -1,7 +1,8 @@
 import { Router, Request, Response } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
-import { getDayPlan, createDraftPlan, getPlanTasks, generatePlan, NoTemplateError, NoContainerBlocksError, PlanNotFoundError, PlanNotInDraftError } from "../services/dayPlan.service";
+import { getDayPlan, createDraftPlan, getPlanTasks, generatePlan, adjustPlanTask, NoTemplateError, NoContainerBlocksError, PlanNotFoundError, PlanNotInDraftError, InvalidBlockError } from "../services/dayPlan.service";
 import { AgentError } from "../services/planAgent.service";
+import { TaskNotFoundError } from "../services/task.service";
 
 const router = Router();
 
@@ -116,6 +117,51 @@ router.post("/:id/generate", authenticate, async (req: Request, res: Response): 
         }
         if (error instanceof AgentError) {
             res.status(502).json({ success: false, error: 'The planning agent could not generate a plan. Please try again.' });
+            return;
+        }
+        throw error;
+    }
+});
+
+router.patch("/:id/tasks/:taskId", authenticate, async (req: Request, res: Response): Promise<void> => {
+    res.set("Cache-Control", "no-store, private");
+
+    const { blockId, blockOrder } = (req.body ?? {}) as { blockId?: unknown; blockOrder?: unknown };
+
+    if (blockId !== null && typeof blockId !== 'string') {
+        res.status(400).json({ success: false, error: 'blockId must be a string or null' });
+        return;
+    }
+    if (blockId !== null && (!Number.isInteger(blockOrder) || (blockOrder as number) < 0)) {
+        res.status(400).json({ success: false, error: 'blockOrder must be a non-negative integer' });
+        return;
+    }
+
+    try {
+        const result = await adjustPlanTask(
+            req.user!.sub,
+            req.params.id as string,
+            req.params.taskId as string,
+            blockId,
+            (blockOrder as number) ?? 0,
+        );
+        res.status(200).json({ success: true, data: result });
+    } catch (error) {
+        if (error instanceof PlanNotFoundError) {
+            res.status(404).json({ success: false, error: 'Plan not found' });
+            return;
+        }
+        if (error instanceof TaskNotFoundError) {
+            res.status(404).json({ success: false, error: 'Task not found' });
+            return;
+        }
+        if (error instanceof PlanNotInDraftError) {
+            // 409 to match POST /:id/generate — same "wrong plan state" conflict.
+            res.status(409).json({ success: false, error: 'Plan is not a draft and cannot be adjusted' });
+            return;
+        }
+        if (error instanceof InvalidBlockError) {
+            res.status(400).json({ success: false, error: 'Target block is not a schedulable block of this plan' });
             return;
         }
         throw error;

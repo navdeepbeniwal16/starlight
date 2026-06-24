@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma";
-import { getDayPlan, createDraftPlan, getPlanTasks, generatePlan, NoTemplateError, NoContainerBlocksError, PlanNotFoundError, PlanNotDraftError } from "./dayPlan.service";
+import { getDayPlan, createDraftPlan, getPlanTasks, generatePlan, adjustPlanTask, NoTemplateError, NoContainerBlocksError, PlanNotFoundError, PlanNotInDraftError, InvalidBlockError } from "./dayPlan.service";
+import { TaskNotFoundError } from "./task.service";
 import type { AgentInput } from "./planAgent.service";
 
 const TEST_EMAIL = "test-dayplan-service@starlight.test";
@@ -564,6 +565,23 @@ describe("generatePlan", () => {
         expect(containerBlock.tasks.map(t => t.title)).toEqual(["B", "A"]); // ordered by blockOrder
     });
 
+    it("returns remainingMins (estimate scaled by progress) on populated tasks", async () => {
+        const { draftId, containerId } = await createDraftWithBlocks();
+        const task = await prisma.task.create({
+            data: { userId, title: "Half done", estimatedMins: 60, progress: 75, status: "IN_PROGRESS" },
+        });
+
+        const agent = recordingAgent({
+            assignments: [{ taskId: task.id, blockId: containerId, blockOrder: 0 }],
+            unschedulable: [],
+        });
+
+        const result = await generatePlan(userId, draftId, agent.deps);
+
+        const planned = result.plan.blocks.find(b => b.id === containerId)!.tasks[0];
+        expect(planned).toMatchObject({ estimatedMins: 60, remainingMins: 15 });
+    });
+
     it("returns the unschedulable list and ignores assignments to unknown blocks/tasks", async () => {
         const { draftId, containerId } = await createDraftWithBlocks();
         const taskA = await prisma.task.create({
@@ -583,7 +601,9 @@ describe("generatePlan", () => {
         const written = await prisma.task.findUnique({ where: { id: taskA.id } });
         expect(written!.plannedBlockId).toBeNull();
         expect(written!.blockOrder).toBeNull();
-        expect(result.unschedulable).toEqual([{ taskId: taskA.id, reason: "no fit" }]);
+        expect(result.unschedulable).toEqual([
+            { taskId: taskA.id, title: "A", estimatedMins: 30, remainingMins: 30, reason: "no fit" },
+        ]);
     });
 
     it("includes carry-over tasks from yesterday's ACTIVE plan in the agent input", async () => {
@@ -610,11 +630,194 @@ describe("generatePlan", () => {
         await expect(generatePlan(userId, "nonexistent", agent.deps)).rejects.toThrow(PlanNotFoundError);
     });
 
-    it("throws PlanNotDraftError when the plan is not a DRAFT", async () => {
+    it("throws PlanNotInDraftError when the plan is not a DRAFT", async () => {
         const active = await prisma.dayPlan.create({
             data: { userId, date: TODAY, wakeTime: "07:00", sleepTime: "23:00", status: "ACTIVE" },
         });
         const agent = recordingAgent({ assignments: [], unschedulable: [] });
-        await expect(generatePlan(userId, active.id, agent.deps)).rejects.toThrow(PlanNotDraftError);
+        await expect(generatePlan(userId, active.id, agent.deps)).rejects.toThrow(PlanNotInDraftError);
+    });
+});
+
+// ─── adjustPlanTask ───────────────────────────────────────────────────────────
+
+const TEST_EMAIL_ADJUST = "test-adjust-plan-task@starlight.test";
+
+async function seedAdjustUser() {
+    return prisma.user.upsert({
+        where: { email: TEST_EMAIL_ADJUST },
+        update: {},
+        create: {
+            email: TEST_EMAIL_ADJUST,
+            passwordHash: "not-a-real-hash",
+            firstName: "Adjust",
+            lastName: "User",
+        },
+    });
+}
+
+async function cleanupAdjustUser(userId: string) {
+    const plans = await prisma.dayPlan.findMany({
+        where: { userId },
+        select: { blocks: { select: { id: true } } },
+    });
+    const blockIds = plans.flatMap(p => p.blocks.map(b => b.id));
+    if (blockIds.length > 0) {
+        await prisma.task.updateMany({
+            where: { plannedBlockId: { in: blockIds } },
+            data: { plannedBlockId: null, blockOrder: null },
+        });
+        await prisma.plannedBlock.deleteMany({ where: { id: { in: blockIds } } });
+    }
+    await prisma.task.deleteMany({ where: { userId } });
+    await prisma.dayPlan.deleteMany({ where: { userId } });
+}
+
+describe("adjustPlanTask", () => {
+    let userId: string;
+    const TODAY = "2026-06-22";
+
+    beforeEach(async () => {
+        const user = await seedAdjustUser();
+        userId = user.id;
+        await cleanupAdjustUser(userId);
+    });
+
+    afterAll(async () => {
+        const user = await prisma.user.findUnique({ where: { email: TEST_EMAIL_ADJUST } });
+        if (user) {
+            await cleanupAdjustUser(user.id);
+            await prisma.user.delete({ where: { id: user.id } });
+        }
+    });
+
+    // Creates a DRAFT with two CONTAINER blocks + one ANCHOR, and a task scheduled
+    // into the first container block.
+    async function seedDraft() {
+        const draft = await prisma.dayPlan.create({
+            data: {
+                userId, date: TODAY, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT",
+                blocks: {
+                    create: [
+                        { type: "CONTAINER", name: "Morning", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" },
+                        { type: "CONTAINER", name: "Afternoon", startTime: "14:00", endTime: "17:00", energyLevel: "MEDIUM" },
+                        { type: "ANCHOR", name: "Lunch", startTime: "12:00", endTime: "13:00" },
+                    ],
+                },
+            },
+            select: { id: true, blocks: { select: { id: true, name: true, type: true } } },
+        });
+        const morning = draft.blocks.find(b => b.name === "Morning")!;
+        const afternoon = draft.blocks.find(b => b.name === "Afternoon")!;
+        const anchor = draft.blocks.find(b => b.type === "ANCHOR")!;
+        const taskRow = await prisma.task.create({
+            data: { userId, title: "Task", estimatedMins: 30, status: "TODO", plannedBlockId: morning.id, blockOrder: 0 },
+        });
+        return { draftId: draft.id, morningId: morning.id, afternoonId: afternoon.id, anchorId: anchor.id, taskId: taskRow.id };
+    }
+
+    it("moves a task to a different block, clamping blockOrder into range", async () => {
+        const { draftId, afternoonId, taskId } = await seedDraft();
+
+        // Afternoon is empty, so an out-of-range index clamps to 0.
+        const result = await adjustPlanTask(userId, draftId, taskId, afternoonId, 2);
+
+        expect(result).toMatchObject({ id: taskId, plannedBlockId: afternoonId, blockOrder: 0 });
+        const written = await prisma.task.findUnique({ where: { id: taskId } });
+        expect(written).toMatchObject({ plannedBlockId: afternoonId, blockOrder: 0 });
+    });
+
+    it("inserts at the requested slot and renumbers the block contiguously", async () => {
+        const { draftId, morningId, taskId } = await seedDraft();
+        // Morning already holds the seed task at order 0; add two more after it.
+        const t1 = await prisma.task.create({
+            data: { userId, title: "T1", estimatedMins: 30, status: "TODO", plannedBlockId: morningId, blockOrder: 1 },
+        });
+        const t2 = await prisma.task.create({
+            data: { userId, title: "T2", estimatedMins: 30, status: "TODO", plannedBlockId: morningId, blockOrder: 2 },
+        });
+
+        // Move the seed task from slot 0 to slot 1 → expect order [T1, Task, T2].
+        const result = await adjustPlanTask(userId, draftId, taskId, morningId, 1);
+
+        expect(result).toMatchObject({ plannedBlockId: morningId, blockOrder: 1 });
+        const rows = await prisma.task.findMany({
+            where: { plannedBlockId: morningId },
+            orderBy: { blockOrder: 'asc' },
+            select: { id: true, blockOrder: true },
+        });
+        expect(rows).toEqual([
+            { id: t1.id, blockOrder: 0 },
+            { id: taskId, blockOrder: 1 },
+            { id: t2.id, blockOrder: 2 },
+        ]);
+    });
+
+    it("closes the gap in the source block when moving a task out of it", async () => {
+        const { draftId, morningId, afternoonId, taskId } = await seedDraft();
+        // Morning: [Task(0), keep(1)]. Move Task out → keep should renumber to 0.
+        const keep = await prisma.task.create({
+            data: { userId, title: "Keep", estimatedMins: 30, status: "TODO", plannedBlockId: morningId, blockOrder: 1 },
+        });
+
+        await adjustPlanTask(userId, draftId, taskId, afternoonId, 0);
+
+        const written = await prisma.task.findUnique({ where: { id: keep.id } });
+        expect(written).toMatchObject({ plannedBlockId: morningId, blockOrder: 0 });
+    });
+
+    it("returns a task to the backlog when blockId is null", async () => {
+        const { draftId, taskId } = await seedDraft();
+
+        const result = await adjustPlanTask(userId, draftId, taskId, null, 0);
+
+        expect(result).toMatchObject({ id: taskId, plannedBlockId: null, blockOrder: null });
+        const written = await prisma.task.findUnique({ where: { id: taskId } });
+        expect(written!.plannedBlockId).toBeNull();
+        expect(written!.blockOrder).toBeNull();
+    });
+
+    it("throws PlanNotInDraftError when the plan is not a DRAFT", async () => {
+        const { draftId, afternoonId, taskId } = await seedDraft();
+        await prisma.dayPlan.update({ where: { id: draftId }, data: { status: "ACTIVE" } });
+
+        await expect(adjustPlanTask(userId, draftId, taskId, afternoonId, 0)).rejects.toThrow(PlanNotInDraftError);
+    });
+
+    it("throws InvalidBlockError when the target block is an ANCHOR block", async () => {
+        const { draftId, anchorId, taskId } = await seedDraft();
+
+        await expect(adjustPlanTask(userId, draftId, taskId, anchorId, 0)).rejects.toThrow(InvalidBlockError);
+    });
+
+    it("throws InvalidBlockError when the target block belongs to another plan", async () => {
+        const { draftId, taskId } = await seedDraft();
+        const otherPlan = await prisma.dayPlan.create({
+            data: {
+                userId, date: "2026-06-23", wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT",
+                blocks: { create: [{ type: "CONTAINER", name: "Other", startTime: "09:00", endTime: "12:00" }] },
+            },
+            select: { blocks: { select: { id: true } } },
+        });
+
+        await expect(adjustPlanTask(userId, draftId, taskId, otherPlan.blocks[0].id, 0)).rejects.toThrow(InvalidBlockError);
+    });
+
+    it("throws TaskNotFoundError when the task does not exist", async () => {
+        const { draftId, afternoonId } = await seedDraft();
+
+        await expect(adjustPlanTask(userId, draftId, "nonexistent", afternoonId, 0)).rejects.toThrow(TaskNotFoundError);
+    });
+
+    it("throws PlanNotFoundError when the plan belongs to another user", async () => {
+        const { draftId, afternoonId, taskId } = await seedDraft();
+        const other = await prisma.user.create({
+            data: { email: "other-adjust@starlight.test", passwordHash: "x", firstName: "O", lastName: "U" },
+        });
+        try {
+            await expect(adjustPlanTask(other.id, draftId, taskId, afternoonId, 0)).rejects.toThrow(PlanNotFoundError);
+        } finally {
+            await prisma.user.delete({ where: { id: other.id } });
+        }
     });
 });
