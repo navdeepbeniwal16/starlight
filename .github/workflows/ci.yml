@@ -53,3 +53,5 @@ jobs:
 
       - name: Test
         run: npx turbo run test
+        env:
+          DATABASE_URL: postgresql://starlight:starlight@localhost:5432/starlight_test
