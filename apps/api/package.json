@@ -38,6 +38,9 @@
     "resend": "^6.12.3",
     "zod": "^4.4.3"
   },
+  "optionalDependencies": {
+    "@swc/core-linux-x64-gnu": "^1.15.41"
+  },
   "devDependencies": {
     "@swc/core": "^1.15.41",
     "@swc/jest": "^0.2.39",
