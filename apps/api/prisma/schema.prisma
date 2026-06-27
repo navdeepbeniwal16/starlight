@@ -6,8 +6,123 @@ datasource db {
   provider = "postgresql"
 }
 
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  dayTemplate  DayTemplate?
+  dayPlans     DayPlan[]
+  tasks        Task[]
+}
+
+model DayTemplate {
+  id        String             @id @default(cuid())
+  userId    String             @unique
+  user      User               @relation(fields: [userId], references: [id])
+  wakeTime  String
+  sleepTime String
+  blocks    Block[]
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+}
+
+model Block {
+  id            String       @id @default(cuid())
+  dayTemplateId String
+  dayTemplate   DayTemplate  @relation(fields: [dayTemplateId], references: [id])
+  type          BlockType
+  name          String
+  startTime     String
+  endTime       String
+  energyLevel   EnergyLevel?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+	@@map("DayTemplateBlock")
+}
+
+enum BlockType {
+  CONTAINER
+  ANCHOR
+  NO_TASK
+}
+
+enum EnergyLevel {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+model DayPlan {
+  id        String         @id @default(cuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id])
+  date      String
+  wakeTime  String
+  sleepTime String
+  status    DayPlanStatus  @default(DRAFT)
+  blocks    PlannedBlock[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@unique([userId, date, status])
+}
+
+model PlannedBlock {
+  id          String       @id @default(cuid())
+  dayPlanId   String
+  dayPlan     DayPlan      @relation(fields: [dayPlanId], references: [id])
+  type        BlockType
+  name        String
+  startTime   String
+  endTime     String
+  energyLevel EnergyLevel?
+  tasks       Task[]
+}
+
+model Task {
+  id             String        @id @default(cuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id])
+  title          String
+  estimatedMins  Int
+  status         TaskStatus    @default(TODO)
+  blockOrder     Int?
+  plannedBlockId String?
+  plannedBlock   PlannedBlock? @relation(fields: [plannedBlockId], references: [id])
+  priority       Priority?
+  deadline       DateTime?
+  progress       Int?
+  notes          String?
+  effort         EnergyLevel?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+enum DayPlanStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum Priority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
 model AppConfig {
   id    Int    @id @default(autoincrement())
   key   String @unique
   value String
 }
+

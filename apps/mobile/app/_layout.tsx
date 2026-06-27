@@ -1,13 +1,19 @@
 import { Stack } from "expo-router";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { trpc, trpcClient, queryClient } from "../lib/trpc";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
 
 export default function RootLayout() {
   return (
-    <trpc.Provider client={trpcClient} queryClient={queryClient}>
+    <GestureHandlerRootView style={{ flex: 1 }}>
       <QueryClientProvider client={queryClient}>
-        <Stack />
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="planning" options={{ presentation: "modal" }} />
+        </Stack>
       </QueryClientProvider>
-    </trpc.Provider>
+    </GestureHandlerRootView>
   );
 }

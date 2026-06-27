@@ -1,29 +1,33 @@
-import { View, Text, StyleSheet } from "react-native";
-import { StatusBar } from "expo-status-bar";
-import { trpc } from "../lib/trpc";
+import { useRouter } from "expo-router";
+import { useEffect } from "react";
+import { api } from "../lib/api";
+import { ActivityIndicator, View } from "react-native";
+import { getToken } from "../lib/auth-token";
+import { useAuthStore } from "../stores/auth.store";
 
 export default function HomeScreen() {
-  const { data: appName, isLoading, error } = trpc.appName.useQuery();
-
+  const router = useRouter();
+  const setAuth = useAuthStore((state) => state.setAuth);
+  
+  useEffect(() => {
+    const checkSession = async () => {
+      const result = await api.getMe();
+      
+      if(result.ok) {
+        const token = await getToken();
+        await setAuth(result.data, token!);
+        router.replace('/(onboarding)');
+      } else {
+        router.replace('/(auth)/signup');
+      }
+    }
+    
+    checkSession();
+  }, []);
+  
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>
-        {isLoading ? "Loading..." : error ? "Error" : appName}
-      </Text>
-      <StatusBar style="auto" />
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <ActivityIndicator />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#fff",
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: "bold",
-  },
-});
