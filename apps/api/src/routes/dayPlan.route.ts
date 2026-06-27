@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
-import { getDayPlan, createDraftPlan, getPlanTasks, generatePlan, adjustPlanTask, NoTemplateError, NoContainerBlocksError, PlanNotFoundError, PlanNotInDraftError, InvalidBlockError } from "../services/dayPlan.service";
+import { getDayPlan, createDraftPlan, getPlanTasks, generatePlan, adjustPlanTask, confirmPlan, NoTemplateError, NoContainerBlocksError, PlanNotFoundError, PlanNotInDraftError, InvalidBlockError } from "../services/dayPlan.service";
 import { AgentError } from "../services/planAgent.service";
 import { TaskNotFoundError } from "../services/task.service";
 
@@ -162,6 +162,28 @@ router.patch("/:id/tasks/:taskId", authenticate, async (req: Request, res: Respo
         }
         if (error instanceof InvalidBlockError) {
             res.status(400).json({ success: false, error: 'Target block is not a schedulable block of this plan' });
+            return;
+        }
+        throw error;
+    }
+});
+
+router.post("/:id/confirm", authenticate, async (req: Request, res: Response): Promise<void> => {
+    res.set("Cache-Control", "no-store, private");
+
+    const utcOffsetMins = parseTimezoneOffset(req);
+    const nowHHmm = nowTimeString(utcOffsetMins);
+
+    try {
+        const plan = await confirmPlan(req.user!.sub, req.params.id as string, nowHHmm);
+        res.status(200).json({ success: true, data: plan });
+    } catch (error) {
+        if (error instanceof PlanNotFoundError) {
+            res.status(404).json({ success: false, error: 'Plan not found' });
+            return;
+        }
+        if (error instanceof PlanNotInDraftError) {
+            res.status(409).json({ success: false, error: 'Plan is not a draft and cannot be confirmed' });
             return;
         }
         throw error;

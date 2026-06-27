@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import type { BlockType, EnergyLevel } from "@prisma/client";
 import type { DayPlan, GeneratePlanResult, PlannedTaskPlacement, ReviewTasks } from "../types/dayPlan.types";
 import { generateSchedule, remainingMinsOf, type RawTask, type ScheduleDeps } from "./planAgent.service";
 import { TaskNotFoundError } from "./task.service";
@@ -73,11 +74,17 @@ export async function createDraftPlan(
     return { id: plan.id };
 }
 
-function yesterdayOf(dateStr: string): string {
-    const [y, m, d] = dateStr.split('-').map(Number);
-    const dt = new Date(Date.UTC(y, m - 1, d));
-    dt.setUTCDate(dt.getUTCDate() - 1);
-    return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+// The plan whose unfinished tasks carry over into a new plan: the most recent
+// ACTIVE plan dated on or before `onOrBeforeDate`. On a same-day re-plan that's
+// today's ACTIVE plan; if days were skipped it's the latest ACTIVE plan in the
+// past. Using the latest ACTIVE plan (rather than strictly "yesterday") means a
+// skipped day no longer strands an earlier plan's unfinished tasks.
+async function mostRecentActivePlan(userId: string, onOrBeforeDate: string): Promise<{ id: string } | null> {
+    return prisma.dayPlan.findFirst({
+        where: { userId, status: 'ACTIVE', date: { lte: onOrBeforeDate } },
+        orderBy: { date: 'desc' },
+        select: { id: true },
+    });
 }
 
 export async function getPlanTasks(userId: string, planId: string): Promise<ReviewTasks> {
@@ -87,7 +94,7 @@ export async function getPlanTasks(userId: string, planId: string): Promise<Revi
     });
     if (!plan) throw new PlanNotFoundError();
 
-    const yesterday = yesterdayOf(plan.date);
+    const recentActive = await mostRecentActivePlan(userId, plan.date);
 
     const taskSelect = {
         id: true,
@@ -100,16 +107,16 @@ export async function getPlanTasks(userId: string, planId: string): Promise<Revi
     } as const;
 
     const [carriedOver, backlog] = await Promise.all([
-        prisma.task.findMany({
-            where: {
-                userId,
-                status: { not: 'DONE' },
-                plannedBlock: {
-                    dayPlan: { date: yesterday, status: 'ACTIVE' },
+        recentActive
+            ? prisma.task.findMany({
+                where: {
+                    userId,
+                    status: { not: 'DONE' },
+                    plannedBlock: { dayPlanId: recentActive.id },
                 },
-            },
-            select: taskSelect,
-        }),
+                select: taskSelect,
+            })
+            : Promise.resolve([]),
         prisma.task.findMany({
             where: {
                 userId,
@@ -178,11 +185,11 @@ export async function getDayPlan(userId: string, date: string): Promise<DayPlan 
     return raw ? toDayPlan(raw) : null;
 }
 
-// Fetches schedulable tasks for a draft: carry-over (from yesterday's ACTIVE plan,
-// not DONE) plus backlog (unscheduled, not DONE). The two sets are disjoint —
-// carry-over tasks still point at yesterday's block, backlog tasks at none.
+// Fetches schedulable tasks for a draft: carry-over (unfinished tasks from the most
+// recent ACTIVE plan) plus backlog (unscheduled, not DONE). The two sets are
+// disjoint — carry-over tasks still point at that plan's blocks, backlog tasks at none.
 async function getSchedulableTasks(userId: string, planDate: string): Promise<RawTask[]> {
-    const yesterday = yesterdayOf(planDate);
+    const recentActive = await mostRecentActivePlan(userId, planDate);
     const taskSelect = {
         id: true,
         title: true,
@@ -195,14 +202,16 @@ async function getSchedulableTasks(userId: string, planDate: string): Promise<Ra
     } as const;
 
     const [carriedOver, backlog] = await Promise.all([
-        prisma.task.findMany({
-            where: {
-                userId,
-                status: { not: 'DONE' },
-                plannedBlock: { dayPlan: { date: yesterday, status: 'ACTIVE' } },
-            },
-            select: taskSelect,
-        }),
+        recentActive
+            ? prisma.task.findMany({
+                where: {
+                    userId,
+                    status: { not: 'DONE' },
+                    plannedBlock: { dayPlanId: recentActive.id },
+                },
+                select: taskSelect,
+            })
+            : Promise.resolve([]),
         prisma.task.findMany({
             where: { userId, plannedBlockId: null, status: { not: 'DONE' } },
             select: taskSelect,
@@ -357,4 +366,134 @@ export async function adjustPlanTask(
             select: { id: true, plannedBlockId: true, blockOrder: true },
         });
     });
+}
+
+/**
+ * Promotes a DRAFT plan to ACTIVE, becoming the live day plan.
+ *
+ * The confirmed plan always spans the whole day, including time that has already
+ * elapsed. Blocks whose endTime is at or before `nowHHmm` are copied into the
+ * draft so the timeline shows them as history:
+ *   - Re-plan (an ACTIVE plan already exists today): elapsed blocks are taken from
+ *     the old plan *with* their task assignments (blockOrder preserved). Tasks still
+ *     sitting in the old plan's not-yet-elapsed blocks were not re-planned, so they
+ *     are unscheduled. The old ACTIVE plan is then deleted.
+ *   - Fresh plan: elapsed blocks are taken (empty) from the day template, so the
+ *     user can still see the blocks they had but never scheduled into.
+ *
+ * Elapsed blocks the draft already represents (a block that was upcoming when the
+ * draft was created but has since elapsed) are skipped — the draft's own copy,
+ * with any tasks scheduled into it, wins. All of this runs in one transaction.
+ *
+ * @param userId - Owner of the plan.
+ * @param planId - The DRAFT plan to confirm.
+ * @param nowHHmm - Current local time ("HH:mm") used to decide which blocks have elapsed.
+ * @returns The now-ACTIVE, fully populated plan.
+ * @throws {PlanNotFoundError} If the plan does not exist or is not owned by the user.
+ * @throws {PlanNotInDraftError} If the plan is not a DRAFT.
+ */
+type ElapsedSourceBlock = {
+    type: BlockType;
+    name: string;
+    startTime: string;
+    endTime: string;
+    energyLevel: EnergyLevel | null;
+    tasks: { id: string; blockOrder: number | null }[];
+};
+
+export async function confirmPlan(
+    userId: string,
+    planId: string,
+    nowHHmm: string,
+): Promise<DayPlan> {
+    const draft = await prisma.dayPlan.findFirst({
+        where: { id: planId, userId },
+        select: { id: true, date: true, status: true },
+    });
+    if (!draft) throw new PlanNotFoundError();
+    if (draft.status !== 'DRAFT') throw new PlanNotInDraftError();
+
+    await prisma.$transaction(async (tx) => {
+        const oldActive = await tx.dayPlan.findFirst({
+            where: { userId, date: draft.date, status: 'ACTIVE' },
+            select: {
+                id: true,
+                blocks: {
+                    select: {
+                        type: true, name: true, startTime: true, endTime: true, energyLevel: true,
+                        tasks: { select: { id: true, blockOrder: true } },
+                    },
+                },
+            },
+        });
+
+        // Where the elapsed blocks come from: the old plan (with task history) on a
+        // re-plan, or the day template (empty) on a fresh plan.
+        // "HH:mm" strings are zero-padded, so a lexical compare is chronological.
+        let elapsedSource: ElapsedSourceBlock[];
+        if (oldActive) {
+            elapsedSource = oldActive.blocks.filter(b => b.endTime <= nowHHmm);
+        } else {
+            const template = await tx.dayTemplate.findUnique({
+                where: { userId },
+                select: { blocks: { select: { type: true, name: true, startTime: true, endTime: true, energyLevel: true } } },
+            });
+            elapsedSource = (template?.blocks ?? [])
+                .filter(b => b.endTime <= nowHHmm)
+                .map(b => ({ ...b, tasks: [] }));
+        }
+
+        // Skip elapsed blocks the draft already represents (matched by name + endTime,
+        // which clamping leaves intact) so they aren't duplicated.
+        const draftBlocks = await tx.plannedBlock.findMany({
+            where: { dayPlanId: draft.id },
+            select: { name: true, endTime: true },
+        });
+        const draftKeys = new Set(draftBlocks.map(b => `${b.name}|${b.endTime}`));
+
+        for (const block of elapsedSource) {
+            if (draftKeys.has(`${block.name}|${block.endTime}`)) continue;
+            const copy = await tx.plannedBlock.create({
+                data: {
+                    dayPlanId: draft.id,
+                    type: block.type,
+                    name: block.name,
+                    startTime: block.startTime,
+                    endTime: block.endTime,
+                    energyLevel: block.energyLevel,
+                },
+                select: { id: true },
+            });
+            for (const t of block.tasks) {
+                await tx.task.update({
+                    where: { id: t.id },
+                    data: { plannedBlockId: copy.id, blockOrder: t.blockOrder },
+                });
+            }
+        }
+
+        if (oldActive) {
+            // Anything still pointing at the old plan's blocks lives in a non-elapsed
+            // block (elapsed tasks were re-pointed above) and was not re-planned.
+            const remainingBlockIds = (
+                await tx.plannedBlock.findMany({
+                    where: { dayPlanId: oldActive.id },
+                    select: { id: true },
+                })
+            ).map(b => b.id);
+            if (remainingBlockIds.length > 0) {
+                await tx.task.updateMany({
+                    where: { plannedBlockId: { in: remainingBlockIds } },
+                    data: { plannedBlockId: null, blockOrder: null },
+                });
+                await tx.plannedBlock.deleteMany({ where: { dayPlanId: oldActive.id } });
+            }
+            await tx.dayPlan.delete({ where: { id: oldActive.id } });
+        }
+
+        await tx.dayPlan.update({ where: { id: draft.id }, data: { status: 'ACTIVE' } });
+    });
+
+    const populated = await fetchPopulatedPlan({ id: planId });
+    return toDayPlan(populated as RawPopulatedPlan);
 }

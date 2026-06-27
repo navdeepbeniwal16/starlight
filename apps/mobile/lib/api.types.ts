@@ -83,6 +83,7 @@ export type DayPlan = {
 
 export type GetDayPlanResponse = ApiResult<DayPlan>;
 export type CreateDayPlanResponse = ApiResult<{ id: string }>;
+export type ConfirmPlanResponse = ApiResult<DayPlan>;
 
 export type UnschedulableTask = {
     taskId: string;

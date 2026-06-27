@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma";
-import { getDayPlan, createDraftPlan, getPlanTasks, generatePlan, adjustPlanTask, NoTemplateError, NoContainerBlocksError, PlanNotFoundError, PlanNotInDraftError, InvalidBlockError } from "./dayPlan.service";
+import { getDayPlan, createDraftPlan, getPlanTasks, generatePlan, adjustPlanTask, confirmPlan, NoTemplateError, NoContainerBlocksError, PlanNotFoundError, PlanNotInDraftError, InvalidBlockError } from "./dayPlan.service";
 import { TaskNotFoundError } from "./task.service";
 import type { AgentInput } from "./planAgent.service";
 
@@ -389,6 +389,74 @@ describe("getPlanTasks", () => {
         const result = await getPlanTasks(userId, draftPlan.id);
 
         expect(result.carriedOver).toHaveLength(0);
+    });
+
+    it("carries over from an older ACTIVE plan when a day was skipped (no plan yesterday)", async () => {
+        const TWO_DAYS_AGO = "2026-06-18";
+        const draftPlan = await prisma.dayPlan.create({
+            data: { userId, date: TODAY, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT" },
+        });
+        // ACTIVE plan two days ago; nothing was planned yesterday.
+        const olderActive = await prisma.dayPlan.create({
+            data: { userId, date: TWO_DAYS_AGO, wakeTime: "07:00", sleepTime: "23:00", status: "ACTIVE" },
+        });
+        const block = await prisma.plannedBlock.create({
+            data: { dayPlanId: olderActive.id, type: "CONTAINER", name: "Work", startTime: "09:00", endTime: "12:00" },
+        });
+        const stranded = await prisma.task.create({
+            data: { userId, title: "Unfinished", estimatedMins: 30, status: "TODO", plannedBlockId: block.id },
+        });
+
+        const result = await getPlanTasks(userId, draftPlan.id);
+
+        expect(result.carriedOver.map(t => t.id)).toEqual([stranded.id]);
+    });
+
+    it("carries over from today's ACTIVE plan on a same-day re-plan", async () => {
+        const draftPlan = await prisma.dayPlan.create({
+            data: { userId, date: TODAY, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT" },
+        });
+        const todayActive = await prisma.dayPlan.create({
+            data: { userId, date: TODAY, wakeTime: "07:00", sleepTime: "23:00", status: "ACTIVE" },
+        });
+        const block = await prisma.plannedBlock.create({
+            data: { dayPlanId: todayActive.id, type: "CONTAINER", name: "Work", startTime: "09:00", endTime: "12:00" },
+        });
+        const unfinished = await prisma.task.create({
+            data: { userId, title: "Still going", estimatedMins: 30, status: "IN_PROGRESS", plannedBlockId: block.id },
+        });
+
+        const result = await getPlanTasks(userId, draftPlan.id);
+
+        expect(result.carriedOver.map(t => t.id)).toEqual([unfinished.id]);
+    });
+
+    it("carries over only from the most recent ACTIVE plan when several exist", async () => {
+        const draftPlan = await prisma.dayPlan.create({
+            data: { userId, date: TODAY, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT" },
+        });
+        const olderActive = await prisma.dayPlan.create({
+            data: { userId, date: "2026-06-18", wakeTime: "07:00", sleepTime: "23:00", status: "ACTIVE" },
+        });
+        const olderBlock = await prisma.plannedBlock.create({
+            data: { dayPlanId: olderActive.id, type: "CONTAINER", name: "Old", startTime: "09:00", endTime: "12:00" },
+        });
+        await prisma.task.create({
+            data: { userId, title: "Old task", estimatedMins: 30, status: "TODO", plannedBlockId: olderBlock.id },
+        });
+        const recentActive = await prisma.dayPlan.create({
+            data: { userId, date: YESTERDAY, wakeTime: "07:00", sleepTime: "23:00", status: "ACTIVE" },
+        });
+        const recentBlock = await prisma.plannedBlock.create({
+            data: { dayPlanId: recentActive.id, type: "CONTAINER", name: "Recent", startTime: "09:00", endTime: "12:00" },
+        });
+        const recentTask = await prisma.task.create({
+            data: { userId, title: "Recent task", estimatedMins: 30, status: "TODO", plannedBlockId: recentBlock.id },
+        });
+
+        const result = await getPlanTasks(userId, draftPlan.id);
+
+        expect(result.carriedOver.map(t => t.id)).toEqual([recentTask.id]);
     });
 });
 
@@ -819,5 +887,248 @@ describe("adjustPlanTask", () => {
         } finally {
             await prisma.user.delete({ where: { id: other.id } });
         }
+    });
+});
+
+// ─── confirmPlan ───────────────────────────────────────────────────────────────
+
+const TEST_EMAIL_CONFIRM = "test-confirm-plan@starlight.test";
+
+async function seedConfirmUser() {
+    return prisma.user.upsert({
+        where: { email: TEST_EMAIL_CONFIRM },
+        update: {},
+        create: {
+            email: TEST_EMAIL_CONFIRM,
+            passwordHash: "not-a-real-hash",
+            firstName: "Confirm",
+            lastName: "User",
+        },
+    });
+}
+
+async function cleanupConfirmUser(userId: string) {
+    const plans = await prisma.dayPlan.findMany({
+        where: { userId },
+        select: { blocks: { select: { id: true } } },
+    });
+    const blockIds = plans.flatMap(p => p.blocks.map(b => b.id));
+    if (blockIds.length > 0) {
+        await prisma.task.updateMany({
+            where: { plannedBlockId: { in: blockIds } },
+            data: { plannedBlockId: null, blockOrder: null },
+        });
+        await prisma.plannedBlock.deleteMany({ where: { id: { in: blockIds } } });
+    }
+    await prisma.task.deleteMany({ where: { userId } });
+    await prisma.dayPlan.deleteMany({ where: { userId } });
+
+    const template = await prisma.dayTemplate.findUnique({ where: { userId } });
+    if (template) {
+        await prisma.block.deleteMany({ where: { dayTemplateId: template.id } });
+        await prisma.dayTemplate.delete({ where: { id: template.id } });
+    }
+}
+
+describe("confirmPlan", () => {
+    let userId: string;
+    const DATE = "2026-06-22";
+
+    beforeEach(async () => {
+        const user = await seedConfirmUser();
+        userId = user.id;
+        await cleanupConfirmUser(userId);
+    });
+
+    afterAll(async () => {
+        const user = await prisma.user.findUnique({ where: { email: TEST_EMAIL_CONFIRM } });
+        if (user) {
+            await cleanupConfirmUser(user.id);
+            await prisma.user.delete({ where: { id: user.id } });
+        }
+    });
+
+    it("promotes a first-time DRAFT to ACTIVE with no other changes", async () => {
+        const draft = await prisma.dayPlan.create({
+            data: {
+                userId, date: DATE, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT",
+                blocks: { create: [{ type: "CONTAINER", name: "Morning", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" }] },
+            },
+            select: { id: true, blocks: { select: { id: true } } },
+        });
+
+        const result = await confirmPlan(userId, draft.id, "08:00");
+
+        expect(result).toMatchObject({ id: draft.id, status: "ACTIVE" });
+        const written = await prisma.dayPlan.findUnique({ where: { id: draft.id }, include: { blocks: true } });
+        expect(written!.status).toBe("ACTIVE");
+        expect(written!.blocks).toHaveLength(1);
+        expect(written!.blocks[0].id).toBe(draft.blocks[0].id); // unchanged
+    });
+
+    it("copies elapsed template blocks (empty) into a fresh plan so the full day shows", async () => {
+        await prisma.dayTemplate.create({
+            data: {
+                userId, wakeTime: "07:00", sleepTime: "23:00",
+                blocks: {
+                    create: [
+                        { type: "CONTAINER", name: "Early", startTime: "08:00", endTime: "10:00", energyLevel: "HIGH" },
+                        { type: "ANCHOR", name: "Lunch", startTime: "12:00", endTime: "13:00" },
+                        { type: "CONTAINER", name: "Afternoon", startTime: "14:00", endTime: "17:00", energyLevel: "MEDIUM" },
+                    ],
+                },
+            },
+        });
+        // Draft mirrors createDraftPlan: only the still-upcoming block exists.
+        const draft = await prisma.dayPlan.create({
+            data: {
+                userId, date: DATE, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT",
+                blocks: { create: [{ type: "CONTAINER", name: "Afternoon", startTime: "14:00", endTime: "17:00", energyLevel: "MEDIUM" }] },
+            },
+            select: { id: true },
+        });
+
+        const result = await confirmPlan(userId, draft.id, "13:30");
+
+        expect(result.status).toBe("ACTIVE");
+        // Elapsed template blocks (Early, Lunch) are added empty; ordered by startTime.
+        expect(result.blocks.map(b => b.name)).toEqual(["Early", "Lunch", "Afternoon"]);
+        const early = result.blocks.find(b => b.name === "Early")!;
+        expect(early).toMatchObject({ type: "CONTAINER", startTime: "08:00", endTime: "10:00", energyLevel: "HIGH" });
+        expect(early.tasks).toEqual([]);
+        // The still-upcoming block is left untouched (not duplicated from the template).
+        expect(result.blocks.filter(b => b.name === "Afternoon")).toHaveLength(1);
+    });
+
+    it("does not duplicate a block that was upcoming at draft time but has since elapsed", async () => {
+        await prisma.dayTemplate.create({
+            data: {
+                userId, wakeTime: "07:00", sleepTime: "23:00",
+                blocks: { create: [{ type: "CONTAINER", name: "Morning", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" }] },
+            },
+        });
+        // Draft still holds Morning (it was upcoming when the draft was created).
+        const draft = await prisma.dayPlan.create({
+            data: {
+                userId, date: DATE, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT",
+                blocks: { create: [{ type: "CONTAINER", name: "Morning", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" }] },
+            },
+            select: { id: true },
+        });
+
+        // Confirm after Morning has elapsed — the template's Morning must not be re-added.
+        const result = await confirmPlan(userId, draft.id, "13:00");
+
+        expect(result.blocks.filter(b => b.name === "Morning")).toHaveLength(1);
+    });
+
+    it("copies elapsed blocks (and their task assignments) from the old ACTIVE into the new plan", async () => {
+        // Old ACTIVE: one elapsed block (ends 10:00) holding a task, one upcoming block.
+        const active = await prisma.dayPlan.create({
+            data: {
+                userId, date: DATE, wakeTime: "07:00", sleepTime: "23:00", status: "ACTIVE",
+                blocks: {
+                    create: [
+                        { type: "CONTAINER", name: "Early", startTime: "08:00", endTime: "10:00", energyLevel: "HIGH" },
+                        { type: "CONTAINER", name: "Late", startTime: "14:00", endTime: "16:00", energyLevel: "LOW" },
+                    ],
+                },
+            },
+            select: { id: true, blocks: { select: { id: true, name: true } } },
+        });
+        const elapsedBlock = active.blocks.find(b => b.name === "Early")!;
+        const upcomingBlock = active.blocks.find(b => b.name === "Late")!;
+        const elapsedTask = await prisma.task.create({
+            data: { userId, title: "Done earlier", estimatedMins: 30, status: "DONE", plannedBlockId: elapsedBlock.id, blockOrder: 0 },
+        });
+        const upcomingTask = await prisma.task.create({
+            data: { userId, title: "Not replanned", estimatedMins: 30, status: "TODO", plannedBlockId: upcomingBlock.id, blockOrder: 0 },
+        });
+
+        const draft = await prisma.dayPlan.create({
+            data: {
+                userId, date: DATE, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT",
+                blocks: { create: [{ type: "CONTAINER", name: "Afternoon", startTime: "13:00", endTime: "15:00", energyLevel: "MEDIUM" }] },
+            },
+            select: { id: true },
+        });
+
+        const result = await confirmPlan(userId, draft.id, "12:00");
+
+        expect(result.status).toBe("ACTIVE");
+        // The elapsed block is copied into the new plan (a fresh PlannedBlock).
+        const copied = result.blocks.find(b => b.name === "Early");
+        expect(copied).toBeDefined();
+        expect(copied!.id).not.toBe(elapsedBlock.id);
+        expect(copied!).toMatchObject({ startTime: "08:00", endTime: "10:00", energyLevel: "HIGH" });
+        expect(copied!.tasks.map(t => t.id)).toEqual([elapsedTask.id]);
+        // The upcoming (non-elapsed) block is not carried over.
+        expect(result.blocks.some(b => b.name === "Late")).toBe(false);
+
+        // The elapsed task now points at the copied block; the upcoming task is unscheduled.
+        const writtenElapsed = await prisma.task.findUnique({ where: { id: elapsedTask.id } });
+        expect(writtenElapsed!.plannedBlockId).toBe(copied!.id);
+        expect(writtenElapsed!.blockOrder).toBe(0);
+        const writtenUpcoming = await prisma.task.findUnique({ where: { id: upcomingTask.id } });
+        expect(writtenUpcoming!.plannedBlockId).toBeNull();
+        expect(writtenUpcoming!.blockOrder).toBeNull();
+
+        // The old ACTIVE plan (and its blocks) is gone.
+        expect(await prisma.dayPlan.findUnique({ where: { id: active.id } })).toBeNull();
+        expect(await prisma.plannedBlock.findUnique({ where: { id: elapsedBlock.id } })).toBeNull();
+        expect(await prisma.plannedBlock.findUnique({ where: { id: upcomingBlock.id } })).toBeNull();
+    });
+
+    it("leaves all state untouched when the transactional core fails (atomic)", async () => {
+        const active = await prisma.dayPlan.create({
+            data: {
+                userId, date: DATE, wakeTime: "07:00", sleepTime: "23:00", status: "ACTIVE",
+                blocks: { create: [{ type: "CONTAINER", name: "Early", startTime: "08:00", endTime: "10:00" }] },
+            },
+            select: { id: true, blocks: { select: { id: true } } },
+        });
+        const draft = await prisma.dayPlan.create({
+            data: { userId, date: DATE, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT" },
+            select: { id: true },
+        });
+
+        // All mutations happen inside the single $transaction; if it throws, none of
+        // them are applied. Forcing it to throw proves the promotion + copy + delete
+        // are all-or-nothing.
+        const spy = jest.spyOn(prisma, "$transaction").mockImplementationOnce(() => {
+            throw new Error("boom");
+        });
+
+        await expect(confirmPlan(userId, draft.id, "12:00")).rejects.toThrow("boom");
+        spy.mockRestore();
+
+        // Nothing changed: draft is still DRAFT, old ACTIVE still ACTIVE and intact.
+        expect((await prisma.dayPlan.findUnique({ where: { id: draft.id } }))!.status).toBe("DRAFT");
+        expect((await prisma.dayPlan.findUnique({ where: { id: active.id } }))!.status).toBe("ACTIVE");
+        expect(await prisma.plannedBlock.findUnique({ where: { id: active.blocks[0].id } })).not.toBeNull();
+    });
+
+    it("throws PlanNotFoundError when the plan belongs to another user", async () => {
+        const draft = await prisma.dayPlan.create({
+            data: { userId, date: DATE, wakeTime: "07:00", sleepTime: "23:00", status: "DRAFT" },
+            select: { id: true },
+        });
+        const other = await prisma.user.create({
+            data: { email: "other-confirm@starlight.test", passwordHash: "x", firstName: "O", lastName: "U" },
+        });
+        try {
+            await expect(confirmPlan(other.id, draft.id, "12:00")).rejects.toThrow(PlanNotFoundError);
+        } finally {
+            await prisma.user.delete({ where: { id: other.id } });
+        }
+    });
+
+    it("throws PlanNotInDraftError when the plan is not a DRAFT", async () => {
+        const active = await prisma.dayPlan.create({
+            data: { userId, date: DATE, wakeTime: "07:00", sleepTime: "23:00", status: "ACTIVE" },
+            select: { id: true },
+        });
+
+        await expect(confirmPlan(userId, active.id, "12:00")).rejects.toThrow(PlanNotInDraftError);
     });
 });

@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
+    ActivityIndicator,
     Alert,
     ScrollView,
     StyleSheet,
@@ -280,15 +281,29 @@ export default function ReviewPlanScreen() {
         }
     }, [planId, applyBoard, resetDragShared]);
 
-    const handleConfirm = useCallback(() => {
-        // T-08 builds the confirmation step (promotes DRAFT → ACTIVE).
-        Alert.alert('Confirm plan', 'Plan confirmation is coming next (T-08).');
-    }, []);
-
     // Tear down the whole planning modal. dismissAll() only scopes to the nested
     // planning stack (it would land back on the review-tasks screen), so dismiss to
     // the route that launched the flow.
     const dismissFlow = useCallback(() => router.dismissTo('/(main)'), [router]);
+
+    const [confirming, setConfirming] = useState(false);
+
+    // Promote the DRAFT to ACTIVE. On success, tear down the modal — the timeline
+    // reloads on focus and shows the now-active plan. On failure, offer a retry.
+    const handleConfirm = useCallback(async () => {
+        if (!planId || confirming) return;
+        setConfirming(true);
+        const res = await api.confirmPlan(planId);
+        if (res.ok) {
+            dismissFlow();
+            return;
+        }
+        setConfirming(false);
+        Alert.alert("Couldn't confirm plan", res.error, [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Retry', onPress: () => handleConfirm() },
+        ]);
+    }, [planId, confirming, dismissFlow]);
 
     if (!board) {
         return (
@@ -394,8 +409,16 @@ export default function ReviewPlanScreen() {
                 </ScrollView>
 
                 <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-                    <TouchableOpacity style={s.confirmButton} activeOpacity={0.85} onPress={handleConfirm}>
-                        <Text style={s.confirmButtonLabel}>Confirm plan</Text>
+                    <TouchableOpacity
+                        style={[s.confirmButton, confirming && s.confirmButtonDisabled]}
+                        activeOpacity={0.85}
+                        onPress={handleConfirm}
+                        disabled={confirming}
+                    >
+                        {confirming
+                            ? <ActivityIndicator size="small" color="#fdfcfa" />
+                            : <Text style={s.confirmButtonLabel}>Confirm plan</Text>
+                        }
                     </TouchableOpacity>
                 </View>
             </SafeAreaView>
@@ -725,5 +748,6 @@ const s = StyleSheet.create({
         borderTopColor: 'rgba(42,38,33,0.06)',
     },
     confirmButton: { backgroundColor: '#2a2621', borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
+    confirmButtonDisabled: { opacity: 0.6 },
     confirmButtonLabel: { fontSize: 15, fontWeight: '600', color: '#fdfcfa', letterSpacing: -0.2 },
 });
