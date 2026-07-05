@@ -38,11 +38,8 @@ jobs:
         with:
           node-version: "26"
 
-      - name: Enable Corepack
-        run: corepack enable
-
       - name: Install dependencies
-        run: npm ci --cache ~/.npm
+        run: npm ci
 
       - name: Run migrations
         run: npx prisma migrate deploy
