@@ -1,0 +1,27 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote",
+  },
+  "build": {
+    "production": {
+      "node": "26.0.0",
+      "ios": {
+        "autoIncrement": true
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://starlightapi-production.up.railway.app",
+        "EXPO_NO_YARN": "1"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "navdeep.beniwal1997@gmail.com",
+        "ascAppId": "6785012086",
+        "appleTeamId": "CX32Z6ZF9N"
+      }
+    }
+  }
+}
