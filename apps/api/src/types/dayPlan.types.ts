@@ -43,13 +43,39 @@ export type UnschedulableTask = {
     reason: string;
 };
 
-export type GeneratePlanResult = {
-    plan: DayPlan;
+// A task slot inside a proposed (not yet persisted) plan.
+export type ProposalTask = {
+    id: string;
+    title: string;
+    estimatedMins: number;
+    remainingMins: number;
+    status: TaskStatus;
+};
+
+// A block of the proposed plan. `blockId` is the *template* block id — the
+// proposal is never persisted, so template blocks are the only stable keys the
+// client and confirm endpoint can agree on.
+export type ProposalBlock = {
+    blockId: string;
+    type: BlockType;
+    name: string;
+    startTime: string;
+    endTime: string;
+    energyLevel: EnergyLevel | null;
+    tasks: ProposalTask[];
+};
+
+export type PlanProposal = {
+    wakeTime: string;
+    sleepTime: string;
+    blocks: ProposalBlock[];
     unschedulable: UnschedulableTask[];
 };
 
-export type PlannedTaskPlacement = {
-    id: string;
-    plannedBlockId: string | null;
-    blockOrder: number | null;
+// One task placement sent back by the client at confirm time.
+// `blockId` references a template block, matching ProposalBlock.blockId.
+export type ConfirmAssignment = {
+    taskId: string;
+    blockId: string;
+    blockOrder: number;
 };

@@ -14,11 +14,11 @@ import {
 } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
 import type { Priority, ReviewTask, TaskDetail } from "../../lib/api.types";
-import { setGeneratedPlan } from "../../lib/planningSession";
+import { usePlanningStore } from "../../stores/planning.store";
 import CreateTaskModal from "../../components/CreateTaskModal";
 
 // ─── Motion primitives ────────────────────────────────────────────────────────
@@ -174,40 +174,39 @@ function TaskCard({ task, onPress, onDone }: { task: ReviewTask; onPress: () => 
 export default function PlanningReviewScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
-    const { planId } = useLocalSearchParams<{ planId: string }>();
+    const setProposal = usePlanningStore(s => s.setProposal);
 
     const [carriedOver, setCarriedOver] = useState<ReviewTask[] | null>(null);
     const [backlog, setBacklog] = useState<ReviewTask[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [showCreateModal, setShowCreateModal] = useState(false);
 
-    // Agent plan generation (T-06): full-screen while the agent runs, retry on error.
+    // Agent plan generation: full-screen while the agent runs, retry on error.
     const [generating, setGenerating] = useState(false);
     const [generateError, setGenerateError] = useState<string | null>(null);
 
     const handleDoneReviewing = useCallback(async () => {
-        if (!planId || generating) return;
+        if (generating) return;
         setGenerating(true);
         setGenerateError(null);
-        const result = await api.generatePlan(planId);
+        const result = await api.generatePlan();
         if (result.ok) {
-            setGeneratedPlan(result.data);
+            setProposal(result.data);
             setGenerating(false);
-            router.push(`/planning/plan/${planId}`);
+            router.push('/planning/plan');
         } else {
             setGenerating(false);
             setGenerateError(result.error);
         }
-    }, [planId, generating, router]);
+    }, [generating, router, setProposal]);
 
     // Refetch whenever the screen regains focus (e.g. returning from task detail)
     // so edits made there are reflected on the review cards. The full-screen
     // loader only shows on the first load (carriedOver === null).
     useFocusEffect(
         useCallback(() => {
-            if (!planId) return;
             let active = true;
-            api.getPlanTasks(planId).then(result => {
+            api.getReviewTasks().then(result => {
                 if (!active) return;
                 if (result.ok) {
                     setCarriedOver(result.data.carriedOver);
@@ -218,7 +217,7 @@ export default function PlanningReviewScreen() {
                 }
             });
             return () => { active = false; };
-        }, [planId])
+        }, [])
     );
 
     function patchTask(section: 'carriedOver' | 'backlog', taskId: string, updated: TaskDetail) {

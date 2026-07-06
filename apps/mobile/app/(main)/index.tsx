@@ -6,7 +6,6 @@ import {
     StyleSheet,
     ScrollView,
     TouchableOpacity,
-    Alert,
     ActivityIndicator,
 } from "react-native";
 import CreateTaskModal from "../../components/CreateTaskModal";
@@ -390,7 +389,6 @@ export default function TodayScreen() {
     const [state, setState] = useState<ScreenState>({ status: 'loading' });
     const [currentTime, setCurrentTime] = useState(() => toHHmm(new Date()));
     const [showCreateModal, setShowCreateModal] = useState(false);
-    const [isPlanningLoading, setIsPlanningLoading] = useState(false);
     const scrollRef = useRef<ScrollView>(null);
     const scrollViewHeight = useRef(0);
     const hasScrolledToNow = useRef(false);
@@ -470,19 +468,10 @@ export default function TodayScreen() {
 
     const handleTaskPress = (taskId: string) => router.push(`/task/${taskId}`);
 
-    const handlePlanDay = async () => {
-        setIsPlanningLoading(true);
-        const result = await api.createDayPlan();
-        setIsPlanningLoading(false);
-
-        if (!result.ok) {
-            const title = result.status === 400 ? 'Cannot plan day' : 'Something went wrong';
-            Alert.alert(title, result.error);
-            return;
-        }
-
-        router.push(`/planning/${result.data.id}`);
-    };
+    // The plan is only created on confirm, so entering the flow is just
+    // navigation. Eligibility errors (no template, no blocks left today) surface
+    // when the proposal is generated.
+    const handlePlanDay = () => router.push('/planning/review');
     const handleAddTask = () => setShowCreateModal(true);
 
     return (
@@ -496,12 +485,8 @@ export default function TodayScreen() {
                     style={styles.planButton}
                     onPress={handlePlanDay}
                     activeOpacity={0.8}
-                    disabled={isPlanningLoading}
                 >
-                    {isPlanningLoading
-                        ? <ActivityIndicator size="small" color="#2a2621" style={styles.planButtonSpinner} />
-                        : <Text style={styles.planButtonIcon}>✦</Text>
-                    }
+                    <Text style={styles.planButtonIcon}>✦</Text>
                     <Text style={styles.planButtonText}>Plan day</Text>
                 </TouchableOpacity>
             </View>
@@ -597,10 +582,6 @@ const styles = StyleSheet.create({
     planButtonIcon: {
         fontSize: 12,
         color: '#2a2621',
-    },
-    planButtonSpinner: {
-        width: 12,
-        height: 12,
     },
     planButtonText: {
         fontSize: 14,
