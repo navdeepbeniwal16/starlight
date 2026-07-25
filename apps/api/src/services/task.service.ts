@@ -1,24 +1,103 @@
 import { prisma } from "../lib/prisma";
-import type { BacklogTask, TaskDetail, CreateTaskInput, UpdateTaskInput } from "../types/task.types";
-import { TaskStatus } from "@prisma/client";
+import type { BacklogTask, BacklogBuckets, ScheduledTask, TaskDetail, CreateTaskInput, UpdateTaskInput } from "../types/task.types";
+import { TaskStatus, Priority } from "@prisma/client";
 
 export class InvalidProgressError extends Error {}
 export class InvalidDeadlineError extends Error {}
 export class TaskNotFoundError extends Error {}
 
-export async function getBacklog(userId: string): Promise<BacklogTask[]> {
-    return prisma.task.findMany({
-        where: { userId, plannedBlockId: null },
-        select: {
-            id: true,
-            title: true,
-            status: true,
-            priority: true,
-            deadline: true,
-            progress: true,
-            estimatedMins: true,
-        },
-    });
+const backlogTaskSelect = {
+    id: true,
+    title: true,
+    status: true,
+    priority: true,
+    deadline: true,
+    progress: true,
+    estimatedMins: true,
+} as const;
+
+const PRIORITY_ORDER: Record<Priority, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+
+// Deadline first (nulls last), then priority (high → low, none last).
+function byDeadlineThenPriority(a: BacklogTask, b: BacklogTask): number {
+    if (a.deadline || b.deadline) {
+        if (!a.deadline) return 1;
+        if (!b.deadline) return -1;
+        const cmp = a.deadline.getTime() - b.deadline.getTime();
+        if (cmp !== 0) return cmp;
+    }
+    const pa = a.priority !== null ? PRIORITY_ORDER[a.priority] : 3;
+    const pb = b.priority !== null ? PRIORITY_ORDER[b.priority] : 3;
+    return pa - pb;
+}
+
+// The UTC instant range [start, end) for the client's local day. `utcOffsetMins`
+// is +600 for UTC+10; absent → server-local midnight.
+function dayRangeUtc(date: string, utcOffsetMins?: number): { start: Date; end: Date } {
+    const start = utcOffsetMins !== undefined
+        ? new Date(new Date(`${date}T00:00:00Z`).getTime() - utcOffsetMins * 60 * 1000)
+        : new Date(`${date}T00:00:00`);
+    return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
+}
+
+/**
+ * The backlog screen's four lifecycle buckets (carriedOver, scheduled,
+ * remaining, doneToday), mutually exclusive with DONE winning. Done tasks from
+ * previous days fall into no bucket, so the screen can't grow unbounded.
+ *
+ * doneToday keys on updatedAt, not a completedAt: editing an old done task
+ * resurrects it here — add a completedAt column if that becomes a problem.
+ */
+export async function getBacklog(userId: string, date: string, utcOffsetMins?: number): Promise<BacklogBuckets> {
+    const { start, end } = dayRangeUtc(date, utcOffsetMins);
+
+    const [carriedOver, scheduledRaw, remaining, doneToday] = await Promise.all([
+        prisma.task.findMany({
+            where: {
+                userId,
+                status: { not: 'DONE' },
+                plannedBlock: { dayPlan: { status: 'ACTIVE', date: { lt: date } } },
+            },
+            select: backlogTaskSelect,
+        }),
+        prisma.task.findMany({
+            where: {
+                userId,
+                status: { not: 'DONE' },
+                plannedBlock: { dayPlan: { status: 'ACTIVE', date } },
+            },
+            select: {
+                ...backlogTaskSelect,
+                blockOrder: true,
+                plannedBlock: { select: { startTime: true, name: true } },
+            },
+        }),
+        prisma.task.findMany({
+            where: { userId, plannedBlockId: null, status: { not: 'DONE' } },
+            select: backlogTaskSelect,
+        }),
+        prisma.task.findMany({
+            where: { userId, status: 'DONE', updatedAt: { gte: start, lt: end } },
+            select: backlogTaskSelect,
+        }),
+    ]);
+
+    const scheduled: ScheduledTask[] = scheduledRaw
+        .sort((a, b) =>
+            a.plannedBlock!.startTime.localeCompare(b.plannedBlock!.startTime)
+            || (a.blockOrder ?? 0) - (b.blockOrder ?? 0))
+        .map(({ plannedBlock, blockOrder: _blockOrder, ...task }) => ({
+            ...task,
+            blockStartTime: plannedBlock!.startTime,
+            blockName: plannedBlock!.name,
+        }));
+
+    return {
+        carriedOver: carriedOver.sort(byDeadlineThenPriority),
+        scheduled,
+        remaining: remaining.sort(byDeadlineThenPriority),
+        doneToday: doneToday.sort(byDeadlineThenPriority),
+    };
 }
 
 function deriveStatus(progress: number): TaskStatus {

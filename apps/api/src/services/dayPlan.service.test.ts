@@ -440,6 +440,38 @@ describe("confirmPlan", () => {
         const finishedAfter = await prisma.task.findUnique({ where: { id: finished.id } });
         expect(finishedAfter!.plannedBlockId).toBe(oldBlock.id); // history intact
     });
+
+    it("retires a past ACTIVE plan even when a COMPLETED plan already exists for that date", async () => {
+        await seedTemplate();
+
+        // Precondition for the @@unique([userId,date,status]) collision: a COMPLETED
+        // and an ACTIVE plan on the same past date. seedActivePlan only makes ACTIVE
+        // plans, so the COMPLETED one is created directly.
+        const stale = await prisma.dayPlan.create({
+            data: {
+                userId, date: YESTERDAY, wakeTime: "07:00", sleepTime: "23:00", status: "COMPLETED",
+                blocks: { create: [{ type: "CONTAINER", name: "Old", startTime: "09:00", endTime: "12:00", energyLevel: "MEDIUM" }] },
+            },
+            include: { blocks: true },
+        });
+        const staleDone = await seedTask("Done on stale completed", { status: "DONE", progress: 100, plannedBlockId: stale.blocks[0].id, blockOrder: 0 });
+
+        const active = await seedActivePlan(YESTERDAY, [{ name: "Redo", startTime: "09:00", endTime: "12:00" }]);
+        const unfinished = await seedTask("Unfinished on active", { plannedBlockId: active.blocks[0].id, blockOrder: 0 });
+
+        // Must not throw a unique-constraint error while retiring ACTIVE(YESTERDAY).
+        await expect(confirmPlan(userId, DATE, "08:00", [])).resolves.toBeDefined();
+
+        const yPlans = await prisma.dayPlan.findMany({ where: { userId, date: YESTERDAY } });
+        expect(yPlans).toHaveLength(1);
+        expect(yPlans[0].status).toBe("COMPLETED");
+
+        // Neither plan's task is stranded on a deleted/retired plan.
+        const unfinishedAfter = await prisma.task.findUnique({ where: { id: unfinished.id } });
+        expect(unfinishedAfter!.plannedBlockId).toBeNull();
+        const staleAfter = await prisma.task.findUnique({ where: { id: staleDone.id } });
+        expect(staleAfter!.plannedBlockId).toBeNull();
+    });
 });
 
 // ─── getReviewTasks ───────────────────────────────────────────────────────────

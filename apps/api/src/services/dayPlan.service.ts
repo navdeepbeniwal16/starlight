@@ -386,7 +386,7 @@ export async function confirmPlan(
         // plan that carry-over will no longer look at. DONE tasks stay as history.
         const pastActives = await tx.dayPlan.findMany({
             where: { userId, status: 'ACTIVE', date: { lt: date } },
-            select: { id: true, blocks: { select: { id: true } } },
+            select: { id: true, date: true, blocks: { select: { id: true } } },
         });
         for (const plan of pastActives) {
             const blockIds = plan.blocks.map(b => b.id);
@@ -395,6 +395,24 @@ export async function confirmPlan(
                     where: { plannedBlockId: { in: blockIds }, status: { not: 'DONE' } },
                     data: { plannedBlockId: null, blockOrder: null },
                 });
+            }
+            // A COMPLETED plan for this date may already exist (if the device date
+            // moved backwards between confirms), which would collide with @@unique
+            // on the ACTIVE→COMPLETED update — so drop the stale COMPLETED row first.
+            const staleCompleted = await tx.dayPlan.findFirst({
+                where: { userId, date: plan.date, status: 'COMPLETED' },
+                select: { id: true, blocks: { select: { id: true } } },
+            });
+            if (staleCompleted) {
+                const staleBlockIds = staleCompleted.blocks.map(b => b.id);
+                if (staleBlockIds.length > 0) {
+                    await tx.task.updateMany({
+                        where: { plannedBlockId: { in: staleBlockIds } },
+                        data: { plannedBlockId: null, blockOrder: null },
+                    });
+                    await tx.plannedBlock.deleteMany({ where: { dayPlanId: staleCompleted.id } });
+                }
+                await tx.dayPlan.delete({ where: { id: staleCompleted.id } });
             }
             await tx.dayPlan.update({ where: { id: plan.id }, data: { status: 'COMPLETED' } });
         }

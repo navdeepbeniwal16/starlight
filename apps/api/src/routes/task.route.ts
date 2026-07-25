@@ -2,18 +2,18 @@ import { Router, Request, Response } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
 import { getBacklog, createTask, getTaskById, deleteTask, updateTask, InvalidProgressError, InvalidDeadlineError, TaskNotFoundError } from "../services/task.service";
 import type { CreateTaskInput, UpdateTaskInput } from "../types/task.types";
+import { todayDateString, parseTimezoneOffset } from "../lib/clientDate";
 
 const router = Router();
 
 router.get("/", authenticate, async (req: Request, res: Response): Promise<void> => {
     res.set("Cache-Control", "no-store, private");
 
-    try {
-        const tasks = await getBacklog(req.user!.sub);
-        res.status(200).json({ success: true, data: tasks });
-    } catch (error) {
-        throw error;
-    }
+    const utcOffsetMins = parseTimezoneOffset(req);
+    const date = todayDateString(utcOffsetMins);
+
+    const buckets = await getBacklog(req.user!.sub, date, utcOffsetMins);
+    res.status(200).json({ success: true, data: buckets });
 });
 
 router.post("/", authenticate, async (req: Request, res: Response): Promise<void> => {

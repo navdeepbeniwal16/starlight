@@ -168,7 +168,10 @@ export const api = {
     try {
       const response = await fetch(`${API_URL}/tasks`, {
         method: 'GET',
-        headers: { 'Authorization': `Bearer ${token}` },
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-Timezone-Offset': String(-new Date().getTimezoneOffset()),
+        },
       });
 
       const responseJson = await response.json();
