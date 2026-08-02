@@ -3,19 +3,12 @@ import { authenticate } from "../middlewares/auth.middleware";
 import {
     createDayTemplate,
     getDayTemplate,
-    BlockOverlapError,
-    ContainerBlockNotFoundError,
     DayTemplateAlreadyExistsError,
-    DayTemplateNotFoundError,
-    OutOfAwakeBoundsError
+    DayTemplateNotFoundError
 } from "../services/dayTemplate.service";
-import { BlockType, EnergyLevel } from "../types/dayTemplate.types";
+import { DayTemplateValidationError } from "../services/dayTemplate.validator";
 
 const router = Router();
-
-const timeRegex = /^\d{2}:\d{2}$/;
-const validBlockTypes = Object.values(BlockType);
-const validEnergyLevels = Object.values(EnergyLevel);
 
 router.get("/", authenticate, async (req: Request, res: Response): Promise<void> => {
     try {
@@ -39,13 +32,9 @@ router.post("/", authenticate, async (req: Request, res: Response): Promise<void
 
     const { wakeTime, sleepTime, blocks } = req.body;
 
-    if (typeof wakeTime !== "string" || !timeRegex.test(wakeTime)) {
-        res.status(400).json({ success: false, error: "wakeTime must be a valid HH:mm string" });
-        return;
-    }
-
-    if (typeof sleepTime !== "string" || !timeRegex.test(sleepTime)) {
-        res.status(400).json({ success: false, error: "sleepTime must be a valid HH:mm string" });
+    // Structural shape guards only — semantic validation lives in validateDayTemplate
+    if (typeof wakeTime !== "string" || typeof sleepTime !== "string") {
+        res.status(400).json({ success: false, error: "wakeTime and sleepTime must be strings" });
         return;
     }
 
@@ -56,34 +45,15 @@ router.post("/", authenticate, async (req: Request, res: Response): Promise<void
 
     for (let i = 0; i < blocks.length; i++) {
         const block = blocks[i];
-
-        if (!block || typeof block !== "object") {
-            res.status(400).json({ success: false, error: `Block at index ${i} is invalid` });
-            return;
-        }
-
-        if (!validBlockTypes.includes(block.type)) {
-            res.status(400).json({ success: false, error: `Block at index ${i} has invalid type` });
-            return;
-        }
-
-        if (typeof block.name !== "string" || !block.name.trim()) {
-            res.status(400).json({ success: false, error: `Block at index ${i} must have a non-empty name` });
-            return;
-        }
-
-        if (typeof block.startTime !== "string" || !timeRegex.test(block.startTime)) {
-            res.status(400).json({ success: false, error: `Block at index ${i} has invalid startTime` });
-            return;
-        }
-
-        if (typeof block.endTime !== "string" || !timeRegex.test(block.endTime)) {
-            res.status(400).json({ success: false, error: `Block at index ${i} has invalid endTime` });
-            return;
-        }
-
-        if (block.energyLevel !== undefined && !validEnergyLevels.includes(block.energyLevel)) {
-            res.status(400).json({ success: false, error: `Block at index ${i} has invalid energyLevel` });
+        if (
+            !block || typeof block !== "object" ||
+            typeof block.type !== "string" ||
+            typeof block.name !== "string" ||
+            typeof block.startTime !== "string" ||
+            typeof block.endTime !== "string" ||
+            (block.energyLevel !== undefined && typeof block.energyLevel !== "string")
+        ) {
+            res.status(400).json({ success: false, error: `Block at index ${i} is malformed` });
             return;
         }
     }
@@ -104,18 +74,8 @@ router.post("/", authenticate, async (req: Request, res: Response): Promise<void
 
         res.status(201).json({ success: true, data: template });
     } catch (error) {
-        if (error instanceof ContainerBlockNotFoundError) {
-            res.status(400).json({ success: false, error: "At least one CONTAINER block is required" });
-            return;
-        }
-
-        if (error instanceof BlockOverlapError) {
-            res.status(400).json({ success: false, error: "Blocks must not overlap" });
-            return;
-        }
-
-        if (error instanceof OutOfAwakeBoundsError) {
-            res.status(400).json({ success: false, error: "All blocks must fall within wakeTime and sleepTime" });
+        if (error instanceof DayTemplateValidationError) {
+            res.status(400).json({ success: false, error: error.message });
             return;
         }
 

@@ -1,11 +1,9 @@
 import { prisma } from "../lib/prisma";
 import { BlockInput } from "../types/dayTemplate.types";
+import { validateDayTemplate } from "./dayTemplate.validator";
 
-export class DayTemplateNotFoundError extends Error {};
-export class ContainerBlockNotFoundError extends Error {};
-export class BlockOverlapError extends Error {};
-export class OutOfAwakeBoundsError extends Error {};
-export class DayTemplateAlreadyExistsError extends Error {};
+export class DayTemplateNotFoundError extends Error { };
+export class DayTemplateAlreadyExistsError extends Error { };
 
 export async function getDayTemplate(userId: string) {
     const template = await prisma.dayTemplate.findUnique({
@@ -18,40 +16,24 @@ export async function getDayTemplate(userId: string) {
     return template;
 }
 
-export async function createDayTemplate(data:{
+export async function createDayTemplate(data: {
     userId: string,
     wakeTime: string,
     sleepTime: string,
-    blocks: BlockInput []
+    blocks: BlockInput[]
 }) {
-    // Validate at least one container block is passed
-    const containerExist = data.blocks.some(b => b.type === 'CONTAINER');
-    if(!containerExist) throw new ContainerBlockNotFoundError();
-    
-    // Validate no blocks overlap
-    for(let i=0; i < data.blocks.length-1; i++) {
-        for(let j=i+1; j < data.blocks.length; j++) {
-            const blockA = data.blocks[i];
-            const blockB = data.blocks[j];
-            if(blockA.startTime < blockB.endTime && blockA.endTime > blockB.startTime) {
-                throw new BlockOverlapError();
-            }
-        }
-    }
-
-    // Validate all blocks fall within wakeTime - sleepTime bounds
-    for(const block of data.blocks) {
-        if(block.startTime < data.wakeTime || block.endTime > data.sleepTime) {
-            throw new OutOfAwakeBoundsError();
-        }
-    }
+    validateDayTemplate({
+        wakeTime: data.wakeTime,
+        sleepTime: data.sleepTime,
+        blocks: data.blocks,
+    });
 
     // Validate no pre-existing day template for user
     const exists = await prisma.dayTemplate.findUnique({
         where: { userId: data.userId }
     });
-    
-    if(exists) {
+
+    if (exists) {
         throw new DayTemplateAlreadyExistsError();
     }
 
