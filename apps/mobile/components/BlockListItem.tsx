@@ -5,42 +5,47 @@ import { ENERGY_LABELS } from "../lib/templateBlocks";
 
 /**
  * A single day-template block row. Store-agnostic: fully driven by the `block`
- * prop and an `onPress` callback, so it is reused by both onboarding and the
- * post-onboarding template editor.
+ * prop
  */
-export function BlockListItem({ block, onPress }: { block: BlockInput; onPress: () => void }) {
+export function BlockListItem({ block, onPress }: { block: BlockInput; onPress?: () => void }) {
     const isContainer = block.type === 'CONTAINER';
     const isAnchor = block.type === 'ANCHOR';
 
-    return (
-        <TouchableOpacity
-            activeOpacity={0.75}
-            onPress={onPress}
-            style={[
-                styles.blockItem,
-                isContainer && styles.blockItemContainer,
-                isAnchor && styles.blockItemAnchor,
-                !isContainer && !isAnchor && styles.blockItemNoTask,
-            ]}
-        >
-            <View style={styles.blockItemInner}>
-                <View style={styles.blockItemContent}>
-                    <View style={styles.blockItemHeader}>
-                        <Text style={styles.blockItemName}>{block.name}</Text>
-                        {isContainer && block.energyLevel && (
-                            <View style={styles.energyBadge}>
-                                <Text style={styles.energyBadgeText}>
-                                    {ENERGY_LABELS[block.energyLevel]} energy
-                                </Text>
-                            </View>
-                        )}
-                    </View>
-                    <Text style={styles.blockItemTime}>
-                        {parseDisplayTime(block.startTime).time} {parseDisplayTime(block.startTime).period} – {parseDisplayTime(block.endTime).time} {parseDisplayTime(block.endTime).period}
-                    </Text>
+    const containerStyle = [
+        styles.blockItem,
+        isContainer && styles.blockItemContainer,
+        isAnchor && styles.blockItemAnchor,
+        !isContainer && !isAnchor && styles.blockItemNoTask,
+    ];
+
+    const inner = (
+        <View style={styles.blockItemInner}>
+            <View style={styles.blockItemContent}>
+                <View style={styles.blockItemHeader}>
+                    <Text style={styles.blockItemName}>{block.name}</Text>
+                    {isContainer && block.energyLevel && (
+                        <View style={styles.energyBadge}>
+                            <Text style={styles.energyBadgeText}>
+                                {ENERGY_LABELS[block.energyLevel]} energy
+                            </Text>
+                        </View>
+                    )}
                 </View>
-                <Text style={styles.blockItemChevron}>›</Text>
+                <Text style={styles.blockItemTime}>
+                    {parseDisplayTime(block.startTime).time} {parseDisplayTime(block.startTime).period} – {parseDisplayTime(block.endTime).time} {parseDisplayTime(block.endTime).period}
+                </Text>
             </View>
+            {onPress && <Text style={styles.blockItemChevron}>›</Text>}
+        </View>
+    );
+
+    if (!onPress) {
+        return <View style={containerStyle}>{inner}</View>;
+    }
+
+    return (
+        <TouchableOpacity activeOpacity={0.75} onPress={onPress} style={containerStyle}>
+            {inner}
         </TouchableOpacity>
     );
 }
