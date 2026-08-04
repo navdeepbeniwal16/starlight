@@ -49,6 +49,7 @@ export type DayTemplate = {
 
 export type GetDayTemplateResponse = ApiResult<DayTemplate>;
 export type CreateDayTemplateResponse = ApiResult<DayTemplate>;
+export type UpdateDayTemplateResponse = ApiResult<DayTemplate>;
 
 export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'DONE';
 export type DayPlanStatus = 'DRAFT' | 'ACTIVE' | 'COMPLETED';

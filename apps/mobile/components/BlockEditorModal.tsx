@@ -29,17 +29,19 @@ export function BlockEditorModal({
     onDelete,
     wakeTime,
     sleepTime,
+    saveLabel = 'Save',
 }: {
     visible: boolean;
     onClose: () => void;
     onAdd?: (block: BlockInput) => void;
     existingBlocks: BlockInput[];
     editIndex?: number;
-    initialValues?: BlockInput;
+    initialValues?: Partial<BlockInput>;
     onSave?: (block: BlockInput) => void;
     onDelete?: () => void;
     wakeTime: string | null;
     sleepTime: string | null;
+    saveLabel?: string;
 }) {
     const isEditMode = editIndex !== undefined;
 
@@ -125,132 +127,132 @@ export function BlockEditorModal({
                             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                                 {/* Header */}
                                 <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitle}>{isEditMode ? 'Edit block' : 'Add a block'}</Text>
-                    <TouchableOpacity onPress={handleClose} hitSlop={12} style={styles.modalCloseButton}>
-                        <Text style={styles.modalClose}>×</Text>
-                    </TouchableOpacity>
-                </View>
-                <View style={styles.modalDivider} />
-
-                {/* Block type */}
-                <View style={styles.modalSection}>
-                    <Text style={styles.modalLabel}>Block type</Text>
-                    <View style={styles.pillRow}>
-                        {BLOCK_TYPES.map((t) => (
-                            <TouchableOpacity
-                                key={t}
-                                style={[styles.pill, type === t && styles.pillActive]}
-                                onPress={() => setType(t)}
-                            >
-                                <Text style={[styles.pillText, type === t && styles.pillTextActive]}>
-                                    {BLOCK_TYPE_LABELS[t]}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </View>
-                    <Text style={styles.typeDescription}>{BLOCK_TYPE_DESCRIPTIONS[type]}</Text>
-
-                    {/* Type legend */}
-                    <View style={styles.typeLegend}>
-                        {BLOCK_TYPES.map((t) => (
-                            <View key={t} style={styles.legendItem}>
-                                <View style={[styles.legendIcon, t === 'CONTAINER' && styles.legendIconContainer, t === 'ANCHOR' && styles.legendIconAnchor, t === 'NO_TASK' && styles.legendIconNoTask]} />
-                                <View>
-                                    <Text style={styles.legendTitle}>{BLOCK_TYPE_LABELS[t]}</Text>
-                                    <Text style={styles.legendDesc}>{BLOCK_TYPE_DESCRIPTIONS[t]}</Text>
+                                    <Text style={styles.modalTitle}>{isEditMode ? 'Edit block' : 'Add a block'}</Text>
+                                    <TouchableOpacity onPress={handleClose} hitSlop={12} style={styles.modalCloseButton}>
+                                        <Text style={styles.modalClose}>×</Text>
+                                    </TouchableOpacity>
                                 </View>
-                            </View>
-                        ))}
-                    </View>
-                </View>
+                                <View style={styles.modalDivider} />
 
-                <View style={styles.modalDividerLight} />
-
-                {/* Block name */}
-                <View style={styles.modalSection}>
-                    <Text style={styles.modalLabel}>Block name</Text>
-                    <TextInput
-                        style={styles.textInput}
-                        value={name}
-                        onChangeText={setName}
-                        placeholder="e.g. Focus time, Deep work, Reading"
-                        placeholderTextColor="rgba(122,115,106,0.4)"
-                    />
-                </View>
-
-                {/* Start / End time */}
-                <View style={styles.modalSection}>
-                    <View style={styles.timeRow}>
-                        <View style={styles.timeField}>
-                            <Text style={styles.modalLabel}>Start time</Text>
-                            <TouchableOpacity style={styles.timeInput} onPress={() => openPicker('start')}>
-                                {startTime ? (
-                                    <View style={styles.timeInputValueRow}>
-                                        <Text style={styles.timeInputValue}>{parseDisplayTime(startTime).time}</Text>
-                                        <Text style={styles.timeInputPeriod}>{parseDisplayTime(startTime).period}</Text>
+                                {/* Block type */}
+                                <View style={styles.modalSection}>
+                                    <Text style={styles.modalLabel}>Block type</Text>
+                                    <View style={styles.pillRow}>
+                                        {BLOCK_TYPES.map((t) => (
+                                            <TouchableOpacity
+                                                key={t}
+                                                style={[styles.pill, type === t && styles.pillActive]}
+                                                onPress={() => setType(t)}
+                                            >
+                                                <Text style={[styles.pillText, type === t && styles.pillTextActive]}>
+                                                    {BLOCK_TYPE_LABELS[t]}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
                                     </View>
-                                ) : (
-                                    <Text style={styles.timeInputPlaceholder}>--:--</Text>
-                                )}
-                            </TouchableOpacity>
-                        </View>
-                        <View style={styles.timeField}>
-                            <Text style={styles.modalLabel}>End time</Text>
-                            <TouchableOpacity style={styles.timeInput} onPress={() => openPicker('end')}>
-                                {endTime ? (
-                                    <View style={styles.timeInputValueRow}>
-                                        <Text style={styles.timeInputValue}>{parseDisplayTime(endTime).time}</Text>
-                                        <Text style={styles.timeInputPeriod}>{parseDisplayTime(endTime).period}</Text>
+                                    <Text style={styles.typeDescription}>{BLOCK_TYPE_DESCRIPTIONS[type]}</Text>
+
+                                    {/* Type legend */}
+                                    <View style={styles.typeLegend}>
+                                        {BLOCK_TYPES.map((t) => (
+                                            <View key={t} style={styles.legendItem}>
+                                                <View style={[styles.legendIcon, t === 'CONTAINER' && styles.legendIconContainer, t === 'ANCHOR' && styles.legendIconAnchor, t === 'NO_TASK' && styles.legendIconNoTask]} />
+                                                <View>
+                                                    <Text style={styles.legendTitle}>{BLOCK_TYPE_LABELS[t]}</Text>
+                                                    <Text style={styles.legendDesc}>{BLOCK_TYPE_DESCRIPTIONS[t]}</Text>
+                                                </View>
+                                            </View>
+                                        ))}
                                     </View>
-                                ) : (
-                                    <Text style={styles.timeInputPlaceholder}>--:--</Text>
+                                </View>
+
+                                <View style={styles.modalDividerLight} />
+
+                                {/* Block name */}
+                                <View style={styles.modalSection}>
+                                    <Text style={styles.modalLabel}>Block name</Text>
+                                    <TextInput
+                                        style={styles.textInput}
+                                        value={name}
+                                        onChangeText={setName}
+                                        placeholder="e.g. Focus time, Deep work, Reading"
+                                        placeholderTextColor="rgba(122,115,106,0.4)"
+                                    />
+                                </View>
+
+                                {/* Start / End time */}
+                                <View style={styles.modalSection}>
+                                    <View style={styles.timeRow}>
+                                        <View style={styles.timeField}>
+                                            <Text style={styles.modalLabel}>Start time</Text>
+                                            <TouchableOpacity style={styles.timeInput} onPress={() => openPicker('start')}>
+                                                {startTime ? (
+                                                    <View style={styles.timeInputValueRow}>
+                                                        <Text style={styles.timeInputValue}>{parseDisplayTime(startTime).time}</Text>
+                                                        <Text style={styles.timeInputPeriod}>{parseDisplayTime(startTime).period}</Text>
+                                                    </View>
+                                                ) : (
+                                                    <Text style={styles.timeInputPlaceholder}>--:--</Text>
+                                                )}
+                                            </TouchableOpacity>
+                                        </View>
+                                        <View style={styles.timeField}>
+                                            <Text style={styles.modalLabel}>End time</Text>
+                                            <TouchableOpacity style={styles.timeInput} onPress={() => openPicker('end')}>
+                                                {endTime ? (
+                                                    <View style={styles.timeInputValueRow}>
+                                                        <Text style={styles.timeInputValue}>{parseDisplayTime(endTime).time}</Text>
+                                                        <Text style={styles.timeInputPeriod}>{parseDisplayTime(endTime).period}</Text>
+                                                    </View>
+                                                ) : (
+                                                    <Text style={styles.timeInputPlaceholder}>--:--</Text>
+                                                )}
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                </View>
+
+                                <View style={styles.modalDividerLight} />
+
+                                {/* Energy level (Container only) */}
+                                {type === 'CONTAINER' && (
+                                    <View style={styles.modalSection}>
+                                        <Text style={styles.modalLabel}>Energy level</Text>
+                                        <Text style={styles.energySubtitle}>Starlight uses this to match tasks to your capacity.</Text>
+                                        <View style={styles.pillRow}>
+                                            {ENERGY_LEVELS.map((e) => (
+                                                <TouchableOpacity
+                                                    key={e}
+                                                    style={[styles.pill, energyLevel === e && styles.pillActive]}
+                                                    onPress={() => setEnergyLevel(e)}
+                                                >
+                                                    <Text style={[styles.pillText, energyLevel === e && styles.pillTextActive]}>
+                                                        {ENERGY_LABELS[e]}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                        </View>
+                                    </View>
                                 )}
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
 
-                <View style={styles.modalDividerLight} />
-
-                {/* Energy level (Container only) */}
-                {type === 'CONTAINER' && (
-                    <View style={styles.modalSection}>
-                        <Text style={styles.modalLabel}>Energy level</Text>
-                        <Text style={styles.energySubtitle}>Starlight uses this to match tasks to your capacity.</Text>
-                        <View style={styles.pillRow}>
-                            {ENERGY_LEVELS.map((e) => (
-                                <TouchableOpacity
-                                    key={e}
-                                    style={[styles.pill, energyLevel === e && styles.pillActive]}
-                                    onPress={() => setEnergyLevel(e)}
-                                >
-                                    <Text style={[styles.pillText, energyLevel === e && styles.pillTextActive]}>
-                                        {ENERGY_LABELS[e]}
-                                    </Text>
+                                <TouchableOpacity style={styles.addButton} onPress={handleSubmit} activeOpacity={0.8}>
+                                    <Text style={styles.addButtonText}>{isEditMode ? saveLabel : 'Add Block'}</Text>
                                 </TouchableOpacity>
-                            ))}
-                        </View>
-                    </View>
-                )}
 
-                <TouchableOpacity style={styles.addButton} onPress={handleSubmit} activeOpacity={0.8}>
-                    <Text style={styles.addButtonText}>{isEditMode ? 'Save Changes' : 'Add Block'}</Text>
-                </TouchableOpacity>
+                                {error && <Text style={styles.errorText}>{error}</Text>}
 
-                {error && <Text style={styles.errorText}>{error}</Text>}
-
-                {isEditMode && onDelete && (
-                    <TouchableOpacity
-                        style={styles.deleteButton}
-                        onPress={() => {
-                            onDelete();
-                            handleClose();
-                        }}
-                        activeOpacity={0.8}
-                    >
-                        <Text style={styles.deleteButtonText}>Delete block</Text>
-                    </TouchableOpacity>
-                )}
+                                {isEditMode && onDelete && (
+                                    <TouchableOpacity
+                                        style={styles.deleteButton}
+                                        onPress={() => {
+                                            onDelete();
+                                            handleClose();
+                                        }}
+                                        activeOpacity={0.8}
+                                    >
+                                        <Text style={styles.deleteButtonText}>Delete block</Text>
+                                    </TouchableOpacity>
+                                )}
 
                                 <View style={{ height: 32 }} />
                             </ScrollView>

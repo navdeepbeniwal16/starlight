@@ -2,9 +2,9 @@ import { prisma } from "../lib/prisma";
 import type { ConfirmAssignment, DayPlan, PlanProposal, ProposalBlock, ReviewTasks } from "../types/dayPlan.types";
 import { generateSchedule, remainingMinsOf, type RawTask, type ScheduleDeps } from "./planAgent.service";
 
-export class NoTemplateError extends Error {}
-export class NoContainerBlocksError extends Error {}
-export class InvalidAssignmentError extends Error {}
+export class NoTemplateError extends Error { }
+export class NoContainerBlocksError extends Error { }
+export class InvalidAssignmentError extends Error { }
 
 // The plan whose unfinished tasks carry over into a new plan: the most recent
 // ACTIVE plan dated on or before `onOrBeforeDate`. On a same-day re-plan that's
