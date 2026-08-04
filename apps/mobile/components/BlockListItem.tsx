@@ -1,8 +1,9 @@
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { BlockInput } from "../lib/api.types";
 import { parseDisplayTime } from "../lib/time";
 import { ENERGY_LABELS } from "../lib/templateBlocks";
+import { PressableScale } from "./PressableScale";
 
 /**
  * A single day-template block row. Store-agnostic: fully driven by the `block`
@@ -46,14 +47,22 @@ export function BlockListItem({ block, onPress, invalid }: { block: BlockInput; 
     }
 
     return (
-        <TouchableOpacity activeOpacity={0.75} onPress={onPress} style={containerStyle}>
+        <PressableScale onPress={onPress} style={containerStyle}>
             {inner}
-        </TouchableOpacity>
+        </PressableScale>
     );
 }
 
 const styles = StyleSheet.create({
-    blockItem: { borderRadius: 16, overflow: 'hidden' },
+    blockItem: {
+        borderRadius: 16,
+        backgroundColor: '#fffef9',
+        shadowColor: '#2a2621',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 5,
+        elevation: 1,
+    },
     blockItemContainer: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.10)', borderStyle: 'dashed' },
     blockItemAnchor: { backgroundColor: 'rgba(232,228,221,0.3)' },
     blockItemNoTask: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.10)', borderStyle: 'dashed', backgroundColor: 'rgba(232,228,221,0.18)' },
@@ -62,7 +71,7 @@ const styles = StyleSheet.create({
     blockItemHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     blockItemHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     blockItemName: { fontSize: 15, fontWeight: '500', color: '#2a2621', letterSpacing: -0.23 },
-    blockItemTime: { fontSize: 14, color: '#7a736a', letterSpacing: -0.15 },
+    blockItemTime: { fontSize: 14, color: '#7a736a', letterSpacing: -0.15, fontVariant: ['tabular-nums'] },
     energyBadge: { backgroundColor: 'rgba(232,223,209,0.5)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
     energyBadgeText: { fontSize: 12, color: '#d4a574' },
 });

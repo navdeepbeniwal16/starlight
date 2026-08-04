@@ -128,7 +128,7 @@ export function BlockEditorModal({
                                 {/* Header */}
                                 <View style={styles.modalHeader}>
                                     <Text style={styles.modalTitle}>{isEditMode ? 'Edit block' : 'Add a block'}</Text>
-                                    <TouchableOpacity onPress={handleClose} hitSlop={12} style={styles.modalCloseButton}>
+                                    <TouchableOpacity onPress={handleClose} hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }} style={styles.modalCloseButton}>
                                         <Text style={styles.modalClose}>×</Text>
                                     </TouchableOpacity>
                                 </View>
@@ -336,7 +336,7 @@ const styles = StyleSheet.create({
     timeField: { flex: 1, gap: 12 },
     timeInput: { height: 52, backgroundColor: '#fffef9', borderWidth: 1, borderColor: 'rgba(42,38,33,0.10)', borderRadius: 14, justifyContent: 'center', paddingHorizontal: 16 },
     timeInputValueRow: { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
-    timeInputValue: { fontSize: 15, fontWeight: '500', color: '#2a2621' },
+    timeInputValue: { fontSize: 15, fontWeight: '500', color: '#2a2621', fontVariant: ['tabular-nums'] },
     timeInputPeriod: { fontSize: 11, fontWeight: '500', color: '#d4a574' },
     timeInputPlaceholder: { fontSize: 15, color: 'rgba(122,115,106,0.35)' },
 

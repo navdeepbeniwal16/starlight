@@ -1,6 +1,7 @@
-import { Text, TouchableOpacity, StyleSheet } from "react-native";
+import { Text, StyleSheet } from "react-native";
 import { TemplateGap } from "../lib/templateDraft";
 import { formatDuration, parseDisplayTime } from "../lib/time";
+import { PressableScale } from "./PressableScale";
 
 // Formats a range like "2:00–8:00 PM", collapsing the meridiem when both ends share it.
 function formatRange(start: string, end: string): string {
@@ -15,12 +16,12 @@ function formatRange(start: string, end: string): string {
 // so it reads as an interstitial hint rather than another block.
 export function GapAffordance({ gap, onPress }: { gap: TemplateGap; onPress: () => void }) {
     return (
-        <TouchableOpacity style={styles.gap} onPress={onPress} activeOpacity={0.6} hitSlop={8}>
+        <PressableScale style={styles.gap} onPress={onPress} hitSlop={8}>
             <Text style={styles.plus}>＋</Text>
             <Text style={styles.label}>
                 {formatDuration(gap.durationMinutes)} free · {formatRange(gap.startTime, gap.endTime)}
             </Text>
-        </TouchableOpacity>
+        </PressableScale>
     );
 }
 
@@ -30,5 +31,5 @@ const styles = StyleSheet.create({
         paddingVertical: 6,
     },
     plus: { fontSize: 14, fontWeight: '500', color: 'rgba(212,165,116,0.9)' },
-    label: { fontSize: 12.5, color: 'rgba(122,115,106,0.55)', letterSpacing: -0.1 },
+    label: { fontSize: 12.5, color: 'rgba(122,115,106,0.55)', letterSpacing: -0.1, fontVariant: ['tabular-nums'] },
 });

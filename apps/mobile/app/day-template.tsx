@@ -7,12 +7,14 @@ import Animated, {
     SlideInDown,
     SlideOutDown,
     FadeIn,
+    FadeInDown,
     FadeOut,
     LinearTransition,
     useSharedValue,
     useAnimatedStyle,
     withSequence,
     withTiming,
+    type EntryOrExitLayoutType,
 } from "react-native-reanimated";
 import { api } from "../lib/api";
 import type { BlockInput } from "../lib/api.types";
@@ -23,6 +25,9 @@ import { BlockListItem } from "../components/BlockListItem";
 import { BlockEditorModal } from "../components/BlockEditorModal";
 import { GapAffordance } from "../components/GapAffordance";
 import { WakeSleepBar } from "../components/WakeSleepBar";
+import { PressableScale } from "../components/PressableScale";
+
+const ROW_LAYOUT = LinearTransition.springify().dampingRatio(1);
 
 // What the block modal is open on: editing a block in place, or adding one into a gap.
 type EditorTarget =
@@ -34,7 +39,7 @@ export default function DayTemplateScreen() {
     const navigation = useNavigation();
     const insets = useSafeAreaInsets();
 
-    const { baseline, draft, hydrate, setWakeSleep, updateBlock, addBlock, removeBlock, commit, reset, clear } = useTemplateStore();
+    const { baseline, draft, blockKeys, hydrate, setWakeSleep, updateBlock, addBlock, removeBlock, commit, reset, clear } = useTemplateStore();
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -44,6 +49,7 @@ export default function DayTemplateScreen() {
     const [saving, setSaving] = useState(false);
     const [saveError, setSaveError] = useState<string | null>(null);
     const [savedVisible, setSavedVisible] = useState(false);
+    const [entering, setEntering] = useState(false);
     // The draft row to flash after an add or edit lands, keyed by the block's start time.
     // The nonce lets re-touching the same row retrigger the flash.
     const [flashFor, setFlashFor] = useState<{ key: string; nonce: number }>({ key: '', nonce: 0 });
@@ -61,11 +67,18 @@ export default function DayTemplateScreen() {
         const result = await api.getDayTemplate();
         if (result.ok) {
             hydrate(result.data);
+            setEntering(true);
         } else {
             setError(result.error);
         }
         setLoading(false);
     }, [hydrate]);
+
+    useEffect(() => {
+        if (!entering) return;
+        const t = setTimeout(() => setEntering(false), 1200);
+        return () => clearTimeout(t);
+    }, [entering]);
 
     useEffect(() => {
         load();
@@ -151,7 +164,7 @@ export default function DayTemplateScreen() {
     return (
         <SafeAreaView style={styles.safeArea}>
             <View style={styles.backRow}>
-                <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.7}>
+                <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.7} hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}>
                     <Ionicons name="chevron-back" size={20} color="#7a736a" />
                     <Text style={styles.backLabel}>Settings</Text>
                 </TouchableOpacity>
@@ -162,28 +175,31 @@ export default function DayTemplateScreen() {
             </View>
 
             {loading && (
-                <View style={styles.centered}>
+                <Animated.View style={styles.centered} exiting={FadeOut.duration(220)}>
                     <ActivityIndicator color="#d4a574" />
-                </View>
+                </Animated.View>
             )}
 
             {!loading && error && (
                 <View style={styles.centered}>
                     <Text style={styles.errorText}>{error}</Text>
-                    <TouchableOpacity style={styles.retryButton} onPress={load} activeOpacity={0.8}>
+                    <PressableScale style={styles.retryButton} onPress={load}>
                         <Text style={styles.retryButtonText}>Try again</Text>
-                    </TouchableOpacity>
+                    </PressableScale>
                 </View>
             )}
 
             {!loading && !error && draft && (
-                <>
+                <Animated.View style={styles.contentFill} entering={entering ? FadeIn.duration(240) : undefined}>
                     <ScrollView
                         style={styles.scroll}
                         contentContainerStyle={[styles.content, dirty && { paddingBottom: 96 + insets.bottom }]}
                         showsVerticalScrollIndicator={false}
                     >
-                        <View style={styles.wakeSleepSection}>
+                        <Animated.View
+                            style={styles.wakeSleepSection}
+                            entering={entering ? FadeInDown.duration(300) : undefined}
+                        >
                             <WakeSleepBar
                                 wakeTime={draft.wakeTime}
                                 sleepTime={draft.sleepTime}
@@ -199,7 +215,7 @@ export default function DayTemplateScreen() {
                                     {outOfBounds.map((o) => o.block.name).join(', ')}. Edit to fit the new window before saving.
                                 </Text>
                             )}
-                        </View>
+                        </Animated.View>
 
                         <View style={styles.blockList}>
                             {noContainer && (
@@ -208,11 +224,12 @@ export default function DayTemplateScreen() {
                                 </Text>
                             )}
 
-                            {rows.map((row) =>
+                            {rows.map((row, i) =>
                                 row.kind === 'block' ? (
                                     <BlockRow
-                                        key={`block-${row.startTime}`}
+                                        key={blockKeys[row.index]}
                                         signal={flashFor.key === `block-${row.startTime}` ? flashFor.nonce : 0}
+                                        entering={entering ? FadeInDown.duration(300).delay((i + 1) * 40) : undefined}
                                     >
                                         <BlockListItem
                                             block={row.block}
@@ -223,8 +240,8 @@ export default function DayTemplateScreen() {
                                 ) : (
                                     <Animated.View
                                         key={`gap-${row.startTime}`}
-                                        layout={LinearTransition.springify()}
-                                        entering={FadeIn.duration(160)}
+                                        layout={ROW_LAYOUT}
+                                        entering={entering ? FadeInDown.duration(300).delay((i + 1) * 40) : FadeIn.duration(160)}
                                         exiting={FadeOut.duration(160)}
                                     >
                                         <GapAffordance
@@ -244,19 +261,18 @@ export default function DayTemplateScreen() {
                             exiting={SlideOutDown.duration(180)}
                         >
                             {saveError && <Text style={styles.saveErrorText}>{saveError}</Text>}
-                            <TouchableOpacity
+                            <PressableScale
                                 style={[styles.saveButton, !canSave && styles.saveButtonDisabled]}
                                 onPress={handleSave}
                                 disabled={!canSave}
-                                activeOpacity={0.8}
                             >
                                 {saving
                                     ? <ActivityIndicator color="#2a2621" />
                                     : <Text style={styles.saveButtonText}>Save</Text>}
-                            </TouchableOpacity>
+                            </PressableScale>
                         </Animated.View>
                     )}
-                </>
+                </Animated.View>
             )}
 
             {savedVisible && (
@@ -297,7 +313,7 @@ export default function DayTemplateScreen() {
 // Wraps a block row with the timeline motion: neighbors reflow via `layout` when a
 // block is added or deleted, a deletion fades out, and an accent overlay flashes
 // when `signal` becomes a new positive value, confirming an add or edit landed.
-function BlockRow({ signal, children }: { signal: number; children: ReactNode }) {
+function BlockRow({ signal, entering, children }: { signal: number; entering?: EntryOrExitLayoutType; children: ReactNode }) {
     const opacity = useSharedValue(0);
     const prev = useRef(0);
 
@@ -311,7 +327,7 @@ function BlockRow({ signal, children }: { signal: number; children: ReactNode })
     const overlayStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
 
     return (
-        <Animated.View layout={LinearTransition.springify()} exiting={FadeOut.duration(200)}>
+        <Animated.View layout={ROW_LAYOUT} entering={entering} exiting={FadeOut.duration(200)}>
             {children}
             <Animated.View pointerEvents="none" style={[styles.flashOverlay, overlayStyle]} />
         </Animated.View>
@@ -331,6 +347,7 @@ const styles = StyleSheet.create({
     header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16 },
     headerTitle: { fontSize: 24, fontWeight: '500', color: '#2a2621', letterSpacing: 0.07 },
 
+    contentFill: { flex: 1 },
     scroll: { flex: 1 },
     content: { paddingHorizontal: 16, paddingBottom: 24, gap: 12 },
 

@@ -8,6 +8,7 @@ import { TemplateDraft } from "../lib/templateDraft";
 type TemplateState = {
     baseline: TemplateDraft | null;
     draft: TemplateDraft | null;
+    blockKeys: string[];
     hydrate: (template: DayTemplate) => void;
     setWakeSleep: (wakeTime: string, sleepTime: string) => void;
     updateBlock: (index: number, block: BlockInput) => void;
@@ -17,6 +18,9 @@ type TemplateState = {
     reset: () => void;   // discard edits and restore the baseline
     clear: () => void;   // drop all state
 };
+
+let keySeq = 0;
+const nextKey = () => `blk_${++keySeq}`;
 
 function toDraft(t: { wakeTime: string; sleepTime: string; blocks: BlockInput[] }): TemplateDraft {
     return {
@@ -35,8 +39,12 @@ function toDraft(t: { wakeTime: string; sleepTime: string; blocks: BlockInput[] 
 export const useTemplateStore = create<TemplateState>((set) => ({
     baseline: null,
     draft: null,
+    blockKeys: [],
 
-    hydrate: (template) => set({ baseline: toDraft(template), draft: toDraft(template) }),
+    hydrate: (template) => {
+        const draft = toDraft(template);
+        set({ baseline: toDraft(template), draft, blockKeys: draft.blocks.map(nextKey) });
+    },
 
     setWakeSleep: (wakeTime, sleepTime) =>
         set((state) => (state.draft ? { draft: { ...state.draft, wakeTime, sleepTime } } : state)),
@@ -50,19 +58,32 @@ export const useTemplateStore = create<TemplateState>((set) => ({
 
     addBlock: (block) =>
         set((state) =>
-            state.draft ? { draft: { ...state.draft, blocks: [...state.draft.blocks, block] } } : state
+            state.draft
+                ? {
+                    draft: { ...state.draft, blocks: [...state.draft.blocks, block] },
+                    blockKeys: [...state.blockKeys, nextKey()],
+                }
+                : state
         ),
 
     removeBlock: (index) =>
         set((state) =>
             state.draft
-                ? { draft: { ...state.draft, blocks: state.draft.blocks.filter((_, i) => i !== index) } }
+                ? {
+                    draft: { ...state.draft, blocks: state.draft.blocks.filter((_, i) => i !== index) },
+                    blockKeys: state.blockKeys.filter((_, i) => i !== index),
+                }
                 : state
         ),
 
     commit: () => set((state) => (state.draft ? { baseline: toDraft(state.draft) } : state)),
 
-    reset: () => set((state) => (state.baseline ? { draft: toDraft(state.baseline) } : state)),
+    reset: () =>
+        set((state) => {
+            if (!state.baseline) return state;
+            const draft = toDraft(state.baseline);
+            return { draft, blockKeys: draft.blocks.map(nextKey) };
+        }),
 
-    clear: () => set({ baseline: null, draft: null }),
+    clear: () => set({ baseline: null, draft: null, blockKeys: [] }),
 }));
