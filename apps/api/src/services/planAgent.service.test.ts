@@ -1,8 +1,10 @@
 import {
     buildAgentInput,
     parseAgentResult,
+    normalizeAssignments,
     generateSchedule,
     AgentError,
+    type AgentResult,
     type RawBlock,
     type RawTask,
     type AgentInput,
@@ -94,6 +96,59 @@ describe("parseAgentResult", () => {
         expect(() => parseAgentResult({ assignments: [{ taskId: "t1" }] })).toThrow(AgentError);
         expect(() => parseAgentResult(null)).toThrow(AgentError);
         expect(() => parseAgentResult({ assignments: [], unschedulable: [{ taskId: 1, reason: "x" }] })).toThrow(AgentError);
+    });
+});
+
+// ─── normalizeAssignments ─────────────────────────────────────────────────────
+
+describe("normalizeAssignments", () => {
+    const containers = new Set(["c1", "c2"]);
+    const tasks = new Set(["t1", "t2"]);
+
+    function result(assignments: AgentResult["assignments"]): AgentResult {
+        return { assignments, unschedulable: [] };
+    }
+
+    it("drops assignments to bogus or non-CONTAINER blocks", () => {
+        const out = normalizeAssignments(
+            result([
+                { taskId: "t1", blockId: "c1", blockOrder: 0 },
+                { taskId: "t2", blockId: "anchor", blockOrder: 0 }, // not a CONTAINER id
+            ]),
+            containers,
+            tasks,
+        );
+        expect(out.assignments).toEqual([{ taskId: "t1", blockId: "c1", blockOrder: 0 }]);
+    });
+
+    it("drops assignments to unknown tasks", () => {
+        const out = normalizeAssignments(
+            result([
+                { taskId: "ghost", blockId: "c1", blockOrder: 0 },
+                { taskId: "t2", blockId: "c1", blockOrder: 1 },
+            ]),
+            containers,
+            tasks,
+        );
+        expect(out.assignments).toEqual([{ taskId: "t2", blockId: "c1", blockOrder: 1 }]);
+    });
+
+    it("keeps a duplicated task only once, first occurrence wins", () => {
+        const out = normalizeAssignments(
+            result([
+                { taskId: "t1", blockId: "c1", blockOrder: 0 },
+                { taskId: "t1", blockId: "c2", blockOrder: 3 }, // duplicate task
+            ]),
+            containers,
+            tasks,
+        );
+        expect(out.assignments).toEqual([{ taskId: "t1", blockId: "c1", blockOrder: 0 }]);
+    });
+
+    it("passes unschedulable through untouched", () => {
+        const unschedulable = [{ taskId: "t2", reason: "too long" }];
+        const out = normalizeAssignments({ assignments: [], unschedulable }, containers, tasks);
+        expect(out.unschedulable).toEqual(unschedulable);
     });
 });
 

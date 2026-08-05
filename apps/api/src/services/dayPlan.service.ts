@@ -217,14 +217,10 @@ export async function generatePlanProposal(
         ? await generateSchedule(eligible, tasks, deps)
         : await generateSchedule(eligible, tasks);
 
-    // Only honour assignments that reference an eligible CONTAINER block and a
-    // schedulable task; dedupe so each task appears at most once.
-    const containerIds = new Set(eligible.filter(b => b.type === 'CONTAINER').map(b => b.id));
     const taskById = new Map(tasks.map(t => [t.id, t]));
     const placedTaskIds = new Set<string>();
     const byBlock = new Map<string, { taskId: string; blockOrder: number }[]>();
     for (const a of result.assignments) {
-        if (!containerIds.has(a.blockId) || !taskById.has(a.taskId) || placedTaskIds.has(a.taskId)) continue;
         placedTaskIds.add(a.taskId);
         const list = byBlock.get(a.blockId) ?? [];
         list.push({ taskId: a.taskId, blockOrder: a.blockOrder });

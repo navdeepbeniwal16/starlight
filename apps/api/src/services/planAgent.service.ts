@@ -4,7 +4,7 @@ import { getAnthropic } from "../lib/anthropic";
 import type { BlockType, EnergyLevel, Priority, TaskStatus } from "@prisma/client";
 
 // Thrown when the agent call fails or returns output we can't parse.
-export class AgentError extends Error {}
+export class AgentError extends Error { }
 
 const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-opus-4-8";
 
@@ -123,6 +123,37 @@ export function parseAgentResult(raw: unknown): AgentResult {
     return parsed.data;
 }
 
+/**
+ * Prunes the agent's assignments down to a trustworthy set: those referencing a
+ * real CONTAINER block and a real task, with each task placed at most once.
+ *
+ * The model can hallucinate block/task ids or place a task twice; downstream
+ * capacity and display logic want a single authoritative set to reason about, so
+ * normalization lives here rather than being re-derived at each consumer. Pure —
+ * `unschedulable` is passed through untouched.
+ *
+ * @param result - The parsed agent output.
+ * @param containerBlockIds - Ids of blocks that are valid CONTAINER placements.
+ * @param taskIds - Ids of the tasks that were offered to the agent.
+ * @returns A result whose assignments are valid and deduped (first occurrence of
+ *          a task wins), preserving each surviving assignment's blockOrder.
+ */
+export function normalizeAssignments(
+    result: AgentResult,
+    containerBlockIds: ReadonlySet<string>,
+    taskIds: ReadonlySet<string>,
+): AgentResult {
+    const placed = new Set<string>();
+    const assignments = result.assignments.filter(a => {
+        if (!containerBlockIds.has(a.blockId) || !taskIds.has(a.taskId) || placed.has(a.taskId)) {
+            return false;
+        }
+        placed.add(a.taskId);
+        return true;
+    });
+    return { assignments, unschedulable: result.unschedulable };
+}
+
 // ─── Claude invocation ────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `You are a scheduling agent for a daily planner. You assign tasks into the available time blocks for the remainder of a user's day.
@@ -201,7 +232,7 @@ async function callClaude(input: AgentInput): Promise<unknown> {
 export type ScheduleDeps = { callAgent: (input: AgentInput) => Promise<unknown> };
 const defaultDeps: ScheduleDeps = { callAgent: callClaude };
 
-// Builds the agent input, invokes the agent, and parses its output.
+// Builds the agent input, invokes the agent, and returns a parsed, normalized result 
 export async function generateSchedule(
     blocks: RawBlock[],
     tasks: RawTask[],
@@ -209,5 +240,9 @@ export async function generateSchedule(
 ): Promise<AgentResult> {
     const input = buildAgentInput(blocks, tasks);
     const raw = await deps.callAgent(input);
-    return parseAgentResult(raw);
+    const result = parseAgentResult(raw);
+
+    const containerBlockIds = new Set(blocks.filter(b => b.type === "CONTAINER").map(b => b.id));
+    const taskIds = new Set(tasks.map(t => t.id));
+    return normalizeAssignments(result, containerBlockIds, taskIds);
 }
