@@ -1,17 +1,33 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
     View, Text, TouchableOpacity, StyleSheet,
-    Modal, TextInput, Platform, TouchableWithoutFeedback, ScrollView, KeyboardAvoidingView
+    Modal, TextInput, Platform, TouchableWithoutFeedback, ScrollView, KeyboardAvoidingView,
+    NativeSyntheticEvent, NativeScrollEvent,
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import Animated, { useAnimatedStyle, withTiming } from "react-native-reanimated";
+import { Feather } from "@expo/vector-icons";
 import { BlockInput, BlockType, EnergyLevel } from "../lib/api.types";
 import { toHHmm, hhMmToDate, parseDisplayTime } from "../lib/time";
 import {
     BLOCK_TYPES, ENERGY_LEVELS, BLOCK_TYPE_LABELS, BLOCK_TYPE_DESCRIPTIONS, ENERGY_LABELS,
     validateBlockDraft, blockDraftErrorMessage, toBlockInput,
 } from "../lib/templateBlocks";
+import { computeGaps, MIN_GAP_MINUTES } from "../lib/templateDraft";
 
 type PickerTarget = 'start' | 'end' | null;
+
+// Overflow (px) below this is just row padding / rounding, not a real arrow.
+const CHIP_EDGE_SLOP = 6;
+
+// Formats a free range like "9:00 – 10:30 AM", showing a shared period once.
+function formatRangeLabel(startTime: string, endTime: string): string {
+    const start = parseDisplayTime(startTime);
+    const end = parseDisplayTime(endTime);
+    return start.period === end.period
+        ? `${start.time} – ${end.time} ${end.period}`
+        : `${start.time} ${start.period} – ${end.time} ${end.period}`;
+}
 
 /**
  * Add/edit-a-block bottom sheet. Store-agnostic: the caller supplies the current
@@ -45,6 +61,47 @@ export function BlockEditorModal({
 }) {
     const isEditMode = editIndex !== undefined;
 
+    // Memoized off the inputs below so any change to states which don't touch them — can't make the chip set flicker or recompute.
+    const availableRanges = useMemo(() => {
+        if (!wakeTime || !sleepTime) return [];
+        return computeGaps({ wakeTime, sleepTime, blocks: existingBlocks }, MIN_GAP_MINUTES, editIndex);
+    }, [wakeTime, sleepTime, existingBlocks, editIndex]);
+
+    // The live scroll offset is kept in a ref, never React state, so a finger
+    // drag doesn't re-render the modal every frame; only the two arrow-visibility
+    // booleans are state, and they flip only when a scroll boundary is crossed.
+    const chipScrollRef = useRef<ScrollView>(null);
+    const chipScrollX = useRef(0);
+    const [chipContentWidth, setChipContentWidth] = useState(0);
+    const [chipViewportWidth, setChipViewportWidth] = useState(0);
+    const [canScrollChipsLeft, setCanScrollChipsLeft] = useState(false);
+    const [canScrollChipsRight, setCanScrollChipsRight] = useState(false);
+
+    const syncChipEdges = () => {
+        const maxScroll = Math.max(0, chipContentWidth - chipViewportWidth);
+        setCanScrollChipsLeft(chipScrollX.current > CHIP_EDGE_SLOP);
+        setCanScrollChipsRight(chipScrollX.current < maxScroll - CHIP_EDGE_SLOP);
+    };
+
+    useEffect(syncChipEdges, [chipContentWidth, chipViewportWidth]);
+
+    const handleChipScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+        chipScrollX.current = e.nativeEvent.contentOffset.x;
+        syncChipEdges();
+    };
+
+    const scrollChips = (direction: 'left' | 'right') => {
+        const maxScroll = Math.max(0, chipContentWidth - chipViewportWidth);
+        const delta = chipViewportWidth * 0.7;
+        const next = direction === 'left'
+            ? Math.max(0, chipScrollX.current - delta)
+            : Math.min(maxScroll, chipScrollX.current + delta);
+        chipScrollRef.current?.scrollTo({ x: next, animated: true });
+    };
+
+    const leftEdgeStyle = useAnimatedStyle(() => ({ opacity: withTiming(canScrollChipsLeft ? 1 : 0, { duration: 160 }) }));
+    const rightEdgeStyle = useAnimatedStyle(() => ({ opacity: withTiming(canScrollChipsRight ? 1 : 0, { duration: 160 }) }));
+
     const [type, setType] = useState<BlockType>('CONTAINER');
     const [name, setName] = useState('');
     const [startTime, setStartTime] = useState<string | null>(null);
@@ -63,6 +120,11 @@ export function BlockEditorModal({
             setEnergyLevel(initialValues?.energyLevel ?? 'HIGH');
             setError(null);
             setPickerTarget(null);
+
+            // Sheet stays mounted between opens; rewind the strip's kept offset.
+            chipScrollX.current = 0;
+            chipScrollRef.current?.scrollTo({ x: 0, animated: false });
+            syncChipEdges();
         }
     }, [visible]);
 
@@ -210,6 +272,74 @@ export function BlockEditorModal({
                                             </TouchableOpacity>
                                         </View>
                                     </View>
+
+                                    {/* Available times */}
+                                    {availableRanges.length > 0 && (
+                                        <View style={styles.availableSection}>
+                                            <Text style={styles.modalLabel}>Available times</Text>
+                                            <View style={styles.chipStrip}>
+                                                <Animated.View
+                                                    style={[styles.chipGutter, leftEdgeStyle]}
+                                                    pointerEvents={canScrollChipsLeft ? 'auto' : 'none'}
+                                                >
+                                                    <TouchableOpacity
+                                                        onPress={() => scrollChips('left')}
+                                                        activeOpacity={0.5}
+                                                        hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                                                        style={styles.chipChevron}
+                                                    >
+                                                        <Feather name="chevron-left" size={20} color="#7a736a" />
+                                                    </TouchableOpacity>
+                                                </Animated.View>
+
+                                                <ScrollView
+                                                    ref={chipScrollRef}
+                                                    style={styles.chipScroll}
+                                                    horizontal
+                                                    showsHorizontalScrollIndicator={false}
+                                                    keyboardShouldPersistTaps="handled"
+                                                    scrollEventThrottle={16}
+                                                    onScroll={handleChipScroll}
+                                                    onLayout={(e) => setChipViewportWidth(e.nativeEvent.layout.width)}
+                                                    onContentSizeChange={(w) => setChipContentWidth(w)}
+                                                    contentContainerStyle={styles.chipRow}
+                                                >
+                                                    {availableRanges.map((range) => {
+                                                        const active = startTime === range.startTime && endTime === range.endTime;
+                                                        return (
+                                                            <TouchableOpacity
+                                                                key={`${range.startTime}-${range.endTime}`}
+                                                                style={[styles.chip, active && styles.chipActive]}
+                                                                onPress={() => {
+                                                                    setStartTime(range.startTime);
+                                                                    setEndTime(range.endTime);
+                                                                }}
+                                                                activeOpacity={0.8}
+                                                            >
+                                                                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                                                                    {formatRangeLabel(range.startTime, range.endTime)}
+                                                                </Text>
+                                                            </TouchableOpacity>
+                                                        );
+                                                    })}
+                                                </ScrollView>
+
+                                                <Animated.View
+                                                    style={[styles.chipGutter, rightEdgeStyle]}
+                                                    pointerEvents={canScrollChipsRight ? 'auto' : 'none'}
+                                                >
+                                                    <TouchableOpacity
+                                                        onPress={() => scrollChips('right')}
+                                                        activeOpacity={0.5}
+                                                        hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                                                        style={styles.chipChevron}
+                                                    >
+                                                        <Feather name="chevron-right" size={20} color="#7a736a" />
+                                                    </TouchableOpacity>
+                                                </Animated.View>
+                                            </View>
+                                        </View>
+                                    )}
                                 </View>
 
                                 <View style={styles.modalDividerLight} />
@@ -339,6 +469,17 @@ const styles = StyleSheet.create({
     timeInputValue: { fontSize: 15, fontWeight: '500', color: '#2a2621', fontVariant: ['tabular-nums'] },
     timeInputPeriod: { fontSize: 11, fontWeight: '500', color: '#d4a574' },
     timeInputPlaceholder: { fontSize: 15, color: 'rgba(122,115,106,0.35)' },
+
+    availableSection: { gap: 12, marginTop: 16 },
+    chipStrip: { flexDirection: 'row', alignItems: 'center' },
+    chipScroll: { flex: 1 },
+    chipRow: { flexDirection: 'row', gap: 8, alignItems: 'center', paddingHorizontal: 2 },
+    chipGutter: { width: 30, alignSelf: 'stretch' },
+    chipChevron: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    chip: { height: 36, borderRadius: 12, backgroundColor: 'rgba(232,228,221,0.35)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 14 },
+    chipActive: { backgroundColor: 'rgba(212,165,116,0.15)', borderWidth: 1.5, borderColor: '#d4a574' },
+    chipText: { fontSize: 13, fontWeight: '500', color: '#7a736a', fontVariant: ['tabular-nums'] },
+    chipTextActive: { color: '#d4a574' },
 
     energySubtitle: { fontSize: 12, color: 'rgba(122,115,106,0.6)', marginTop: -4 },
 

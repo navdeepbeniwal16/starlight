@@ -191,6 +191,82 @@ describe("computeGaps", () => {
         expect(computeGaps({ ...draft(), wakeTime: '23:00', sleepTime: '07:00' })).toEqual([]);
         expect(computeGaps(null)).toEqual([]);
     });
+
+    describe("with excludeIndex (available ranges for the edited block)", () => {
+        it("merges the excluded block's vacated span with the gaps before and after it", () => {
+            // Lunch (12:00-13:00, index 1) sits flush after Deep Work (09:00-12:00).
+            // Excluding it merges its span with the 13:00-20:00 gap into one 12:00-20:00 range.
+            const gaps = computeGaps(draft(), MIN_GAP_MINUTES, 1);
+            expect(gaps).toEqual([
+                { startTime: '07:00', endTime: '09:00', durationMinutes: 120 },
+                { startTime: '12:00', endTime: '20:00', durationMinutes: 480 },
+                { startTime: '22:00', endTime: '23:00', durationMinutes: 60 },
+            ]);
+        });
+
+        it("yields just the excluded block's own span when it has no adjacent free time", () => {
+            const d: TemplateDraft = {
+                wakeTime: '08:00',
+                sleepTime: '11:00',
+                blocks: [
+                    { type: 'CONTAINER', name: 'A', startTime: '08:00', endTime: '09:00', energyLevel: 'HIGH' },
+                    { type: 'ANCHOR', name: 'B', startTime: '09:00', endTime: '10:00' },
+                    { type: 'CONTAINER', name: 'C', startTime: '10:00', endTime: '11:00', energyLevel: 'LOW' },
+                ],
+            };
+            // Excluding B (09:00-10:00), wedged between A and C, frees exactly its own span.
+            expect(computeGaps(d, MIN_GAP_MINUTES, 1)).toEqual([
+                { startTime: '09:00', endTime: '10:00', durationMinutes: 60 },
+            ]);
+        });
+
+        it("still filters sub-threshold slivers after exclusion", () => {
+            const d: TemplateDraft = {
+                wakeTime: '08:00',
+                sleepTime: '12:00',
+                blocks: [
+                    { type: 'CONTAINER', name: 'A', startTime: '08:00', endTime: '09:00', energyLevel: 'HIGH' },
+                    // 10-minute block, flush on both sides — excluding it frees only a 10-min sliver.
+                    { type: 'ANCHOR', name: 'B', startTime: '09:00', endTime: '09:10' },
+                    { type: 'CONTAINER', name: 'C', startTime: '09:10', endTime: '12:00', energyLevel: 'LOW' },
+                ],
+            };
+            expect(computeGaps(d, MIN_GAP_MINUTES, 1)).toEqual([]);
+        });
+
+        it("behaves exactly as today when excludeIndex is undefined", () => {
+            expect(computeGaps(draft(), MIN_GAP_MINUTES, undefined)).toEqual(computeGaps(draft()));
+        });
+
+        it("yields no ranges for a fully packed day even with an exclusion out of range", () => {
+            const d: TemplateDraft = {
+                wakeTime: '08:00',
+                sleepTime: '10:00',
+                blocks: [
+                    { type: 'CONTAINER', name: 'A', startTime: '08:00', endTime: '09:00', energyLevel: 'HIGH' },
+                    { type: 'CONTAINER', name: 'B', startTime: '09:00', endTime: '10:00', energyLevel: 'LOW' },
+                ],
+            };
+            expect(computeGaps(d, MIN_GAP_MINUTES, 5)).toEqual([]);
+        });
+
+        it("handles blocks in start order regardless of input order", () => {
+            const d: TemplateDraft = {
+                wakeTime: '08:00',
+                sleepTime: '14:00',
+                blocks: [
+                    // Given out of order: C, A, B.
+                    { type: 'NO_TASK', name: 'C', startTime: '13:00', endTime: '14:00' },
+                    { type: 'CONTAINER', name: 'A', startTime: '08:00', endTime: '09:00', energyLevel: 'HIGH' },
+                    { type: 'ANCHOR', name: 'B', startTime: '11:00', endTime: '12:00' },
+                ],
+            };
+            // Exclude B (index 2): its 11:00-12:00 span merges with 09:00-11:00 and 12:00-13:00.
+            expect(computeGaps(d, MIN_GAP_MINUTES, 2)).toEqual([
+                { startTime: '09:00', endTime: '13:00', durationMinutes: 240 },
+            ]);
+        });
+    });
 });
 
 describe("hasContainer", () => {

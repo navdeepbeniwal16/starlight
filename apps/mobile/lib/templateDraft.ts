@@ -57,7 +57,16 @@ export function isTemplateValid(draft: TemplateDraft | null): boolean {
 // The free spans between blocks within the wake/sleep window, each at least minMinutes long.
 // Blocks are swept in start order behind a forward-only cursor,
 // so overlapping or out-of-range blocks never yield negative gaps.
-export function computeGaps(draft: TemplateDraft | null, minMinutes: number = MIN_GAP_MINUTES): TemplateGap[] {
+//
+// `excludeIndex` drops the block at that index from the occupiers before the sweep
+// (mirroring `hasOverlap`/`validateBlockDraft`), so its vacated span merges with the
+// gaps immediately before and after it into one contiguous range — the block's full
+// set of valid placements when it is the one being retimed.
+export function computeGaps(
+    draft: TemplateDraft | null,
+    minMinutes: number = MIN_GAP_MINUTES,
+    excludeIndex?: number,
+): TemplateGap[] {
     if (!draft) return [];
     const wake = toMins(draft.wakeTime);
     const sleep = toMins(draft.sleepTime);
@@ -69,7 +78,9 @@ export function computeGaps(draft: TemplateDraft | null, minMinutes: number = MI
         durationMinutes: end - start,
     });
 
-    const sorted = [...draft.blocks].sort((a, b) => toMins(a.startTime) - toMins(b.startTime));
+    const sorted = draft.blocks
+        .filter((_, i) => i !== excludeIndex)
+        .sort((a, b) => toMins(a.startTime) - toMins(b.startTime));
     const gaps: TemplateGap[] = [];
     let cursor = wake;
     for (const block of sorted) {
