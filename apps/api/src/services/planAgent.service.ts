@@ -11,6 +11,9 @@ const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-opus-4-8";
 
 export const CAPACITY_TOLERANCE_MINS = 15;
 
+// 2 retries after the first call = 3 model calls total.
+export const MAX_REPLAN_ATTEMPTS = 2;
+
 export const FLOOR_EVICTION_REASON = "There wasn't enough time to fit this in a block.";
 
 // ─── Agent input/output shapes ────────────────────────────────────────────────
@@ -261,6 +264,32 @@ export function evictToFit(
     };
 }
 
+/**
+ * buildOverflowFeedback renders re-plan feedback for over-capacity blocks. It
+ * deliberately never discloses the tolerance — the model is told to fit within capacity,
+ * so the floor's slack stays private.
+ */
+export function buildOverflowFeedback(
+    blocks: AgentBlock[],
+    tasks: AgentTask[],
+    assignments: Assignment[],
+    tolerance: number,
+): string {
+    const overflows = overflowsOf(blocks, tasks, assignments, tolerance);
+    const nameById = new Map(blocks.map(b => [b.id, b.name]));
+    const lines = overflows.map(
+        o => `- "${nameById.get(o.blockId) ?? o.blockId}" (${o.blockId}): capacity ${o.capacity} min, assigned ${o.committed} min, over by ${o.overflow} min`,
+    );
+    return [
+        "One or more blocks are scheduled beyond their capacity. Fit each block's assigned work within its capacity.",
+        "Prefer moving lower-value tasks to blocks with room, and keep the highest-value tasks scheduled; mark a task unschedulable only as a last resort.",
+        "Resubmit the full schedule via submit_schedule.",
+        "",
+        "Over-capacity blocks:",
+        ...lines,
+    ].join("\n");
+}
+
 // ─── Claude invocation ────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `You are a scheduling agent for a daily planner. You assign tasks into the available time blocks for the remainder of a user's day.
@@ -274,7 +303,7 @@ Rules:
 - blockOrder is the 0-based position of a task within its block, reflecting the suggested order of execution.
 - If a task cannot fit into any block (its remainingMins exceeds every block's remaining capacity), return it in "unschedulable" with a short human-readable reason. Every task must appear in exactly one of "assignments" or "unschedulable".
 
-Call the submit_schedule tool with your result.`;
+You MUST call the submit_schedule tool on every turn with your complete schedule — including when revising after feedback. Never reply without calling it.`;
 
 const SCHEDULE_TOOL: Anthropic.Tool = {
     name: "submit_schedule",
@@ -312,43 +341,44 @@ const SCHEDULE_TOOL: Anthropic.Tool = {
     },
 };
 
-// Runs one turn of the model conversation and returns the raw submit_schedule input.
-async function callClaude(messages: Anthropic.MessageParam[]): Promise<unknown> {
-    let message;
+// tool_choice stays `auto` because forcing a specific tool is incompatible with
+// thinking; the system prompt guarantees the submit_schedule call instead.
+// disable_parallel_tool_use keeps each turn to a single tool_use, so the loop's echo of
+// the assistant turn is always matched by exactly one tool_result on the next request.
+async function callClaude(messages: Anthropic.MessageParam[]): Promise<Anthropic.Message> {
     try {
-        message = await getAnthropic().messages.create({
+        return await getAnthropic().messages.create({
             model: MODEL,
-            max_tokens: 4096,
+            max_tokens: 16000,
+            thinking: { type: "adaptive" },
             system: SYSTEM_PROMPT,
             tools: [SCHEDULE_TOOL],
-            tool_choice: { type: "tool", name: "submit_schedule" },
+            tool_choice: { type: "auto", disable_parallel_tool_use: true },
             messages,
         });
     } catch (err) {
         throw new AgentError(`Agent request failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-
-    const block = message.content.find(b => b.type === "tool_use");
-    if (!block || block.type !== "tool_use") {
-        throw new AgentError("Agent did not return a tool_use block");
-    }
-    return block.input;
 }
 
-// Dependency seam for the model round-trip, injected so tests can script responses. It
-// takes the whole message array rather than a lone input so the re-plan loop can later
-// drive a multi-turn conversation through the same seam.
-export type ScheduleDeps = { callModel: (messages: Anthropic.MessageParam[]) => Promise<unknown> };
+// Null (rather than a throw) when the model didn't call submit_schedule — possible under
+// tool_choice: auto, and salvaged by the caller instead of being fatal.
+function toolUseOf(message: Anthropic.Message): { input: unknown; toolUseId: string } | null {
+    const block = message.content.find(b => b.type === "tool_use");
+    if (!block || block.type !== "tool_use") return null;
+    return { input: block.input, toolUseId: block.id };
+}
+
+export type ScheduleDeps = { callModel: (messages: Anthropic.MessageParam[]) => Promise<Anthropic.Message> };
 const defaultDeps: ScheduleDeps = { callModel: callClaude };
 
 /**
- * Builds the agent input, gets a schedule from the model, and returns a result that is
- * valid, deduplicated, and capacity-safe.
+ * generateSchedule returns a valid, deduplicated, capacity-safe schedule.
  *
- * After normalization, the deterministic floor guarantees the hard ceiling: no returned
- * block is committed beyond capacity + tolerance. When the model overcommits, the
- * lowest-valued tasks are evicted from the offending blocks and moved to unschedulable,
- * and a `warn` is logged so we can see how often the floor bottoms out and on what.
+ * The model gets up to MAX_REPLAN_ATTEMPTS re-plans to fix overcommitted blocks while
+ * preserving high-value work; if it can't converge, the deterministic floor evicts the
+ * lowest-valued tasks as a backstop. Either way, no returned block exceeds
+ * capacity + tolerance.
  */
 export async function generateSchedule(
     blocks: RawBlock[],
@@ -356,18 +386,55 @@ export async function generateSchedule(
     deps: ScheduleDeps = defaultDeps,
 ): Promise<AgentResult> {
     const input = buildAgentInput(blocks, tasks);
-    const messages: Anthropic.MessageParam[] = [{ role: "user", content: JSON.stringify(input) }];
-    const raw = await deps.callModel(messages);
-    const result = parseAgentResult(raw);
-
     const containerBlockIds = new Set(blocks.filter(b => b.type === "CONTAINER").map(b => b.id));
     const taskIds = new Set(tasks.map(t => t.id));
-    const normalized = normalizeAssignments(result, containerBlockIds, taskIds);
 
-    const overflows = overflowsOf(input.blocks, input.tasks, normalized.assignments, CAPACITY_TOLERANCE_MINS);
-    if (overflows.length === 0) return normalized;
+    // The transcript is the model's holistic view: message[0] holds the full input and
+    // each turn is appended, so every re-plan sees the whole day and its own prior plan.
+    const messages: Anthropic.MessageParam[] = [{ role: "user", content: JSON.stringify(input) }];
 
-    const { assignments, evicted } = evictToFit(input.blocks, input.tasks, normalized.assignments, CAPACITY_TOLERANCE_MINS);
+    let normalized: AgentResult | undefined;
+    let overflows: BlockOverflow[] = [];
+
+    for (let attempt = 0; ; attempt++) {
+        const message = await deps.callModel(messages);
+
+        const toolUse = toolUseOf(message);
+        // Under tool_choice: auto the model can answer without calling submit_schedule.
+        // Fall back to the best schedule so far and let the floor make it safe; only the
+        // very first turn has nothing to salvage, so that alone is unrecoverable.
+        if (!toolUse) {
+            if (!normalized) throw new AgentError("Agent did not return a tool_use block");
+            break;
+        }
+
+        normalized = normalizeAssignments(parseAgentResult(toolUse.input), containerBlockIds, taskIds);
+
+        overflows = overflowsOf(input.blocks, input.tasks, normalized.assignments, CAPACITY_TOLERANCE_MINS);
+        if (overflows.length === 0) return normalized;
+        if (attempt >= MAX_REPLAN_ATTEMPTS) break;
+
+        logger.debug(
+            { attempt: attempt + 1, overflows: overflows.map(o => ({ blockId: o.blockId, overflow: o.overflow })) },
+            "Re-plan loop: block(s) over capacity, requesting a fresh schedule",
+        );
+
+        // The API requires prior thinking blocks to be replayed unchanged, so echo the
+        // full response verbatim.
+        messages.push({ role: "assistant", content: message.content });
+        messages.push({
+            role: "user",
+            content: [{
+                type: "tool_result",
+                tool_use_id: toolUse.toolUseId,
+                content: buildOverflowFeedback(input.blocks, input.tasks, normalized.assignments, CAPACITY_TOLERANCE_MINS),
+            }],
+        });
+    }
+
+    // Reached only via `break`, which always runs after `normalized` has been assigned.
+    const finalSchedule = normalized as AgentResult;
+    const { assignments, evicted } = evictToFit(input.blocks, input.tasks, finalSchedule.assignments, CAPACITY_TOLERANCE_MINS);
 
     // Overrun each floored block still carries past true capacity — now within tolerance
     // (may be ≤ 0). Surfaced in the warn log to show how much slack the floor leaned on.
@@ -381,7 +448,7 @@ export async function generateSchedule(
     return {
         assignments,
         unschedulable: [
-            ...normalized.unschedulable,
+            ...finalSchedule.unschedulable,
             ...evicted.map(taskId => ({ taskId, reason: FLOOR_EVICTION_REASON })),
         ],
     };

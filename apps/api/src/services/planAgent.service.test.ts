@@ -4,9 +4,11 @@ import {
     normalizeAssignments,
     overflowsOf,
     evictToFit,
+    buildOverflowFeedback,
     generateSchedule,
     AgentError,
     CAPACITY_TOLERANCE_MINS,
+    MAX_REPLAN_ATTEMPTS,
     FLOOR_EVICTION_REASON,
     type AgentResult,
     type AgentBlock,
@@ -247,7 +249,67 @@ describe("evictToFit", () => {
     });
 });
 
-// ─── generateSchedule (injected fixture) ──────────────────────────────────────
+// ─── buildOverflowFeedback ────────────────────────────────────────────────────
+
+describe("buildOverflowFeedback", () => {
+    it("lists each over-capacity block with capacity/assigned/overflow and never leaks the tolerance", () => {
+        const blocks = [agentBlock({ id: "c1", name: "Deep Work", startTime: "09:00", endTime: "10:00" })];
+        const tasks = [agentTask({ id: "t1", remainingMins: 50 }), agentTask({ id: "t2", remainingMins: 50 })];
+        const feedback = buildOverflowFeedback(blocks, tasks, [assign("t1", "c1", 0), assign("t2", "c1", 1)], CAPACITY_TOLERANCE_MINS);
+
+        expect(feedback).toContain('"Deep Work" (c1): capacity 60 min, assigned 100 min, over by 40 min');
+        expect(feedback).toContain("Resubmit the full schedule");
+        expect(feedback).not.toContain(String(CAPACITY_TOLERANCE_MINS)); // tolerance stays private to the floor
+    });
+
+    it("emits no block lines when every block is within tolerance", () => {
+        const blocks = [agentBlock({ id: "c1", startTime: "09:00", endTime: "10:00" })];
+        const tasks = [agentTask({ id: "t1", remainingMins: 70 })]; // 60 cap + 10, inside the 15-min slack → no overflow
+        const feedback = buildOverflowFeedback(blocks, tasks, [assign("t1", "c1", 0)], CAPACITY_TOLERANCE_MINS);
+
+        expect(feedback.trimEnd().endsWith("Over-capacity blocks:")).toBe(true);
+    });
+});
+
+// ─── generateSchedule (callModel scripting) ───────────────────────────────────
+
+// Mirrors callModel's return: an AgentResult wrapped in a tool_use, optionally preceded
+// by a thinking block.
+function modelMessage(
+    result: AgentResult,
+    opts: { thinking?: string; toolUseId?: string } = {},
+): Anthropic.Message {
+    const content: Anthropic.ContentBlock[] = [];
+    if (opts.thinking !== undefined) {
+        content.push({ type: "thinking", thinking: opts.thinking, signature: "sig" });
+    }
+    content.push({
+        type: "tool_use",
+        id: opts.toolUseId ?? "toolu_1",
+        name: "submit_schedule",
+        input: result,
+    } as Anthropic.ToolUseBlock);
+    return { content } as unknown as Anthropic.Message;
+}
+
+// Scripts callModel turn-by-turn (repeating the last response) and snapshots the messages
+// array each turn, so tests can assert on the conversation the loop built.
+function scriptModel(...responses: Anthropic.Message[]): {
+    callModel: (messages: Anthropic.MessageParam[]) => Promise<Anthropic.Message>;
+    calls: Anthropic.MessageParam[][];
+} {
+    const calls: Anthropic.MessageParam[][] = [];
+    let turn = 0;
+    return {
+        calls,
+        callModel: async (messages) => {
+            calls.push(structuredClone(messages)); // the loop mutates one array across turns
+            const res = responses[Math.min(turn, responses.length - 1)];
+            turn += 1;
+            return res;
+        },
+    };
+}
 
 describe("generateSchedule", () => {
     it("passes CONTAINER-only blocks and pre-computed remainingMins to the agent", async () => {
@@ -255,7 +317,7 @@ describe("generateSchedule", () => {
         const deps = {
             callModel: async (messages: Anthropic.MessageParam[]) => {
                 captured = JSON.parse(messages[0].content as string) as AgentInput;
-                return { assignments: [], unschedulable: [] };
+                return modelMessage({ assignments: [], unschedulable: [] });
             },
         };
 
@@ -269,34 +331,42 @@ describe("generateSchedule", () => {
         expect(captured!.tasks[0]).toMatchObject({ id: "t1", remainingMins: 60 });
     });
 
-    it("returns the parsed agent output (recorded fixture)", async () => {
-        // Stands in for a recorded Claude tool_use response in CI.
-        const fixture = {
+    it("happy path: a fitting schedule returns in a single call, no floor", async () => {
+        const fixture: AgentResult = {
             assignments: [{ taskId: "t1", blockId: "c1", blockOrder: 0 }],
             unschedulable: [{ taskId: "t2", reason: "remainingMins exceeds all block capacities" }],
         };
-        const deps = { callModel: async () => fixture };
+        const deps = scriptModel(modelMessage(fixture));
 
         const result = await generateSchedule([block({ id: "c1" })], [task()], deps);
 
         expect(result).toEqual(fixture);
+        expect(deps.calls).toHaveLength(1);
     });
 
     it("rejects malformed agent output with AgentError", async () => {
-        const deps = { callModel: async () => ({ assignments: "nope" }) };
+        const deps = scriptModel(modelMessage({ assignments: "nope" } as unknown as AgentResult));
         await expect(generateSchedule([block()], [task()], deps)).rejects.toThrow(AgentError);
     });
 
-    it("applies the floor when the model overcommits a block: trims it and marks the evicted task unschedulable", async () => {
-        // A 60-minute block the model packs with 100 minutes of work (2 × 50).
-        const fixture = {
+    it("throws AgentError when the model turn carries no submit_schedule call", async () => {
+        const deps = {
+            callModel: async () =>
+                ({ content: [{ type: "text", text: "no tool call" }] } as unknown as Anthropic.Message),
+        };
+        await expect(generateSchedule([block()], [task()], deps)).rejects.toThrow(AgentError);
+    });
+
+    it("salvages the prior schedule to the floor when a later turn carries no tool call", async () => {
+        const overcommit = modelMessage({
             assignments: [
                 { taskId: "t1", blockId: "c1", blockOrder: 0 },
                 { taskId: "t2", blockId: "c1", blockOrder: 1 },
             ],
             unschedulable: [],
-        };
-        const deps = { callModel: async () => fixture };
+        });
+        const textOnly = { content: [{ type: "text", text: "hmm" }] } as unknown as Anthropic.Message;
+        const deps = scriptModel(overcommit, textOnly);
 
         const result = await generateSchedule(
             [block({ id: "c1", startTime: "09:00", endTime: "10:00" })],
@@ -304,7 +374,72 @@ describe("generateSchedule", () => {
             deps,
         );
 
-        // The highest-blockOrder task is evicted until the block fits within tolerance.
+        expect(deps.calls).toHaveLength(2);
+        expect(result.assignments).toEqual([{ taskId: "t1", blockId: "c1", blockOrder: 0 }]);
+        expect(result.unschedulable).toEqual([{ taskId: "t2", reason: FLOOR_EVICTION_REASON }]);
+    });
+
+    it("overflow then fix: converges on the retry without the floor firing", async () => {
+        const blocks = [
+            block({ id: "c1", startTime: "09:00", endTime: "10:00" }),
+            block({ id: "c2", startTime: "10:00", endTime: "12:00" }),
+        ];
+        const tasks = [task({ id: "t1", estimatedMins: 50 }), task({ id: "t2", estimatedMins: 50 })];
+
+        const overcommit = modelMessage(
+            {
+                assignments: [
+                    { taskId: "t1", blockId: "c1", blockOrder: 0 },
+                    { taskId: "t2", blockId: "c1", blockOrder: 1 },
+                ],
+                unschedulable: [],
+            },
+            { thinking: "packing c1" },
+        );
+        const fixed = modelMessage({
+            assignments: [
+                { taskId: "t1", blockId: "c1", blockOrder: 0 },
+                { taskId: "t2", blockId: "c2", blockOrder: 0 },
+            ],
+            unschedulable: [],
+        });
+        const deps = scriptModel(overcommit, fixed);
+
+        const result = await generateSchedule(blocks, tasks, deps);
+
+        expect(result.assignments).toEqual([
+            { taskId: "t1", blockId: "c1", blockOrder: 0 },
+            { taskId: "t2", blockId: "c2", blockOrder: 0 },
+        ]);
+        expect(result.unschedulable).toEqual([]);
+        expect(deps.calls).toHaveLength(2);
+
+        // deps.calls[1] = [original input, echoed assistant turn, tool_result feedback].
+        const retryTurn = deps.calls[1];
+        expect(retryTurn).toHaveLength(3);
+        expect(retryTurn[1]).toEqual({ role: "assistant", content: overcommit.content });
+        const toolResult = (retryTurn[2].content as Anthropic.ToolResultBlockParam[])[0];
+        expect(toolResult.tool_use_id).toBe("toolu_1");
+        expect(toolResult.content).toContain("capacity 60 min, assigned 100 min, over by 40 min");
+    });
+
+    it("always overflows: the loop exhausts its budget and the floor evicts to fit", async () => {
+        const overcommit = modelMessage({
+            assignments: [
+                { taskId: "t1", blockId: "c1", blockOrder: 0 },
+                { taskId: "t2", blockId: "c1", blockOrder: 1 },
+            ],
+            unschedulable: [],
+        });
+        const deps = scriptModel(overcommit);
+
+        const result = await generateSchedule(
+            [block({ id: "c1", startTime: "09:00", endTime: "10:00" })],
+            [task({ id: "t1", estimatedMins: 50 }), task({ id: "t2", estimatedMins: 50 })],
+            deps,
+        );
+
+        expect(deps.calls).toHaveLength(1 + MAX_REPLAN_ATTEMPTS);
         expect(result.assignments).toEqual([{ taskId: "t1", blockId: "c1", blockOrder: 0 }]);
         expect(result.unschedulable).toEqual([{ taskId: "t2", reason: FLOOR_EVICTION_REASON }]);
     });

@@ -9,7 +9,8 @@ const YESTERDAY = "2026-06-19";
 
 let userId: string;
 
-// A fake agent that returns a canned result and records the input it was given.
+// Fake agent: returns a canned result wrapped as callModel's tool_use message, and
+// records the input it saw.
 function fakeAgent(result: AgentResult) {
     const calls: AgentInput[] = [];
     return {
@@ -17,7 +18,9 @@ function fakeAgent(result: AgentResult) {
         deps: {
             callModel: async (messages: Anthropic.MessageParam[]) => {
                 calls.push(JSON.parse(messages[0].content as string) as AgentInput);
-                return result;
+                return {
+                    content: [{ type: "tool_use", id: "toolu_1", name: "submit_schedule", input: result }],
+                } as unknown as Anthropic.Message;
             },
         },
     };
