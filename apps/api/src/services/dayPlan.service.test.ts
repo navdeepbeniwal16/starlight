@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { getDayPlan, getReviewTasks, generatePlanProposal, confirmPlan, NoTemplateError, NoContainerBlocksError, InvalidAssignmentError } from "./dayPlan.service";
+import type { Anthropic } from "@anthropic-ai/sdk";
 import type { AgentInput, AgentResult } from "./planAgent.service";
 
 const TEST_EMAIL = "test-dayplan-service@starlight.test";
@@ -14,8 +15,8 @@ function fakeAgent(result: AgentResult) {
     return {
         calls,
         deps: {
-            callAgent: async (input: AgentInput) => {
-                calls.push(input);
+            callModel: async (messages: Anthropic.MessageParam[]) => {
+                calls.push(JSON.parse(messages[0].content as string) as AgentInput);
                 return result;
             },
         },

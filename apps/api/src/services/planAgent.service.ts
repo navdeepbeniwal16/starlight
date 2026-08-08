@@ -1,12 +1,17 @@
 import { z } from "zod";
 import type { Anthropic } from "@anthropic-ai/sdk";
 import { getAnthropic } from "../lib/anthropic";
+import logger from "../lib/logger";
 import type { BlockType, EnergyLevel, Priority, TaskStatus } from "@prisma/client";
 
 // Thrown when the agent call fails or returns output we can't parse.
 export class AgentError extends Error { }
 
 const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-opus-4-8";
+
+export const CAPACITY_TOLERANCE_MINS = 15;
+
+export const FLOOR_EVICTION_REASON = "There wasn't enough time to fit this in a block.";
 
 // ─── Agent input/output shapes ────────────────────────────────────────────────
 
@@ -154,6 +159,108 @@ export function normalizeAssignments(
     return { assignments, unschedulable: result.unschedulable };
 }
 
+// ─── Capacity guardrail ───────────────────────────────────────────────────────
+
+function hhmmToMins(hhmm: string): number {
+    const [h, m] = hhmm.split(":").map(Number);
+    return h * 60 + m;
+}
+
+// Positive by construction: blocks are pre-validated (start < end) and never wrap midnight.
+function capacityOf(block: AgentBlock): number {
+    return hhmmToMins(block.endTime) - hhmmToMins(block.startTime);
+}
+
+function committedMinsByBlock(
+    tasks: AgentTask[],
+    assignments: Assignment[],
+): Map<string, number> {
+    const remainingById = new Map(tasks.map(t => [t.id, t.remainingMins]));
+    const committed = new Map<string, number>();
+    for (const a of assignments) {
+        const mins = remainingById.get(a.taskId) ?? 0;
+        committed.set(a.blockId, (committed.get(a.blockId) ?? 0) + mins);
+    }
+    return committed;
+}
+
+// A block committed beyond capacity + tolerance, with its overflow past true capacity.
+export type BlockOverflow = {
+    blockId: string;
+    capacity: number;
+    committed: number;
+    overflow: number;
+};
+
+/**
+ * Finds blocks whose committed work exceeds their capacity by more than `tolerance`.
+ *
+ * Pure. The threshold is `capacity + tolerance` (a block committed exactly to that
+ * bound is within tolerance, not over), but the reported `overflow` is measured
+ * against true capacity — the honest "how far past what fits" figure that feeds
+ * eviction targets and the floor's residual log.
+ *
+ * @returns One entry per over-capacity block; an empty array means every block fits.
+ */
+export function overflowsOf(
+    blocks: AgentBlock[],
+    tasks: AgentTask[],
+    assignments: Assignment[],
+    tolerance: number,
+): BlockOverflow[] {
+    const committed = committedMinsByBlock(tasks, assignments);
+    const overflows: BlockOverflow[] = [];
+    for (const block of blocks) {
+        const capacity = capacityOf(block);
+        const used = committed.get(block.id) ?? 0;
+        const overflow = used - capacity;
+        if (overflow > tolerance) {
+            overflows.push({ blockId: block.id, capacity, committed: used, overflow });
+        }
+    }
+    return overflows;
+}
+
+/**
+ * The deterministic floor: trims each over-capacity block until it fits within
+ * `capacity + tolerance` by evicting its highest-`blockOrder` tasks first.
+ *
+ * @returns The surviving assignments and the ids of tasks evicted to make room.
+ */
+export function evictToFit(
+    blocks: AgentBlock[],
+    tasks: AgentTask[],
+    assignments: Assignment[],
+    tolerance: number,
+): { assignments: Assignment[]; evicted: string[] } {
+    const remainingById = new Map(tasks.map(t => [t.id, t.remainingMins]));
+    const capacityById = new Map(blocks.map(b => [b.id, capacityOf(b)]));
+
+    const evicted = new Set<string>();
+    const byBlock = new Map<string, Assignment[]>();
+    for (const a of assignments) {
+        const list = byBlock.get(a.blockId) ?? [];
+        list.push(a);
+        byBlock.set(a.blockId, list);
+    }
+
+    for (const [blockId, placed] of byBlock) {
+        const capacity = capacityById.get(blockId) ?? 0;
+        let committed = placed.reduce((sum, a) => sum + (remainingById.get(a.taskId) ?? 0), 0);
+        const byValueAscending = [...placed].sort((x, y) => y.blockOrder - x.blockOrder);
+        for (const a of byValueAscending) {
+            if (committed - capacity <= tolerance) break;
+            evicted.add(a.taskId);
+            committed -= remainingById.get(a.taskId) ?? 0;
+        }
+    }
+
+    return {
+        assignments: assignments.filter(a => !evicted.has(a.taskId)),
+        evicted: [...evicted],
+    };
+}
+
 // ─── Claude invocation ────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `You are a scheduling agent for a daily planner. You assign tasks into the available time blocks for the remainder of a user's day.
@@ -205,8 +312,8 @@ const SCHEDULE_TOOL: Anthropic.Tool = {
     },
 };
 
-// Calls Claude with the constructed prompt and returns the raw tool input.
-async function callClaude(input: AgentInput): Promise<unknown> {
+// Runs one turn of the model conversation and returns the raw submit_schedule input.
+async function callClaude(messages: Anthropic.MessageParam[]): Promise<unknown> {
     let message;
     try {
         message = await getAnthropic().messages.create({
@@ -215,7 +322,7 @@ async function callClaude(input: AgentInput): Promise<unknown> {
             system: SYSTEM_PROMPT,
             tools: [SCHEDULE_TOOL],
             tool_choice: { type: "tool", name: "submit_schedule" },
-            messages: [{ role: "user", content: JSON.stringify(input) }],
+            messages,
         });
     } catch (err) {
         throw new AgentError(`Agent request failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -228,21 +335,54 @@ async function callClaude(input: AgentInput): Promise<unknown> {
     return block.input;
 }
 
-// Dependency seam — lets tests inject a recorded fixture in place of the live call.
-export type ScheduleDeps = { callAgent: (input: AgentInput) => Promise<unknown> };
-const defaultDeps: ScheduleDeps = { callAgent: callClaude };
+// Dependency seam for the model round-trip, injected so tests can script responses. It
+// takes the whole message array rather than a lone input so the re-plan loop can later
+// drive a multi-turn conversation through the same seam.
+export type ScheduleDeps = { callModel: (messages: Anthropic.MessageParam[]) => Promise<unknown> };
+const defaultDeps: ScheduleDeps = { callModel: callClaude };
 
-// Builds the agent input, invokes the agent, and returns a parsed, normalized result 
+/**
+ * Builds the agent input, gets a schedule from the model, and returns a result that is
+ * valid, deduplicated, and capacity-safe.
+ *
+ * After normalization, the deterministic floor guarantees the hard ceiling: no returned
+ * block is committed beyond capacity + tolerance. When the model overcommits, the
+ * lowest-valued tasks are evicted from the offending blocks and moved to unschedulable,
+ * and a `warn` is logged so we can see how often the floor bottoms out and on what.
+ */
 export async function generateSchedule(
     blocks: RawBlock[],
     tasks: RawTask[],
     deps: ScheduleDeps = defaultDeps,
 ): Promise<AgentResult> {
     const input = buildAgentInput(blocks, tasks);
-    const raw = await deps.callAgent(input);
+    const messages: Anthropic.MessageParam[] = [{ role: "user", content: JSON.stringify(input) }];
+    const raw = await deps.callModel(messages);
     const result = parseAgentResult(raw);
 
     const containerBlockIds = new Set(blocks.filter(b => b.type === "CONTAINER").map(b => b.id));
     const taskIds = new Set(tasks.map(t => t.id));
-    return normalizeAssignments(result, containerBlockIds, taskIds);
+    const normalized = normalizeAssignments(result, containerBlockIds, taskIds);
+
+    const overflows = overflowsOf(input.blocks, input.tasks, normalized.assignments, CAPACITY_TOLERANCE_MINS);
+    if (overflows.length === 0) return normalized;
+
+    const { assignments, evicted } = evictToFit(input.blocks, input.tasks, normalized.assignments, CAPACITY_TOLERANCE_MINS);
+
+    // Overrun each floored block still carries past true capacity — now within tolerance
+    // (may be ≤ 0). Surfaced in the warn log to show how much slack the floor leaned on.
+    const overIds = new Set(overflows.map(o => o.blockId));
+    const committedAfter = committedMinsByBlock(input.tasks, assignments);
+    const residual = input.blocks
+        .filter(b => overIds.has(b.id))
+        .map(b => ({ blockId: b.id, overflow: (committedAfter.get(b.id) ?? 0) - capacityOf(b) }));
+    logger.warn({ evicted, residual }, "Capacity floor evicted tasks to fit blocks within capacity");
+
+    return {
+        assignments,
+        unschedulable: [
+            ...normalized.unschedulable,
+            ...evicted.map(taskId => ({ taskId, reason: FLOOR_EVICTION_REASON })),
+        ],
+    };
 }
