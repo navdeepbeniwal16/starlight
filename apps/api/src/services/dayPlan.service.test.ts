@@ -6,6 +6,7 @@ import type { AgentInput, AgentResult } from "./planAgent.service";
 const TEST_EMAIL = "test-dayplan-service@starlight.test";
 const DATE = "2026-06-20";
 const YESTERDAY = "2026-06-19";
+const NOW = "2026-06-20T08:00:00.000Z";
 
 let userId: string;
 
@@ -64,6 +65,8 @@ async function seedTask(title: string, overrides: Partial<{
     status: "TODO" | "IN_PROGRESS" | "DONE";
     plannedBlockId: string;
     blockOrder: number;
+    notes: string;
+    createdAt: Date;
 }> = {}) {
     return prisma.task.create({
         data: {
@@ -72,6 +75,8 @@ async function seedTask(title: string, overrides: Partial<{
             estimatedMins: overrides.estimatedMins ?? 60,
             status: overrides.status ?? "TODO",
             progress: overrides.progress ?? 0,
+            ...(overrides.notes !== undefined && { notes: overrides.notes }),
+            ...(overrides.createdAt !== undefined && { createdAt: overrides.createdAt }),
             ...(overrides.plannedBlockId !== undefined && { plannedBlockId: overrides.plannedBlockId }),
             ...(overrides.blockOrder !== undefined && { blockOrder: overrides.blockOrder }),
         },
@@ -141,7 +146,7 @@ afterAll(async () => {
 
 describe("generatePlanProposal", () => {
     it("throws NoTemplateError when the user has no template", async () => {
-        await expect(generatePlanProposal(userId, DATE, "08:00", noopAgent().deps))
+        await expect(generatePlanProposal(userId, DATE, "08:00", NOW, noopAgent().deps))
             .rejects.toBeInstanceOf(NoTemplateError);
     });
 
@@ -150,13 +155,13 @@ describe("generatePlanProposal", () => {
             { type: "CONTAINER", name: "Morning", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" },
             { type: "ANCHOR", name: "Dinner", startTime: "18:00", endTime: "19:00" },
         ]);
-        await expect(generatePlanProposal(userId, DATE, "13:00", noopAgent().deps))
+        await expect(generatePlanProposal(userId, DATE, "13:00", NOW, noopAgent().deps))
             .rejects.toBeInstanceOf(NoContainerBlocksError);
     });
 
     it("returns eligible blocks keyed by template block id, clamping an in-progress block", async () => {
         const template = await seedTemplate();
-        const proposal = await generatePlanProposal(userId, DATE, "10:00", noopAgent().deps);
+        const proposal = await generatePlanProposal(userId, DATE, "10:00", NOW, noopAgent().deps);
 
         expect(proposal.wakeTime).toBe("07:00");
         expect(proposal.sleepTime).toBe("23:00");
@@ -173,7 +178,7 @@ describe("generatePlanProposal", () => {
         await seedTemplate();
         const task = await seedTask("Backlog task");
 
-        await generatePlanProposal(userId, DATE, "08:00", fakeAgent({
+        await generatePlanProposal(userId, DATE, "08:00", NOW, fakeAgent({
             assignments: [{ taskId: task.id, blockId: "ignored", blockOrder: 0 }],
             unschedulable: [],
         }).deps);
@@ -189,7 +194,7 @@ describe("generatePlanProposal", () => {
         const t1 = await seedTask("First", { estimatedMins: 30 });
         const t2 = await seedTask("Second", { estimatedMins: 60, progress: 50 });
 
-        const proposal = await generatePlanProposal(userId, DATE, "08:00", fakeAgent({
+        const proposal = await generatePlanProposal(userId, DATE, "08:00", NOW, fakeAgent({
             assignments: [
                 { taskId: t2.id, blockId: deepWork.id, blockOrder: 1 },
                 { taskId: t1.id, blockId: deepWork.id, blockOrder: 0 },
@@ -208,7 +213,7 @@ describe("generatePlanProposal", () => {
         const lunch = templateBlock(template, "Lunch");
         const t1 = await seedTask("Valid");
 
-        const proposal = await generatePlanProposal(userId, DATE, "08:00", fakeAgent({
+        const proposal = await generatePlanProposal(userId, DATE, "08:00", NOW, fakeAgent({
             assignments: [
                 { taskId: t1.id, blockId: deepWork.id, blockOrder: 0 },
                 { taskId: t1.id, blockId: lunch.id, blockOrder: 0 },      // duplicate + anchor
@@ -228,7 +233,7 @@ describe("generatePlanProposal", () => {
         const noFit = await seedTask("Too big", { estimatedMins: 600 });
         const dropped = await seedTask("Forgotten by agent");
 
-        const proposal = await generatePlanProposal(userId, DATE, "08:00", fakeAgent({
+        const proposal = await generatePlanProposal(userId, DATE, "08:00", NOW, fakeAgent({
             assignments: [],
             unschedulable: [{ taskId: noFit.id, reason: "Exceeds every block's capacity" }],
         }).deps);
@@ -250,7 +255,7 @@ describe("generatePlanProposal", () => {
         const scheduled = await seedTask("Already scheduled", { plannedBlockId: futureBlock.id, blockOrder: 0 });
         const agent = noopAgent();
 
-        await generatePlanProposal(userId, DATE, "10:00", agent.deps);
+        await generatePlanProposal(userId, DATE, "10:00", NOW, agent.deps);
 
         // The carried-over task was offered to the agent…
         expect(agent.calls[0].tasks.map(t => t.id)).toContain(scheduled.id);
@@ -260,6 +265,20 @@ describe("generatePlanProposal", () => {
         expect(after!.blockOrder).toBe(0);
         const plan = await prisma.dayPlan.findUnique({ where: { id: active.id } });
         expect(plan!.status).toBe("ACTIVE");
+    });
+
+    it("threads `now` and each task's notes and createdAt through to the agent", async () => {
+        await seedTemplate();
+        const createdAt = new Date("2026-05-01T00:00:00.000Z");
+        const t = await seedTask("Backlog task", { notes: "call the vendor first", createdAt });
+        const agent = noopAgent();
+
+        await generatePlanProposal(userId, DATE, "08:00", NOW, agent.deps);
+
+        expect(agent.calls[0].now).toBe(NOW);
+        const sent = agent.calls[0].tasks.find(x => x.id === t.id)!;
+        expect(sent.notes).toBe("call the vendor first");
+        expect(sent.createdAt).toBe(createdAt.toISOString());
     });
 });
 

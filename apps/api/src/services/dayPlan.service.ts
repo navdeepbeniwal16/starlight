@@ -124,6 +124,8 @@ async function getSchedulableTasks(userId: string, planDate: string): Promise<Ra
         effort: true,
         priority: true,
         deadline: true,
+        notes: true,
+        createdAt: true,
         status: true,
     } as const;
 
@@ -192,7 +194,9 @@ function eligibleBlocksOf(blocks: EligibleBlock[], nowHHmm: string): EligibleBlo
  * a block or listed as unschedulable (tasks the agent dropped entirely are
  * added to unschedulable as a fallback).
  *
- * `deps` is the agent dependency seam, forwarded for tests; production omits it.
+ * `nowHHmm` is the user's local wall clock, used to drop elapsed blocks; `now` is
+ * the server's current instant (ISO), handed to the agent as its urgency/staleness
+ * anchor. `deps` is the agent dependency seam, forwarded for tests; production omits it.
  *
  * @throws {NoTemplateError} If the user has no day template.
  * @throws {NoContainerBlocksError} If no CONTAINER block remains today.
@@ -202,6 +206,7 @@ export async function generatePlanProposal(
     userId: string,
     date: string,
     nowHHmm: string,
+    now: string,
     deps?: ScheduleDeps,
 ): Promise<PlanProposal> {
     const template = await getTemplateOrThrow(userId);
@@ -214,8 +219,8 @@ export async function generatePlanProposal(
     const tasks = await getSchedulableTasks(userId, date);
 
     const result = deps
-        ? await generateSchedule(eligible, tasks, deps)
-        : await generateSchedule(eligible, tasks);
+        ? await generateSchedule(eligible, tasks, now, deps)
+        : await generateSchedule(eligible, tasks, now);
 
     const taskById = new Map(tasks.map(t => [t.id, t]));
     const placedTaskIds = new Set<string>();

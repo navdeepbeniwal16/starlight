@@ -20,6 +20,8 @@ import {
 } from "./planAgent.service";
 import type { Anthropic } from "@anthropic-ai/sdk";
 
+const NOW = "2026-06-20T08:00:00.000Z";
+
 // ─── buildAgentInput ──────────────────────────────────────────────────────────
 
 function block(overrides: Partial<RawBlock> = {}): RawBlock {
@@ -43,6 +45,8 @@ function task(overrides: Partial<RawTask> = {}): RawTask {
         effort: "MEDIUM",
         priority: "HIGH",
         deadline: null,
+        notes: null,
+        createdAt: new Date("2026-06-01T00:00:00.000Z"),
         status: "TODO",
         ...overrides,
     };
@@ -57,8 +61,13 @@ describe("buildAgentInput", () => {
                 block({ id: "n1", type: "NO_TASK" }),
             ],
             [],
+            NOW,
         );
         expect(input.blocks.map(b => b.id)).toEqual(["c1"]);
+    });
+
+    it("carries `now` through as the agent's anchor", () => {
+        expect(buildAgentInput([], [], NOW).now).toBe(NOW);
     });
 
     it("pre-computes remainingMins as estimatedMins × (1 − progress/100)", () => {
@@ -71,6 +80,7 @@ describe("buildAgentInput", () => {
                 task({ id: "most", estimatedMins: 90, progress: 75 }),
                 task({ id: "done", estimatedMins: 60, progress: 100 }),
             ],
+            NOW,
         );
         const byId = Object.fromEntries(input.tasks.map(t => [t.id, t.remainingMins]));
         expect(byId).toEqual({ none: 60, zero: 60, half: 30, most: 23, done: 0 });
@@ -84,9 +94,27 @@ describe("buildAgentInput", () => {
                 task({ id: "with", deadline }),
                 task({ id: "without", deadline: null }),
             ],
+            NOW,
         );
         const byId = Object.fromEntries(input.tasks.map(t => [t.id, t.deadline]));
         expect(byId).toEqual({ with: "2026-06-25T09:00:00.000Z", without: null });
+    });
+
+    it("serialises createdAt to an ISO string and passes notes through raw", () => {
+        const createdAt = new Date("2026-05-01T00:00:00.000Z");
+        const input = buildAgentInput(
+            [],
+            [
+                task({ id: "with", createdAt, notes: "call the vendor first" }),
+                task({ id: "without", notes: null }),
+            ],
+            NOW,
+        );
+        const byId = Object.fromEntries(input.tasks.map(t => [t.id, { createdAt: t.createdAt, notes: t.notes }]));
+        expect(byId).toEqual({
+            with: { createdAt: "2026-05-01T00:00:00.000Z", notes: "call the vendor first" },
+            without: { createdAt: "2026-06-01T00:00:00.000Z", notes: null },
+        });
     });
 });
 
@@ -169,7 +197,7 @@ function agentBlock(overrides: Partial<AgentBlock> = {}): AgentBlock {
 }
 
 function agentTask(overrides: Partial<AgentTask> = {}): AgentTask {
-    return { id: "t1", title: "Task", remainingMins: 30, effort: "MEDIUM", priority: "HIGH", deadline: null, status: "TODO", ...overrides };
+    return { id: "t1", title: "Task", remainingMins: 30, effort: "MEDIUM", priority: "HIGH", deadline: null, notes: null, createdAt: NOW, status: "TODO", ...overrides };
 }
 
 function assign(taskId: string, blockId: string, blockOrder: number): Assignment {
@@ -324,9 +352,11 @@ describe("generateSchedule", () => {
         await generateSchedule(
             [block({ id: "c1", type: "CONTAINER" }), block({ id: "a1", type: "ANCHOR" })],
             [task({ id: "t1", estimatedMins: 80, progress: 25 })],
+            NOW,
             deps,
         );
 
+        expect(captured!.now).toBe(NOW);
         expect(captured!.blocks.map(b => b.id)).toEqual(["c1"]);
         expect(captured!.tasks[0]).toMatchObject({ id: "t1", remainingMins: 60 });
     });
@@ -338,7 +368,7 @@ describe("generateSchedule", () => {
         };
         const deps = scriptModel(modelMessage(fixture));
 
-        const result = await generateSchedule([block({ id: "c1" })], [task()], deps);
+        const result = await generateSchedule([block({ id: "c1" })], [task()], NOW, deps);
 
         expect(result).toEqual(fixture);
         expect(deps.calls).toHaveLength(1);
@@ -346,7 +376,7 @@ describe("generateSchedule", () => {
 
     it("rejects malformed agent output with AgentError", async () => {
         const deps = scriptModel(modelMessage({ assignments: "nope" } as unknown as AgentResult));
-        await expect(generateSchedule([block()], [task()], deps)).rejects.toThrow(AgentError);
+        await expect(generateSchedule([block()], [task()], NOW, deps)).rejects.toThrow(AgentError);
     });
 
     it("throws AgentError when the model turn carries no submit_schedule call", async () => {
@@ -354,7 +384,7 @@ describe("generateSchedule", () => {
             callModel: async () =>
                 ({ content: [{ type: "text", text: "no tool call" }] } as unknown as Anthropic.Message),
         };
-        await expect(generateSchedule([block()], [task()], deps)).rejects.toThrow(AgentError);
+        await expect(generateSchedule([block()], [task()], NOW, deps)).rejects.toThrow(AgentError);
     });
 
     it("salvages the prior schedule to the floor when a later turn carries no tool call", async () => {
@@ -371,6 +401,7 @@ describe("generateSchedule", () => {
         const result = await generateSchedule(
             [block({ id: "c1", startTime: "09:00", endTime: "10:00" })],
             [task({ id: "t1", estimatedMins: 50 }), task({ id: "t2", estimatedMins: 50 })],
+            NOW,
             deps,
         );
 
@@ -405,7 +436,7 @@ describe("generateSchedule", () => {
         });
         const deps = scriptModel(overcommit, fixed);
 
-        const result = await generateSchedule(blocks, tasks, deps);
+        const result = await generateSchedule(blocks, tasks, NOW, deps);
 
         expect(result.assignments).toEqual([
             { taskId: "t1", blockId: "c1", blockOrder: 0 },
@@ -436,6 +467,7 @@ describe("generateSchedule", () => {
         const result = await generateSchedule(
             [block({ id: "c1", startTime: "09:00", endTime: "10:00" })],
             [task({ id: "t1", estimatedMins: 50 }), task({ id: "t2", estimatedMins: 50 })],
+            NOW,
             deps,
         );
 

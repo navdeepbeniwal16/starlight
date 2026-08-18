@@ -49,9 +49,10 @@ router.post("/generate", authenticate, async (req: Request, res: Response): Prom
     const utcOffsetMins = parseTimezoneOffset(req);
     const date = todayDateString(utcOffsetMins);
     const nowHHmm = nowTimeString(utcOffsetMins);
+    const now = new Date().toISOString();
 
     try {
-        const result = await generatePlanProposal(req.user!.sub, date, nowHHmm);
+        const result = await generatePlanProposal(req.user!.sub, date, nowHHmm, now);
         res.status(200).json({ success: true, data: result });
     } catch (error) {
         if (error instanceof NoTemplateError) {

@@ -35,10 +35,13 @@ export type AgentTask = {
     effort: EnergyLevel | null;
     priority: Priority | null;
     deadline: string | null;
+    notes: string | null;
+    createdAt: string;
     status: TaskStatus;
 };
 
 export type AgentInput = {
+    now: string;
     blocks: AgentBlock[];
     tasks: AgentTask[];
 };
@@ -65,6 +68,8 @@ export type RawTask = {
     effort: EnergyLevel | null;
     priority: Priority | null;
     deadline: Date | null;
+    notes: string | null;
+    createdAt: Date;
     status: TaskStatus;
 };
 
@@ -83,8 +88,9 @@ export function remainingMinsOf(estimatedMins: number, progress: number | null):
 
 // Shapes the agent input: only CONTAINER blocks are schedulable, and each task's
 // remaining work is pre-computed server-side as estimatedMins × (1 − progress/100).
-export function buildAgentInput(blocks: RawBlock[], tasks: RawTask[]): AgentInput {
+export function buildAgentInput(blocks: RawBlock[], tasks: RawTask[], now: string): AgentInput {
     return {
+        now,
         blocks: blocks
             .filter(b => b.type === "CONTAINER")
             .map(b => ({
@@ -101,6 +107,8 @@ export function buildAgentInput(blocks: RawBlock[], tasks: RawTask[]): AgentInpu
             effort: t.effort,
             priority: t.priority,
             deadline: t.deadline ? t.deadline.toISOString() : null,
+            notes: t.notes,
+            createdAt: t.createdAt.toISOString(),
             status: t.status,
         })),
     };
@@ -294,11 +302,19 @@ export function buildOverflowFeedback(
 
 const SYSTEM_PROMPT = `You are a scheduling agent for a daily planner. You assign tasks into the available time blocks for the remainder of a user's day.
 
+Input:
+- now: the current instant as an ISO string. It is your anchor — judge how urgent a deadline is and how long a task has waited relative to now.
+- blocks: the CONTAINER blocks you may schedule into. Each has a startTime, endTime (24h "HH:mm"), and an energyLevel (HIGH, MEDIUM, LOW, or null).
+- tasks: each has a remainingMins (the work left to do), an effort (HIGH, MEDIUM, LOW, or null), a priority (HIGH, MEDIUM, LOW, or null), a deadline (ISO string or null), notes (free-text context from the user, possibly empty), a createdAt (ISO string — when the task was added, so an old createdAt means it has waited a long time), and a status.
+
+Judging value:
+- Estimate each task's value by weighing all of its signals together: how close its deadline is relative to now, its priority, what its notes reveal about importance or context, and how long it has waited (tasks sitting in the backlog for a long time should not linger). Balance these signals holistically rather than following any strict ordering of them.
+- Schedule so the most valuable work gets a place. When not everything fits, the lower-value tasks are the ones left unscheduled.
+
 Rules:
-- Only schedule tasks into the CONTAINER blocks you are given. Each block has a startTime, endTime (24h "HH:mm"), and an energyLevel (HIGH, MEDIUM, LOW, or null).
-- A task's remainingMins is the work left to do. It must fit entirely within a single block — task splitting across blocks is not supported.
-- Batch similar tasks (use the task title and block name for more context) in the same block to avoid context switching as much as possible, or match the task's effort to the block's energyLevel (e.g. HIGH-effort work in HIGH-energy blocks).
-- Prioritise in this order: tasks with the most imminent deadline first, then by priority (HIGH > MEDIUM > LOW > none).
+- Only schedule tasks into the CONTAINER blocks you are given.
+- A task's remainingMins must fit entirely within a single block — task splitting across blocks is not supported.
+- Batch similar tasks (use the task title, notes, and block name for more context) in the same block to avoid context switching as much as possible, or match the task's effort to the block's energyLevel (e.g. HIGH-effort work in HIGH-energy blocks).
 - The total remainingMins assigned to a block must not exceed its capacity (endTime − startTime in minutes).
 - blockOrder is the 0-based position of a task within its block, reflecting the suggested order of execution.
 - If a task cannot fit into any block (its remainingMins exceeds every block's remaining capacity), return it in "unschedulable" with a short human-readable reason. Every task must appear in exactly one of "assignments" or "unschedulable".
@@ -383,9 +399,10 @@ const defaultDeps: ScheduleDeps = { callModel: callClaude };
 export async function generateSchedule(
     blocks: RawBlock[],
     tasks: RawTask[],
+    now: string,
     deps: ScheduleDeps = defaultDeps,
 ): Promise<AgentResult> {
-    const input = buildAgentInput(blocks, tasks);
+    const input = buildAgentInput(blocks, tasks, now);
     const containerBlockIds = new Set(blocks.filter(b => b.type === "CONTAINER").map(b => b.id));
     const taskIds = new Set(tasks.map(t => t.id));
 
