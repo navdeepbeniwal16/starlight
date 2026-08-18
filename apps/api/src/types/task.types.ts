@@ -11,6 +11,19 @@ export type BacklogTask = {
     estimatedMins: number;
 };
 
+export type ScheduledTask = BacklogTask & {
+    blockStartTime: string;  // HH:mm
+    blockName: string;
+};
+
+// Server-computed, mutually exclusive; the client renders each array as-is.
+export type BacklogBuckets = {
+    carriedOver: BacklogTask[];
+    scheduled: ScheduledTask[];
+    remaining: BacklogTask[];
+    doneToday: BacklogTask[];
+};
+
 export type TaskDetail = {
     id: string;
     title: string;

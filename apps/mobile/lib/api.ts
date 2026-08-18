@@ -1,4 +1,4 @@
-import { AdjustPlanTaskResponse, ApiResult, BlockInput, ConfirmPlanResponse, CreateDayPlanResponse, CreateDayTemplateResponse, CreateTaskInput, CreateTaskResponse, GeneratePlanResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, GetPlanTasksResponse, GetTaskDetailResponse, LoginResponse, MeResponse, SignupResponse, UpdateTaskInput, UpdateTaskResponse } from "./api.types";
+import { ApiResult, BlockInput, ConfirmAssignment, ConfirmPlanResponse, CreateDayTemplateResponse, CreateTaskInput, CreateTaskResponse, GeneratePlanResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, GetReviewTasksResponse, GetTaskDetailResponse, LoginResponse, MeResponse, SignupResponse, UpdateDayTemplateResponse, UpdateTaskInput, UpdateTaskResponse } from "./api.types";
 import { getToken } from "./auth-token";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
@@ -106,7 +106,7 @@ export const api = {
     }
   },
 
-  createDayPlan: async (): Promise<CreateDayPlanResponse> => {
+  updateDayTemplate: async (payload: { wakeTime: string; sleepTime: string; blocks: BlockInput[] }): Promise<UpdateDayTemplateResponse> => {
     const token = await getToken();
 
     if (!token) {
@@ -114,12 +114,10 @@ export const api = {
     }
 
     try {
-      const response = await fetch(`${API_URL}/day-plan`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'X-Timezone-Offset': String(-new Date().getTimezoneOffset()),
-        },
+      const response = await fetch(`${API_URL}/day-template`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
 
       const responseJson = await response.json();
@@ -195,7 +193,10 @@ export const api = {
     try {
       const response = await fetch(`${API_URL}/tasks`, {
         method: 'GET',
-        headers: { 'Authorization': `Bearer ${token}` },
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-Timezone-Offset': String(-new Date().getTimezoneOffset()),
+        },
       });
 
       const responseJson = await response.json();
@@ -258,13 +259,16 @@ export const api = {
     }
   },
 
-  getPlanTasks: async (planId: string): Promise<GetPlanTasksResponse> => {
+  getReviewTasks: async (): Promise<GetReviewTasksResponse> => {
     const token = await getToken();
     if (!token) return { ok: false, error: 'No token found' };
     try {
-      const response = await fetch(`${API_URL}/day-plan/${planId}/tasks`, {
+      const response = await fetch(`${API_URL}/day-plan/review-tasks`, {
         method: 'GET',
-        headers: { 'Authorization': `Bearer ${token}` },
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-Timezone-Offset': String(-new Date().getTimezoneOffset()),
+        },
       });
       const responseJson = await response.json();
       if (!response.ok) {
@@ -276,11 +280,13 @@ export const api = {
     }
   },
 
-  generatePlan: async (planId: string): Promise<GeneratePlanResponse> => {
+  // Returns a plan proposal; nothing is persisted server-side. The proposal is
+  // held client-side during review and sent back via confirmPlan.
+  generatePlan: async (): Promise<GeneratePlanResponse> => {
     const token = await getToken();
     if (!token) return { ok: false, error: 'No token found' };
     try {
-      const response = await fetch(`${API_URL}/day-plan/${planId}/generate`, {
+      const response = await fetch(`${API_URL}/day-plan/generate`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -297,39 +303,18 @@ export const api = {
     }
   },
 
-  adjustPlanTask: async (
-    planId: string,
-    taskId: string,
-    body: { blockId: string | null; blockOrder: number },
-  ): Promise<AdjustPlanTaskResponse> => {
+  confirmPlan: async (assignments: ConfirmAssignment[]): Promise<ConfirmPlanResponse> => {
     const token = await getToken();
     if (!token) return { ok: false, error: 'No token found' };
     try {
-      const response = await fetch(`${API_URL}/day-plan/${planId}/tasks/${taskId}`, {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const responseJson = await response.json();
-      if (!response.ok) {
-        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
-      }
-      return { ok: true, data: responseJson.data };
-    } catch (error) {
-      return { ok: false, error: 'Network error. Please check your connection.' };
-    }
-  },
-
-  confirmPlan: async (planId: string): Promise<ConfirmPlanResponse> => {
-    const token = await getToken();
-    if (!token) return { ok: false, error: 'No token found' };
-    try {
-      const response = await fetch(`${API_URL}/day-plan/${planId}/confirm`, {
+      const response = await fetch(`${API_URL}/day-plan/confirm`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
           'X-Timezone-Offset': String(-new Date().getTimezoneOffset()),
         },
+        body: JSON.stringify({ assignments }),
       });
       const responseJson = await response.json();
       if (!response.ok) {

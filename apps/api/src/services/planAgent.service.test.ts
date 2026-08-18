@@ -1,12 +1,26 @@
 import {
     buildAgentInput,
     parseAgentResult,
+    normalizeAssignments,
+    overflowsOf,
+    evictToFit,
+    buildOverflowFeedback,
     generateSchedule,
     AgentError,
+    CAPACITY_TOLERANCE_MINS,
+    MAX_REPLAN_ATTEMPTS,
+    FLOOR_EVICTION_REASON,
+    type AgentResult,
+    type AgentBlock,
+    type AgentTask,
+    type Assignment,
     type RawBlock,
     type RawTask,
     type AgentInput,
 } from "./planAgent.service";
+import type { Anthropic } from "@anthropic-ai/sdk";
+
+const NOW = "2026-06-20T08:00:00.000Z";
 
 // ─── buildAgentInput ──────────────────────────────────────────────────────────
 
@@ -31,6 +45,8 @@ function task(overrides: Partial<RawTask> = {}): RawTask {
         effort: "MEDIUM",
         priority: "HIGH",
         deadline: null,
+        notes: null,
+        createdAt: new Date("2026-06-01T00:00:00.000Z"),
         status: "TODO",
         ...overrides,
     };
@@ -45,8 +61,13 @@ describe("buildAgentInput", () => {
                 block({ id: "n1", type: "NO_TASK" }),
             ],
             [],
+            NOW,
         );
         expect(input.blocks.map(b => b.id)).toEqual(["c1"]);
+    });
+
+    it("carries `now` through as the agent's anchor", () => {
+        expect(buildAgentInput([], [], NOW).now).toBe(NOW);
     });
 
     it("pre-computes remainingMins as estimatedMins × (1 − progress/100)", () => {
@@ -59,6 +80,7 @@ describe("buildAgentInput", () => {
                 task({ id: "most", estimatedMins: 90, progress: 75 }),
                 task({ id: "done", estimatedMins: 60, progress: 100 }),
             ],
+            NOW,
         );
         const byId = Object.fromEntries(input.tasks.map(t => [t.id, t.remainingMins]));
         expect(byId).toEqual({ none: 60, zero: 60, half: 30, most: 23, done: 0 });
@@ -72,9 +94,27 @@ describe("buildAgentInput", () => {
                 task({ id: "with", deadline }),
                 task({ id: "without", deadline: null }),
             ],
+            NOW,
         );
         const byId = Object.fromEntries(input.tasks.map(t => [t.id, t.deadline]));
         expect(byId).toEqual({ with: "2026-06-25T09:00:00.000Z", without: null });
+    });
+
+    it("serialises createdAt to an ISO string and passes notes through raw", () => {
+        const createdAt = new Date("2026-05-01T00:00:00.000Z");
+        const input = buildAgentInput(
+            [],
+            [
+                task({ id: "with", createdAt, notes: "call the vendor first" }),
+                task({ id: "without", notes: null }),
+            ],
+            NOW,
+        );
+        const byId = Object.fromEntries(input.tasks.map(t => [t.id, { createdAt: t.createdAt, notes: t.notes }]));
+        expect(byId).toEqual({
+            with: { createdAt: "2026-05-01T00:00:00.000Z", notes: "call the vendor first" },
+            without: { createdAt: "2026-06-01T00:00:00.000Z", notes: null },
+        });
     });
 });
 
@@ -97,43 +137,342 @@ describe("parseAgentResult", () => {
     });
 });
 
-// ─── generateSchedule (injected fixture) ──────────────────────────────────────
+// ─── normalizeAssignments ─────────────────────────────────────────────────────
+
+describe("normalizeAssignments", () => {
+    const containers = new Set(["c1", "c2"]);
+    const tasks = new Set(["t1", "t2"]);
+
+    function result(assignments: AgentResult["assignments"]): AgentResult {
+        return { assignments, unschedulable: [] };
+    }
+
+    it("drops assignments to bogus or non-CONTAINER blocks", () => {
+        const out = normalizeAssignments(
+            result([
+                { taskId: "t1", blockId: "c1", blockOrder: 0 },
+                { taskId: "t2", blockId: "anchor", blockOrder: 0 }, // not a CONTAINER id
+            ]),
+            containers,
+            tasks,
+        );
+        expect(out.assignments).toEqual([{ taskId: "t1", blockId: "c1", blockOrder: 0 }]);
+    });
+
+    it("drops assignments to unknown tasks", () => {
+        const out = normalizeAssignments(
+            result([
+                { taskId: "ghost", blockId: "c1", blockOrder: 0 },
+                { taskId: "t2", blockId: "c1", blockOrder: 1 },
+            ]),
+            containers,
+            tasks,
+        );
+        expect(out.assignments).toEqual([{ taskId: "t2", blockId: "c1", blockOrder: 1 }]);
+    });
+
+    it("keeps a duplicated task only once, first occurrence wins", () => {
+        const out = normalizeAssignments(
+            result([
+                { taskId: "t1", blockId: "c1", blockOrder: 0 },
+                { taskId: "t1", blockId: "c2", blockOrder: 3 }, // duplicate task
+            ]),
+            containers,
+            tasks,
+        );
+        expect(out.assignments).toEqual([{ taskId: "t1", blockId: "c1", blockOrder: 0 }]);
+    });
+
+    it("passes unschedulable through untouched", () => {
+        const unschedulable = [{ taskId: "t2", reason: "too long" }];
+        const out = normalizeAssignments({ assignments: [], unschedulable }, containers, tasks);
+        expect(out.unschedulable).toEqual(unschedulable);
+    });
+});
+
+// ─── capacity guardrail (overflowsOf / evictToFit) ────────────────────────────
+
+function agentBlock(overrides: Partial<AgentBlock> = {}): AgentBlock {
+    return { id: "c1", name: "Deep Work", startTime: "09:00", endTime: "10:00", energyLevel: "HIGH", ...overrides };
+}
+
+function agentTask(overrides: Partial<AgentTask> = {}): AgentTask {
+    return { id: "t1", title: "Task", remainingMins: 30, effort: "MEDIUM", priority: "HIGH", deadline: null, notes: null, createdAt: NOW, status: "TODO", ...overrides };
+}
+
+function assign(taskId: string, blockId: string, blockOrder: number): Assignment {
+    return { taskId, blockId, blockOrder };
+}
+
+describe("overflowsOf", () => {
+    // A 60-minute block (09:00–10:00) with the default 15-minute tolerance.
+    const blocks = [agentBlock({ id: "c1", startTime: "09:00", endTime: "10:00" })];
+
+    it("treats committed === capacity + tolerance as within tolerance (not over)", () => {
+        const tasks = [agentTask({ id: "t1", remainingMins: 75 })]; // 60 capacity + 15 tolerance
+        const out = overflowsOf(blocks, tasks, [assign("t1", "c1", 0)], CAPACITY_TOLERANCE_MINS);
+        expect(out).toEqual([]);
+    });
+
+    it("reports a block one minute past the tolerance boundary, overflow measured vs capacity", () => {
+        const tasks = [agentTask({ id: "t1", remainingMins: 76 })]; // 1 past 60 + 15
+        const out = overflowsOf(blocks, tasks, [assign("t1", "c1", 0)], CAPACITY_TOLERANCE_MINS);
+        expect(out).toEqual([{ blockId: "c1", capacity: 60, committed: 76, overflow: 16 }]);
+    });
+
+    it("sums a block's committed work and reports overflow past true capacity", () => {
+        const tasks = [agentTask({ id: "t1", remainingMins: 50 }), agentTask({ id: "t2", remainingMins: 40 })];
+        const out = overflowsOf(blocks, tasks, [assign("t1", "c1", 0), assign("t2", "c1", 1)], CAPACITY_TOLERANCE_MINS);
+        expect(out).toEqual([{ blockId: "c1", capacity: 60, committed: 90, overflow: 30 }]);
+    });
+
+    it("returns only the over-capacity blocks; a block with no assignments is never over", () => {
+        const two = [
+            agentBlock({ id: "c1", startTime: "09:00", endTime: "10:00" }), // 60, overcommitted
+            agentBlock({ id: "c2", startTime: "10:00", endTime: "12:00" }), // 120, empty
+        ];
+        const tasks = [agentTask({ id: "t1", remainingMins: 100 })];
+        const out = overflowsOf(two, tasks, [assign("t1", "c1", 0)], CAPACITY_TOLERANCE_MINS);
+        expect(out.map(o => o.blockId)).toEqual(["c1"]);
+    });
+});
+
+describe("evictToFit", () => {
+    // 60-minute block, three 30-minute tasks (committed 90), zero tolerance.
+    const blocks = [agentBlock({ id: "c1", startTime: "09:00", endTime: "10:00" })];
+    const tasks = [
+        agentTask({ id: "t0", remainingMins: 30 }),
+        agentTask({ id: "t1", remainingMins: 30 }),
+        agentTask({ id: "t2", remainingMins: 30 }),
+    ];
+    const assignments = [assign("t0", "c1", 0), assign("t1", "c1", 1), assign("t2", "c1", 2)];
+
+    it("evicts the highest-blockOrder task first and stops as soon as the block fits", () => {
+        const out = evictToFit(blocks, tasks, assignments, 0);
+        // Evicting t2 (order 2) drops committed to 60 == capacity — t1 must not also go.
+        expect(out.evicted).toEqual(["t2"]);
+        expect(out.assignments).toEqual([assign("t0", "c1", 0), assign("t1", "c1", 1)]);
+    });
+
+    it("keeps evicting in descending blockOrder until within capacity + tolerance", () => {
+        // A single 30-minute block forces two evictions to get committed (90) down to 30.
+        const tiny = [agentBlock({ id: "c1", startTime: "09:00", endTime: "09:30" })];
+        const out = evictToFit(tiny, tasks, assignments, 0);
+        expect(out.evicted).toEqual(["t2", "t1"]);
+        expect(out.assignments).toEqual([assign("t0", "c1", 0)]);
+    });
+
+    it("leaves a block already within capacity + tolerance untouched", () => {
+        const roomy = [agentBlock({ id: "c1", startTime: "09:00", endTime: "12:00" })]; // 180 capacity
+        const out = evictToFit(roomy, tasks, assignments, CAPACITY_TOLERANCE_MINS);
+        expect(out.evicted).toEqual([]);
+        expect(out.assignments).toEqual(assignments);
+    });
+
+    it("lets the tolerance absorb an overrun within the slack", () => {
+        // Committed 70 on a 60 block is 10 over — inside the 15-minute tolerance.
+        const twoTasks = [agentTask({ id: "t0", remainingMins: 40 }), agentTask({ id: "t1", remainingMins: 30 })];
+        const out = evictToFit(blocks, twoTasks, [assign("t0", "c1", 0), assign("t1", "c1", 1)], CAPACITY_TOLERANCE_MINS);
+        expect(out.evicted).toEqual([]);
+    });
+});
+
+// ─── buildOverflowFeedback ────────────────────────────────────────────────────
+
+describe("buildOverflowFeedback", () => {
+    it("lists each over-capacity block with capacity/assigned/overflow and never leaks the tolerance", () => {
+        const blocks = [agentBlock({ id: "c1", name: "Deep Work", startTime: "09:00", endTime: "10:00" })];
+        const tasks = [agentTask({ id: "t1", remainingMins: 50 }), agentTask({ id: "t2", remainingMins: 50 })];
+        const feedback = buildOverflowFeedback(blocks, tasks, [assign("t1", "c1", 0), assign("t2", "c1", 1)], CAPACITY_TOLERANCE_MINS);
+
+        expect(feedback).toContain('"Deep Work" (c1): capacity 60 min, assigned 100 min, over by 40 min');
+        expect(feedback).toContain("Resubmit the full schedule");
+        expect(feedback).not.toContain(String(CAPACITY_TOLERANCE_MINS)); // tolerance stays private to the floor
+    });
+
+    it("emits no block lines when every block is within tolerance", () => {
+        const blocks = [agentBlock({ id: "c1", startTime: "09:00", endTime: "10:00" })];
+        const tasks = [agentTask({ id: "t1", remainingMins: 70 })]; // 60 cap + 10, inside the 15-min slack → no overflow
+        const feedback = buildOverflowFeedback(blocks, tasks, [assign("t1", "c1", 0)], CAPACITY_TOLERANCE_MINS);
+
+        expect(feedback.trimEnd().endsWith("Over-capacity blocks:")).toBe(true);
+    });
+});
+
+// ─── generateSchedule (callModel scripting) ───────────────────────────────────
+
+// Mirrors callModel's return: an AgentResult wrapped in a tool_use, optionally preceded
+// by a thinking block.
+function modelMessage(
+    result: AgentResult,
+    opts: { thinking?: string; toolUseId?: string } = {},
+): Anthropic.Message {
+    const content: Anthropic.ContentBlock[] = [];
+    if (opts.thinking !== undefined) {
+        content.push({ type: "thinking", thinking: opts.thinking, signature: "sig" });
+    }
+    content.push({
+        type: "tool_use",
+        id: opts.toolUseId ?? "toolu_1",
+        name: "submit_schedule",
+        input: result,
+    } as Anthropic.ToolUseBlock);
+    return { content } as unknown as Anthropic.Message;
+}
+
+// Scripts callModel turn-by-turn (repeating the last response) and snapshots the messages
+// array each turn, so tests can assert on the conversation the loop built.
+function scriptModel(...responses: Anthropic.Message[]): {
+    callModel: (messages: Anthropic.MessageParam[]) => Promise<Anthropic.Message>;
+    calls: Anthropic.MessageParam[][];
+} {
+    const calls: Anthropic.MessageParam[][] = [];
+    let turn = 0;
+    return {
+        calls,
+        callModel: async (messages) => {
+            calls.push(structuredClone(messages)); // the loop mutates one array across turns
+            const res = responses[Math.min(turn, responses.length - 1)];
+            turn += 1;
+            return res;
+        },
+    };
+}
 
 describe("generateSchedule", () => {
     it("passes CONTAINER-only blocks and pre-computed remainingMins to the agent", async () => {
         let captured: AgentInput | undefined;
         const deps = {
-            callAgent: async (input: AgentInput) => {
-                captured = input;
-                return { assignments: [], unschedulable: [] };
+            callModel: async (messages: Anthropic.MessageParam[]) => {
+                captured = JSON.parse(messages[0].content as string) as AgentInput;
+                return modelMessage({ assignments: [], unschedulable: [] });
             },
         };
 
         await generateSchedule(
             [block({ id: "c1", type: "CONTAINER" }), block({ id: "a1", type: "ANCHOR" })],
             [task({ id: "t1", estimatedMins: 80, progress: 25 })],
+            NOW,
             deps,
         );
 
+        expect(captured!.now).toBe(NOW);
         expect(captured!.blocks.map(b => b.id)).toEqual(["c1"]);
         expect(captured!.tasks[0]).toMatchObject({ id: "t1", remainingMins: 60 });
     });
 
-    it("returns the parsed agent output (recorded fixture)", async () => {
-        // Stands in for a recorded Claude tool_use response in CI.
-        const fixture = {
+    it("happy path: a fitting schedule returns in a single call, no floor", async () => {
+        const fixture: AgentResult = {
             assignments: [{ taskId: "t1", blockId: "c1", blockOrder: 0 }],
             unschedulable: [{ taskId: "t2", reason: "remainingMins exceeds all block capacities" }],
         };
-        const deps = { callAgent: async () => fixture };
+        const deps = scriptModel(modelMessage(fixture));
 
-        const result = await generateSchedule([block({ id: "c1" })], [task()], deps);
+        const result = await generateSchedule([block({ id: "c1" })], [task()], NOW, deps);
 
         expect(result).toEqual(fixture);
+        expect(deps.calls).toHaveLength(1);
     });
 
     it("rejects malformed agent output with AgentError", async () => {
-        const deps = { callAgent: async () => ({ assignments: "nope" }) };
-        await expect(generateSchedule([block()], [task()], deps)).rejects.toThrow(AgentError);
+        const deps = scriptModel(modelMessage({ assignments: "nope" } as unknown as AgentResult));
+        await expect(generateSchedule([block()], [task()], NOW, deps)).rejects.toThrow(AgentError);
+    });
+
+    it("throws AgentError when the model turn carries no submit_schedule call", async () => {
+        const deps = {
+            callModel: async () =>
+                ({ content: [{ type: "text", text: "no tool call" }] } as unknown as Anthropic.Message),
+        };
+        await expect(generateSchedule([block()], [task()], NOW, deps)).rejects.toThrow(AgentError);
+    });
+
+    it("salvages the prior schedule to the floor when a later turn carries no tool call", async () => {
+        const overcommit = modelMessage({
+            assignments: [
+                { taskId: "t1", blockId: "c1", blockOrder: 0 },
+                { taskId: "t2", blockId: "c1", blockOrder: 1 },
+            ],
+            unschedulable: [],
+        });
+        const textOnly = { content: [{ type: "text", text: "hmm" }] } as unknown as Anthropic.Message;
+        const deps = scriptModel(overcommit, textOnly);
+
+        const result = await generateSchedule(
+            [block({ id: "c1", startTime: "09:00", endTime: "10:00" })],
+            [task({ id: "t1", estimatedMins: 50 }), task({ id: "t2", estimatedMins: 50 })],
+            NOW,
+            deps,
+        );
+
+        expect(deps.calls).toHaveLength(2);
+        expect(result.assignments).toEqual([{ taskId: "t1", blockId: "c1", blockOrder: 0 }]);
+        expect(result.unschedulable).toEqual([{ taskId: "t2", reason: FLOOR_EVICTION_REASON }]);
+    });
+
+    it("overflow then fix: converges on the retry without the floor firing", async () => {
+        const blocks = [
+            block({ id: "c1", startTime: "09:00", endTime: "10:00" }),
+            block({ id: "c2", startTime: "10:00", endTime: "12:00" }),
+        ];
+        const tasks = [task({ id: "t1", estimatedMins: 50 }), task({ id: "t2", estimatedMins: 50 })];
+
+        const overcommit = modelMessage(
+            {
+                assignments: [
+                    { taskId: "t1", blockId: "c1", blockOrder: 0 },
+                    { taskId: "t2", blockId: "c1", blockOrder: 1 },
+                ],
+                unschedulable: [],
+            },
+            { thinking: "packing c1" },
+        );
+        const fixed = modelMessage({
+            assignments: [
+                { taskId: "t1", blockId: "c1", blockOrder: 0 },
+                { taskId: "t2", blockId: "c2", blockOrder: 0 },
+            ],
+            unschedulable: [],
+        });
+        const deps = scriptModel(overcommit, fixed);
+
+        const result = await generateSchedule(blocks, tasks, NOW, deps);
+
+        expect(result.assignments).toEqual([
+            { taskId: "t1", blockId: "c1", blockOrder: 0 },
+            { taskId: "t2", blockId: "c2", blockOrder: 0 },
+        ]);
+        expect(result.unschedulable).toEqual([]);
+        expect(deps.calls).toHaveLength(2);
+
+        // deps.calls[1] = [original input, echoed assistant turn, tool_result feedback].
+        const retryTurn = deps.calls[1];
+        expect(retryTurn).toHaveLength(3);
+        expect(retryTurn[1]).toEqual({ role: "assistant", content: overcommit.content });
+        const toolResult = (retryTurn[2].content as Anthropic.ToolResultBlockParam[])[0];
+        expect(toolResult.tool_use_id).toBe("toolu_1");
+        expect(toolResult.content).toContain("capacity 60 min, assigned 100 min, over by 40 min");
+    });
+
+    it("always overflows: the loop exhausts its budget and the floor evicts to fit", async () => {
+        const overcommit = modelMessage({
+            assignments: [
+                { taskId: "t1", blockId: "c1", blockOrder: 0 },
+                { taskId: "t2", blockId: "c1", blockOrder: 1 },
+            ],
+            unschedulable: [],
+        });
+        const deps = scriptModel(overcommit);
+
+        const result = await generateSchedule(
+            [block({ id: "c1", startTime: "09:00", endTime: "10:00" })],
+            [task({ id: "t1", estimatedMins: 50 }), task({ id: "t2", estimatedMins: 50 })],
+            NOW,
+            deps,
+        );
+
+        expect(deps.calls).toHaveLength(1 + MAX_REPLAN_ATTEMPTS);
+        expect(result.assignments).toEqual([{ taskId: "t1", blockId: "c1", blockOrder: 0 }]);
+        expect(result.unschedulable).toEqual([{ taskId: "t2", reason: FLOOR_EVICTION_REASON }]);
     });
 });

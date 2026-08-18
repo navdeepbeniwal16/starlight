@@ -49,6 +49,7 @@ export type DayTemplate = {
 
 export type GetDayTemplateResponse = ApiResult<DayTemplate>;
 export type CreateDayTemplateResponse = ApiResult<DayTemplate>;
+export type UpdateDayTemplateResponse = ApiResult<DayTemplate>;
 
 export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'DONE';
 export type DayPlanStatus = 'DRAFT' | 'ACTIVE' | 'COMPLETED';
@@ -82,7 +83,6 @@ export type DayPlan = {
 };
 
 export type GetDayPlanResponse = ApiResult<DayPlan>;
-export type CreateDayPlanResponse = ApiResult<{ id: string }>;
 export type ConfirmPlanResponse = ApiResult<DayPlan>;
 
 export type UnschedulableTask = {
@@ -92,18 +92,46 @@ export type UnschedulableTask = {
     remainingMins: number;
     reason: string;
 };
-export type GeneratePlanResult = {
-    plan: DayPlan;
+
+// A task slot inside a proposed (not yet persisted) plan.
+export type ProposalTask = {
+    id: string;
+    title: string;
+    estimatedMins: number;
+    remainingMins: number;
+    status: TaskStatus;
+};
+
+// A block of the proposed plan. `blockId` is the template block id — the
+// proposal is never persisted, so template blocks are the only stable keys
+// shared with the confirm endpoint.
+export type ProposalBlock = {
+    blockId: string;
+    type: BlockType;
+    name: string;
+    startTime: string;
+    endTime: string;
+    energyLevel: EnergyLevel | null;
+    tasks: ProposalTask[];
+};
+
+// The full output of plan generation. Held client-side during review;
+// nothing about it exists on the server until confirm.
+export type PlanProposal = {
+    wakeTime: string;
+    sleepTime: string;
+    blocks: ProposalBlock[];
     unschedulable: UnschedulableTask[];
 };
-export type GeneratePlanResponse = ApiResult<GeneratePlanResult>;
+export type GeneratePlanResponse = ApiResult<PlanProposal>;
 
-export type PlannedTaskPlacement = {
-    id: string;
-    plannedBlockId: string | null;
-    blockOrder: number | null;
+// One task placement sent to the confirm endpoint. `blockId` references a
+// template block, matching ProposalBlock.blockId.
+export type ConfirmAssignment = {
+    taskId: string;
+    blockId: string;
+    blockOrder: number;
 };
-export type AdjustPlanTaskResponse = ApiResult<PlannedTaskPlacement>;
 
 export type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
 
@@ -117,7 +145,20 @@ export type BacklogTask = {
     estimatedMins: number;
 };
 
-export type GetBacklogResponse = ApiResult<BacklogTask[]>;
+export type ScheduledTask = BacklogTask & {
+    blockStartTime: string;  // HH:mm
+    blockName: string;
+};
+
+// Server-computed, mutually exclusive; the client renders each array as-is.
+export type BacklogBuckets = {
+    carriedOver: BacklogTask[];
+    scheduled: ScheduledTask[];
+    remaining: BacklogTask[];
+    doneToday: BacklogTask[];
+};
+
+export type GetBacklogResponse = ApiResult<BacklogBuckets>;
 
 export type CreateTaskInput = {
     title: string;
@@ -139,11 +180,11 @@ export type GetTaskDetailResponse = ApiResult<TaskDetail>;
 
 export type ReviewTask = BacklogTask;
 
-export type PlanTasksData = {
+export type ReviewTasksData = {
     carriedOver: ReviewTask[];
     backlog: ReviewTask[];
 };
-export type GetPlanTasksResponse = ApiResult<PlanTasksData>;
+export type GetReviewTasksResponse = ApiResult<ReviewTasksData>;
 
 export type UpdateTaskInput = {
     title?: string;

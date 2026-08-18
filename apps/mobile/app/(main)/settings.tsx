@@ -55,6 +55,18 @@ export default function SettingsScreen() {
                 </View>
 
                 <View style={styles.card}>
+                    <TouchableOpacity
+                        style={styles.actionRow}
+                        onPress={() => router.push('/day-template')}
+                        activeOpacity={0.7}
+                    >
+                        <Ionicons name="calendar-outline" size={18} color="#7a736a" />
+                        <Text style={styles.navLabel}>Day Template</Text>
+                        <Ionicons name="chevron-forward" size={18} color="#c0b8b0" style={styles.navChevron} />
+                    </TouchableOpacity>
+                </View>
+
+                <View style={styles.card}>
                     <TouchableOpacity style={styles.actionRow} onPress={confirmLogout} activeOpacity={0.7}>
                         <Ionicons name="log-out-outline" size={18} color="rgba(200,80,80,0.85)" />
                         <Text style={styles.actionLabel}>Log out</Text>
@@ -115,4 +127,6 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
     },
     actionLabel: { fontSize: 14, fontWeight: '500', color: 'rgba(200,80,80,0.85)' },
+    navLabel: { fontSize: 14, fontWeight: '500', color: '#2a2621' },
+    navChevron: { marginLeft: 'auto' },
 });

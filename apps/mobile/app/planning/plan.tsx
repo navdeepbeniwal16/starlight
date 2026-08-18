@@ -19,11 +19,12 @@ import Animated, {
 } from "react-native-reanimated";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { api } from "../../../lib/api";
-import { takeGeneratedPlan } from "../../../lib/planningSession";
-import { formatTime, toMins } from "../../../lib/time";
+import { api } from "../../lib/api";
+import type { ConfirmAssignment, PlanProposal } from "../../lib/api.types";
+import { usePlanningStore } from "../../stores/planning.store";
+import { formatTime, toMins } from "../../lib/time";
 
 // ─── Local board model ────────────────────────────────────────────────────────
 
@@ -56,32 +57,32 @@ function energyLabel(level: DraftBlock['energyLevel']): string | null {
 }
 
 // Moves a task from one zone to another, returning a new board. Appends to the
-// end of the target block (or to the unscheduled list). Pure.
+// end of the target block (or to the unscheduled list). Pure — never mutates
+// the input board or any block it contains.
 function moveTask(board: Board, taskId: string, fromZone: string, toZone: string): Board {
     let moved: TaskItem | undefined;
 
+    if (fromZone === UNSCHEDULED_ZONE) {
+        const item = board.unscheduled.find(t => t.id === taskId);
+        if (item) moved = { id: item.id, title: item.title, remainingMins: item.remainingMins };
+    } else {
+        moved = board.blocks.find(b => b.id === fromZone)?.tasks.find(t => t.id === taskId);
+    }
+    if (!moved) return board; // task not found in source — no-op
+    const task = moved;
+
     const blocks = board.blocks.map(b => {
-        if (b.id !== fromZone) return b;
-        const task = b.tasks.find(t => t.id === taskId);
-        if (task) moved = task;
-        return { ...b, tasks: b.tasks.filter(t => t.id !== taskId) };
+        if (b.id === fromZone) return { ...b, tasks: b.tasks.filter(t => t.id !== taskId) };
+        if (b.id === toZone) return { ...b, tasks: [...b.tasks, task] };
+        return b;
     });
 
     let unscheduled = board.unscheduled;
     if (fromZone === UNSCHEDULED_ZONE) {
-        const item = board.unscheduled.find(t => t.id === taskId);
-        if (item) moved = { id: item.id, title: item.title, remainingMins: item.remainingMins };
-        unscheduled = board.unscheduled.filter(t => t.id !== taskId);
+        unscheduled = unscheduled.filter(t => t.id !== taskId);
     }
-
-    if (!moved) return board; // task not found in source — no-op
-
     if (toZone === UNSCHEDULED_ZONE) {
-        unscheduled = [...unscheduled, { ...moved, reason: null }];
-    } else {
-        const target = blocks.find(b => b.id === toZone);
-        if (!target) return board;
-        target.tasks = [...target.tasks, moved];
+        unscheduled = [...unscheduled, { ...task, reason: null }];
     }
 
     return { blocks, unscheduled };
@@ -107,21 +108,21 @@ function sameOrder(a: string[], b: string[]): boolean {
     return a.length === b.length && a.every((id, i) => id === b[i]);
 }
 
-function initialBoard(): Board | null {
-    const result = takeGeneratedPlan();
-    if (!result) return null;
+// Board zone ids are the proposal's template block ids, which is what the
+// confirm endpoint expects assignments to reference.
+function boardFromProposal(proposal: PlanProposal): Board {
     return {
-        blocks: result.plan.blocks
+        blocks: proposal.blocks
             .filter(b => b.type === 'CONTAINER')
             .map(b => ({
-                id: b.id,
+                id: b.blockId,
                 name: b.name,
                 startTime: b.startTime,
                 endTime: b.endTime,
                 energyLevel: b.energyLevel,
                 tasks: b.tasks.map(t => ({ id: t.id, title: t.title, remainingMins: t.remainingMins })),
             })),
-        unscheduled: result.unschedulable.map(u => ({
+        unscheduled: proposal.unschedulable.map(u => ({
             id: u.taskId,
             title: u.title,
             remainingMins: u.remainingMins,
@@ -130,14 +131,26 @@ function initialBoard(): Board | null {
     };
 }
 
+// Flattens the board into the confirm payload: every scheduled task with its
+// block (template block id) and position.
+function assignmentsFromBoard(board: Board): ConfirmAssignment[] {
+    return board.blocks.flatMap(block =>
+        block.tasks.map((task, i) => ({ taskId: task.id, blockId: block.id, blockOrder: i }))
+    );
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function ReviewPlanScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
-    const { planId } = useLocalSearchParams<{ planId: string }>();
+    const proposal = usePlanningStore(s => s.proposal);
+    const clearProposal = usePlanningStore(s => s.clear);
 
-    const [board, setBoardState] = useState<Board | null>(() => initialBoard());
+    // The board is derived from the store-held proposal once on mount; edits
+    // stay local until confirm. The store survives remounts, so re-entering
+    // this screen rebuilds the board.
+    const [board, setBoardState] = useState<Board | null>(() => (proposal ? boardFromProposal(proposal) : null));
     const boardRef = useRef<Board | null>(board);
     const applyBoard = useCallback((next: Board) => {
         boardRef.current = next;
@@ -239,61 +252,43 @@ export default function ReviewPlanScreen() {
 
     const endDrag = useCallback(() => setDragging(false), []);
 
-    // Cross-section move: append the task to the end of the target zone.
-    const handleDrop = useCallback(async (taskId: string, fromZone: string, toZone: string) => {
+    // Cross-section move: append the task to the end of the target zone. Edits
+    // stay in local board state until the plan is confirmed.
+    const handleDrop = useCallback((taskId: string, fromZone: string, toZone: string) => {
         const snapshot = boardRef.current;
-        if (!snapshot || !planId) return;
-
-        const next = moveTask(snapshot, taskId, fromZone, toZone);
-        applyBoard(next);
+        if (!snapshot) return;
+        applyBoard(moveTask(snapshot, taskId, fromZone, toZone));
         resetDragShared();
+    }, [applyBoard, resetDragShared]);
 
-        const body = toZone === UNSCHEDULED_ZONE
-            ? { blockId: null, blockOrder: 0 }
-            : { blockId: toZone, blockOrder: snapshot.blocks.find(b => b.id === toZone)?.tasks.length ?? 0 };
-
-        const res = await api.adjustPlanTask(planId, taskId, body);
-        if (!res.ok) {
-            applyBoard(snapshot); // revert on failure
-            Alert.alert("Couldn't move task", res.error);
-        }
-    }, [planId, applyBoard, resetDragShared]);
-
-    // Within-section reorder. The server owns ordering and renumbers the block, so
-    // we send a single "move taskId to this slot" call (not a per-task batch).
-    // Unscheduled order is local-only (the backlog has no stored order).
-    const handleReorder = useCallback(async (sectionId: string, taskId: string, orderedIds: string[]) => {
+    // Within-section reorder. Updates local board state only, like handleDrop.
+    const handleReorder = useCallback((sectionId: string, taskId: string, orderedIds: string[]) => {
         const snapshot = boardRef.current;
-        if (!snapshot || !planId) return;
-
+        if (!snapshot) return;
         if (sameOrder(sectionIds(snapshot, sectionId), orderedIds)) { resetDragShared(); return; }
-
-        const next = reorderSection(snapshot, sectionId, orderedIds);
-        applyBoard(next);
+        applyBoard(reorderSection(snapshot, sectionId, orderedIds));
         resetDragShared();
+    }, [applyBoard, resetDragShared]);
 
-        if (sectionId === UNSCHEDULED_ZONE) return;
-
-        const res = await api.adjustPlanTask(planId, taskId, { blockId: sectionId, blockOrder: orderedIds.indexOf(taskId) });
-        if (!res.ok) {
-            applyBoard(snapshot); // revert on failure
-            Alert.alert("Couldn't reorder tasks", "Your changes were reverted. Please try again.");
-        }
-    }, [planId, applyBoard, resetDragShared]);
-
-    // Tear down the whole planning modal. dismissAll() only scopes to the nested
-    // planning stack (it would land back on the review-tasks screen), so dismiss to
-    // the route that launched the flow.
-    const dismissFlow = useCallback(() => router.dismissTo('/(main)'), [router]);
+    // Tear down the whole planning modal and discard the proposal. dismissAll()
+    // only scopes to the nested planning stack (it would land back on the
+    // review-tasks screen), so dismiss to the route that launched the flow.
+    const dismissFlow = useCallback(() => {
+        clearProposal();
+        router.dismissTo('/(main)');
+    }, [clearProposal, router]);
 
     const [confirming, setConfirming] = useState(false);
 
-    // Promote the DRAFT to ACTIVE. On success, tear down the modal — the timeline
-    // reloads on focus and shows the now-active plan. On failure, offer a retry.
+    // Persist the plan: send the board's placements to the confirm endpoint,
+    // which creates the ACTIVE plan in one transaction. On success, tear down the
+    // modal — the timeline reloads on focus and shows the new plan. On failure,
+    // offer a retry (the board is untouched, so retrying just resends).
     const handleConfirm = useCallback(async () => {
-        if (!planId || confirming) return;
+        const snapshot = boardRef.current;
+        if (!snapshot || confirming) return;
         setConfirming(true);
-        const res = await api.confirmPlan(planId);
+        const res = await api.confirmPlan(assignmentsFromBoard(snapshot));
         if (res.ok) {
             dismissFlow();
             return;
@@ -303,7 +298,7 @@ export default function ReviewPlanScreen() {
             { text: 'Cancel', style: 'cancel' },
             { text: 'Retry', onPress: () => handleConfirm() },
         ]);
-    }, [planId, confirming, dismissFlow]);
+    }, [confirming, dismissFlow]);
 
     if (!board) {
         return (

@@ -14,6 +14,22 @@ export function hhMmToDate(hhMm: string): Date {
     return d;
 }
 
+// Converts minutes since midnight to an "HH:mm" string.
+export function fromMins(mins: number): string {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+}
+
+// Formats a minute count as a compact duration: "2h", "45m", or "1h 30m".
+export function formatDuration(mins: number): string {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    if (h === 0) return `${m}m`;
+    if (m === 0) return `${h}h`;
+    return `${h}h ${m}m`;
+}
+
 // Use when time + period need separate styles (e.g. period in a different colour)
 export function parseDisplayTime(hhMm: string): { time: string; period: string } {
     const [h, m] = hhMm.split(':').map(Number);
