@@ -13,7 +13,7 @@ import CreateTaskModal from "../../components/CreateTaskModal";
 import { PressableScale } from "../../components/PressableScale";
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Rect } from "react-native-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
 import { DayPlan, DayTemplate, DayTemplateBlock, PlannedBlock, PlannedTask, TaskStatus } from "../../lib/api.types";
 import { toMins, toHHmm, formatTime, formatTimeRange, formatDuration } from "../../lib/time";
@@ -170,16 +170,21 @@ function EmptyState({ template, entrance }: { template: DayTemplate | null; entr
         );
     });
 
+    const hasTemplate = listItems.length > 0;
+
     return (
         <>
-            <Animated.View style={styles.emptyBanner} entering={staggeredEntering(entrance, 0)}>
-                <View style={styles.emptyIconCircle}>
-                    <Text style={styles.emptyIcon}>✦</Text>
-                </View>
-                <Text style={styles.emptyBannerText}>{"Today's plan is empty"}</Text>
+            <Animated.View style={styles.emptyHero} entering={staggeredEntering(entrance, 0)}>
+                <MaterialCommunityIcons name="script-outline" size={44} color="rgba(42,38,33,0.22)" style={styles.emptyHeroGlyph} />
+                <Text style={styles.emptyHeroTitle}>Your day is a blank page</Text>
+                <Text style={styles.emptyHeroSubtitle}>
+                    {hasTemplate
+                        ? 'Plan it, and your tasks will settle into each block below.'
+                        : 'Plan your day and your blocks and tasks will appear here — a clear path from wake to wind-down.'}
+                </Text>
             </Animated.View>
 
-            {listItems.length > 0 && (
+            {hasTemplate && (
                 <View style={styles.templateTimeline}>
                     {timelineElements}
                 </View>
@@ -850,38 +855,44 @@ const styles = StyleSheet.create({
         fontVariant: ['tabular-nums'],
     },
 
-    // Empty state banner
-    emptyBanner: {
-        flexDirection: 'row',
+    // Empty state hero
+    emptyHero: {
         alignItems: 'center',
-        gap: 12,
         backgroundColor: '#fffef9',
         borderWidth: 1,
-        borderColor: 'rgba(42,38,33,0.04)',
-        borderRadius: 16,
-        padding: 17,
+        borderColor: 'rgba(42,38,33,0.05)',
+        borderRadius: 24,
+        paddingHorizontal: 28,
+        paddingTop: 34,
+        paddingBottom: 30,
+        shadowColor: '#2a2621',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.05,
+        shadowRadius: 14,
+        elevation: 2,
     },
-    emptyIconCircle: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: 'rgba(212,165,116,0.1)',
-        justifyContent: 'center',
-        alignItems: 'center',
+    emptyHeroGlyph: {
+        marginBottom: 16,
     },
-    emptyIcon: {
+    emptyHeroTitle: {
+        fontSize: 19,
+        fontWeight: '600',
+        color: '#2a2621',
+        letterSpacing: -0.4,
+    },
+    emptyHeroSubtitle: {
         fontSize: 14,
-        color: '#d4a574',
-    },
-    emptyBannerText: {
-        fontSize: 14,
+        lineHeight: 21,
         color: '#7a736a',
         letterSpacing: -0.15,
+        textAlign: 'center',
+        marginTop: 8,
+        maxWidth: 300,
     },
 
     // Template section (empty state)
     templateTimeline: {
-        marginTop: 12,
+        marginTop: 24,
     },
 
     // Ghost anchor / no-task card
