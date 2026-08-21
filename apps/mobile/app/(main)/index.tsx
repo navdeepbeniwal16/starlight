@@ -5,10 +5,12 @@ import {
     Text,
     StyleSheet,
     ScrollView,
-    TouchableOpacity,
+    Pressable,
     ActivityIndicator,
 } from "react-native";
+import Animated, { FadeInDown, useSharedValue, useAnimatedStyle, withSpring } from "react-native-reanimated";
 import CreateTaskModal from "../../components/CreateTaskModal";
+import { PressableScale } from "../../components/PressableScale";
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Rect } from "react-native-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -115,7 +117,7 @@ type TemplateListItem =
     | { kind: 'gap'; start: string; end: string }
     | { kind: 'boundary'; label: 'Wake' | 'Sleep'; time: string };
 
-function EmptyState({ template }: { template: DayTemplate | null }) {
+function EmptyState({ template, entrance }: { template: DayTemplate | null; entrance: boolean }) {
     const listItems: TemplateListItem[] = [];
 
     if (template) {
@@ -146,31 +148,36 @@ function EmptyState({ template }: { template: DayTemplate | null }) {
     }
 
     const timelineElements: ReactNode[] = [];
+    let stagger = 1;
     listItems.forEach((item, i) => {
         if (i > 0) {
             timelineElements.push(<ThreadSegment key={`t-${i}`} />);
         }
+        let content: ReactNode;
         if (item.kind === 'block') {
-            timelineElements.push(
-                item.block.type === 'CONTAINER'
-                    ? <GhostContainerBlock key={`i-${i}`} block={item.block} />
-                    : <GhostAnchorBlock key={`i-${i}`} block={item.block} />
-            );
+            content = item.block.type === 'CONTAINER'
+                ? <GhostContainerBlock block={item.block} />
+                : <GhostAnchorBlock block={item.block} />;
         } else if (item.kind === 'gap') {
-            timelineElements.push(<FreeSlotIndicator key={`i-${i}`} startTime={item.start} endTime={item.end} />);
+            content = <FreeSlotIndicator startTime={item.start} endTime={item.end} />;
         } else {
-            timelineElements.push(<DayBoundaryMarker key={`i-${i}`} label={item.label} time={item.time} />);
+            content = <DayBoundaryMarker label={item.label} time={item.time} />;
         }
+        timelineElements.push(
+            <Animated.View key={`i-${i}`} entering={staggeredEntering(entrance, stagger++)}>
+                {content}
+            </Animated.View>
+        );
     });
 
     return (
         <>
-            <View style={styles.emptyBanner}>
+            <Animated.View style={styles.emptyBanner} entering={staggeredEntering(entrance, 0)}>
                 <View style={styles.emptyIconCircle}>
                     <Text style={styles.emptyIcon}>✦</Text>
                 </View>
                 <Text style={styles.emptyBannerText}>{"Today's plan is empty"}</Text>
-            </View>
+            </Animated.View>
 
             {listItems.length > 0 && (
                 <View style={styles.templateTimeline}>
@@ -229,34 +236,49 @@ function AnchorBlockCard({ block, elapsed, progress }: { block: PlannedBlock; el
     );
 }
 
+const CHECK_SPRING = { duration: 300, dampingRatio: 1 };
+
 function TaskDoneToggle({ task, onDone }: { task: PlannedTask; onDone: () => void }) {
     const [completing, setCompleting] = useState(false);
-    const isDone = task.status === 'DONE' || completing;
+    const fill = useSharedValue(task.status === 'DONE' ? 1 : 0);
+
+    const filledStyle = useAnimatedStyle(() => ({
+        opacity: fill.value,
+        transform: [{ scale: 0.25 + fill.value * 0.75 }],
+    }));
+    const outlineStyle = useAnimatedStyle(() => ({ opacity: 1 - fill.value }));
+
+    // Follow the prop so status changes from elsewhere (a reload, a status flip on
+    // a persisted instance) re-drive the fill — press is not the only source of truth.
+    useEffect(() => {
+        fill.value = withSpring(task.status === 'DONE' ? 1 : 0, CHECK_SPRING);
+    }, [task.status]);
 
     async function handlePress() {
         if (completing || task.status === 'DONE') return;
         setCompleting(true);
+        fill.value = withSpring(1, CHECK_SPRING);
         const result = await api.updateTask(task.id, { progress: 100 });
         if (result.ok) {
             setCompleting(false);
             onDone();
         } else {
             setCompleting(false);
+            fill.value = withSpring(0, CHECK_SPRING);
         }
     }
 
     return (
-        <TouchableOpacity
-            onPress={handlePress}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            activeOpacity={0.6}
-        >
-            <Ionicons
-                name={isDone ? 'checkmark-circle' : 'checkmark-circle-outline'}
-                size={18}
-                color={isDone ? '#5c5248' : 'rgba(122,115,106,0.3)'}
-            />
-        </TouchableOpacity>
+        <Pressable onPress={handlePress} hitSlop={{ top: 11, bottom: 11, left: 11, right: 11 }}>
+            <View style={styles.toggleIcon}>
+                <Animated.View style={[StyleSheet.absoluteFill, outlineStyle]}>
+                    <Ionicons name="checkmark-circle-outline" size={18} color="rgba(122,115,106,0.3)" />
+                </Animated.View>
+                <Animated.View style={filledStyle}>
+                    <Ionicons name="checkmark-circle" size={18} color="#5c5248" />
+                </Animated.View>
+            </View>
+        </Pressable>
     );
 }
 
@@ -284,11 +306,11 @@ function ContainerBlockCard({ block, elapsed, progress, onTaskDone, onTaskPress 
             {block.tasks.length > 0 && (
                 <View style={styles.taskList}>
                     {block.tasks.map(task => (
-                        <TouchableOpacity key={task.id} style={styles.taskCard} activeOpacity={0.7} onPress={() => onTaskPress(task.id)}>
+                        <PressableScale key={task.id} style={styles.taskCard} onPress={() => onTaskPress(task.id)}>
                             <TaskDoneToggle task={task} onDone={() => onTaskDone(task.id)} />
                             <Text style={styles.taskTitle} numberOfLines={2}>{task.title}</Text>
                             <Text style={styles.taskEstimate}>{formatEstimatedMins(task.remainingMins)}</Text>
-                        </TouchableOpacity>
+                        </PressableScale>
                     ))}
                 </View>
             )}
@@ -362,15 +384,23 @@ function buildTimelineItems(plan: DayPlan, currentTime: string): TimelineItem[] 
     return items;
 }
 
+// Cap the stagger so a long day doesn't trickle in item-by-item.
+function staggeredEntering(entrance: boolean, index: number) {
+    if (!entrance) return undefined;
+    return FadeInDown.duration(340).delay(Math.min(index, 8) * 45);
+}
+
 function Timeline({
     plan,
     currentTime,
+    entrance,
     onNowLayout,
     onTaskDone,
     onTaskPress,
 }: {
     plan: DayPlan;
     currentTime: string;
+    entrance: boolean;
     onNowLayout: (y: number) => void;
     onTaskDone: (taskId: string) => void;
     onTaskPress: (taskId: string) => void;
@@ -378,23 +408,34 @@ function Timeline({
     const items = buildTimelineItems(plan, currentTime);
 
     const elements: ReactNode[] = [];
+    let stagger = 0;
     items.forEach((item, i) => {
         // Skip the thread after the invisible zero-height now-anchor to avoid a double gap.
         if (i > 0 && items[i - 1].kind !== 'current-time') {
             elements.push(<ThreadSegment key={`sep-${i}`} />);
         }
 
-        if (item.kind === 'boundary') {
-            elements.push(<DayBoundaryMarker key={`item-${i}`} label={item.label} time={item.time} />);
-        } else if (item.kind === 'gap') {
-            elements.push(<FreeSlotIndicator key={`item-${i}`} startTime={item.start} endTime={item.end} elapsed={item.elapsed} />);
-        } else if (item.kind === 'current-time') {
+        if (item.kind === 'current-time') {
             elements.push(<View key={`item-${i}`} onLayout={(e) => onNowLayout(e.nativeEvent.layout.y)} />);
-        } else if (item.block.type === 'CONTAINER') {
-            elements.push(<ContainerBlockCard key={`item-${i}`} block={item.block} elapsed={item.elapsed} progress={item.progress} onTaskDone={onTaskDone} onTaskPress={onTaskPress} />);
-        } else {
-            elements.push(<AnchorBlockCard key={`item-${i}`} block={item.block} elapsed={item.elapsed} progress={item.progress} />);
+            return;
         }
+
+        let content: ReactNode;
+        if (item.kind === 'boundary') {
+            content = <DayBoundaryMarker label={item.label} time={item.time} />;
+        } else if (item.kind === 'gap') {
+            content = <FreeSlotIndicator startTime={item.start} endTime={item.end} elapsed={item.elapsed} />;
+        } else if (item.block.type === 'CONTAINER') {
+            content = <ContainerBlockCard block={item.block} elapsed={item.elapsed} progress={item.progress} onTaskDone={onTaskDone} onTaskPress={onTaskPress} />;
+        } else {
+            content = <AnchorBlockCard block={item.block} elapsed={item.elapsed} progress={item.progress} />;
+        }
+
+        elements.push(
+            <Animated.View key={`item-${i}`} entering={staggeredEntering(entrance, stagger++)}>
+                {content}
+            </Animated.View>
+        );
     });
 
     return <View>{elements}</View>;
@@ -405,6 +446,9 @@ function Timeline({
 export default function TodayScreen() {
     const router = useRouter();
     const [state, setState] = useState<ScreenState>({ status: 'loading' });
+    // Gate the staggered entrance to the first render after a load so the
+    // minute-by-minute currentTime re-render never re-triggers it.
+    const [entrance, setEntrance] = useState(true);
     const [currentTime, setCurrentTime] = useState(() => toHHmm(new Date()));
     const [showCreateModal, setShowCreateModal] = useState(false);
     const scrollRef = useRef<ScrollView>(null);
@@ -416,6 +460,7 @@ export default function TodayScreen() {
 
     const load = useCallback(async () => {
         hasScrolledToNow.current = false;
+        setEntrance(true);
         setState({ status: 'loading' });
 
         const planResult = await api.getDayPlan();
@@ -453,6 +498,12 @@ export default function TodayScreen() {
         }, 60_000);
         return () => clearInterval(interval);
     }, []);
+
+    useEffect(() => {
+        if (state.status !== 'loaded' && state.status !== 'empty') return;
+        const t = setTimeout(() => setEntrance(false), 700);
+        return () => clearTimeout(t);
+    }, [state.status]);
 
     // Scroll so the now indicator is centred on screen. Only fires once per load
     // to avoid fighting the user if they scroll manually.
@@ -499,14 +550,10 @@ export default function TodayScreen() {
                     <Text style={styles.dayOfWeek}>{dayOfWeek}</Text>
                     <Text style={styles.date}>{date}</Text>
                 </View>
-                <TouchableOpacity
-                    style={styles.planButton}
-                    onPress={handlePlanDay}
-                    activeOpacity={0.8}
-                >
+                <PressableScale style={styles.planButton} onPress={handlePlanDay}>
                     <Text style={styles.planButtonIcon}>✦</Text>
                     <Text style={styles.planButtonText}>Plan your day</Text>
-                </TouchableOpacity>
+                </PressableScale>
             </View>
 
             {state.status === 'loading' && (
@@ -518,15 +565,15 @@ export default function TodayScreen() {
             {state.status === 'error' && (
                 <View style={styles.centered}>
                     <Text style={styles.errorText}>{state.message}</Text>
-                    <TouchableOpacity style={styles.retryButton} onPress={load}>
+                    <PressableScale style={styles.retryButton} onPress={load}>
                         <Text style={styles.retryButtonText}>Retry</Text>
-                    </TouchableOpacity>
+                    </PressableScale>
                 </View>
             )}
 
             {state.status === 'empty' && (
                 <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-                    <EmptyState template={state.template} />
+                    <EmptyState template={state.template} entrance={entrance} />
                 </ScrollView>
             )}
 
@@ -537,14 +584,16 @@ export default function TodayScreen() {
                     showsVerticalScrollIndicator={false}
                     onLayout={(e) => { scrollViewHeight.current = e.nativeEvent.layout.height; }}
                 >
-                    <Timeline plan={state.plan} currentTime={currentTime} onNowLayout={handleNowLayout} onTaskDone={handleTaskDone} onTaskPress={handleTaskPress} />
+                    <Timeline plan={state.plan} currentTime={currentTime} entrance={entrance} onNowLayout={handleNowLayout} onTaskDone={handleTaskDone} onTaskPress={handleTaskPress} />
                 </ScrollView>
             )}
 
             {(state.status === 'empty' || state.status === 'loaded') && (
-                <TouchableOpacity style={styles.fab} onPress={handleAddTask} activeOpacity={0.85}>
-                    <Ionicons name="add" size={24} color="#2a2621" />
-                </TouchableOpacity>
+                <View style={styles.fabWrap} pointerEvents="box-none">
+                    <PressableScale style={styles.fab} onPress={handleAddTask}>
+                        <Ionicons name="add" size={24} color="#2a2621" />
+                    </PressableScale>
+                </View>
             )}
 
             <CreateTaskModal
@@ -677,6 +726,7 @@ const styles = StyleSheet.create({
         fontWeight: '500',
         color: '#2a2621',
         letterSpacing: -0.15,
+        fontVariant: ['tabular-nums'],
     },
     boundaryTimeSleep: {
         color: 'rgba(42,38,33,0.6)',
@@ -708,6 +758,7 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontWeight: '400',
         color: 'rgba(122,115,106,0.8)',
+        fontVariant: ['tabular-nums'],
     },
 
     // Elapsed opacity (shared)
@@ -758,10 +809,12 @@ const styles = StyleSheet.create({
         color: '#9a9389',
         letterSpacing: -0.15,
         marginTop: 3,
+        fontVariant: ['tabular-nums'],
     },
     blockTimeRemaining: {
         color: '#7a9a6f',
         fontWeight: '500',
+        fontVariant: ['tabular-nums'],
     },
     taskList: {
         gap: 6,
@@ -779,6 +832,10 @@ const styles = StyleSheet.create({
         paddingVertical: 9,
         minHeight: 38,
     },
+    toggleIcon: {
+        width: 18,
+        height: 18,
+    },
     taskTitle: {
         flex: 1,
         fontSize: 14,
@@ -790,6 +847,7 @@ const styles = StyleSheet.create({
         fontSize: 13,
         color: '#7a736a',
         letterSpacing: -0.15,
+        fontVariant: ['tabular-nums'],
     },
 
     // Empty state banner
@@ -843,6 +901,7 @@ const styles = StyleSheet.create({
         color: 'rgba(122,115,106,0.5)',
         letterSpacing: -0.15,
         marginTop: 2,
+        fontVariant: ['tabular-nums'],
     },
 
     // Ghost container card (dashed)
@@ -873,6 +932,7 @@ const styles = StyleSheet.create({
         color: 'rgba(122,115,106,0.6)',
         letterSpacing: -0.15,
         marginTop: 2,
+        fontVariant: ['tabular-nums'],
     },
     energyBadge: {
         backgroundColor: 'rgba(232,223,209,0.3)',
@@ -893,7 +953,7 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(42,38,33,0.04)',
         borderStyle: 'dashed',
-        borderRadius: 16,
+        borderRadius: 10,
         paddingHorizontal: 17,
         paddingVertical: 13,
         minHeight: 46,
@@ -912,11 +972,13 @@ const styles = StyleSheet.create({
         letterSpacing: -0.15,
     },
 
-    // Floating action button
-    fab: {
+    // Wrapper holds the absolute position so the inner PressableScale's press transform doesn't fight it.
+    fabWrap: {
         position: 'absolute',
         bottom: 16,
         right: 16,
+    },
+    fab: {
         width: 48,
         height: 48,
         borderRadius: 24,
