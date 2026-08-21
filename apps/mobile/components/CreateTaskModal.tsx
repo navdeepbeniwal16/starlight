@@ -15,7 +15,7 @@ import type { BacklogTask, EnergyLevel } from "../lib/api.types";
 import {
     ESTIMATE_OPTIONS, PROGRESS_PRESETS,
     FieldRow, ProgressSlider, DeadlineExpanded,
-    getEstimateLabel, formatDeadlineValue,
+    getEstimateLabel, formatDeadlineValue, effortDotColor,
     defaultTime,
     tf,
 } from "./TaskFields";
@@ -28,7 +28,8 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
     const insets = useSafeAreaInsets();
     const scrollViewRef = useRef<KeyboardAwareScrollViewRef>(null);
 
-    const [activeField, setActiveField] = useState<FieldKey | null>(null);
+    // Estimate is required for scheduling, so surface it expanded from the start.
+    const [activeField, setActiveField] = useState<FieldKey | null>('estimate');
     const [title, setTitle]             = useState('');
     const [notes, setNotes]             = useState('');
     const [estimatedMins, setEstimatedMins] = useState<number | null>(null);
@@ -44,7 +45,7 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
     const [submitError, setSubmitError]   = useState<string | null>(null);
 
     function resetForm() {
-        setActiveField(null); setTitle(''); setNotes('');
+        setActiveField('estimate'); setTitle(''); setNotes('');
         setEstimatedMins(null); setEffort(null);
         setDeadlineDay(null); setDeadlineTime(defaultTime()); setTempDay(new Date()); setShowTimePicker(false);
         setProgress(0);
@@ -170,6 +171,7 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                                         style={[tf.pill, effort === e && tf.pillOn]}
                                         onPress={() => { setEffort(e); setActiveField(null); }}
                                     >
+                                        <View style={[tf.dot, { backgroundColor: effortDotColor(e) }]} />
                                         <Text style={[tf.pillTxt, effort === e && tf.pillTxtOn]}>
                                             {e.charAt(0) + e.slice(1).toLowerCase()}
                                         </Text>
@@ -269,13 +271,12 @@ const s = StyleSheet.create({
 
     header: {
         flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        paddingHorizontal: 20, paddingVertical: 14,
-        borderBottomWidth: 1, borderBottomColor: 'rgba(42,38,33,0.10)',
+        paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12,
+        borderBottomWidth: 1, borderBottomColor: 'rgba(42,38,33,0.06)',
     },
-    headerTitle: { ...BASE_TXT, fontSize: 16, fontWeight: '500', letterSpacing: -0.2 },
+    headerTitle: { ...BASE_TXT, fontSize: 18, fontWeight: '600', letterSpacing: -0.3 },
     closeBtn: {
-        width: 30, height: 30, borderRadius: 15,
-        backgroundColor: 'rgba(42,38,33,0.10)',
+        width: 30, height: 30,
         justifyContent: 'center', alignItems: 'center',
     },
 
@@ -294,14 +295,14 @@ const s = StyleSheet.create({
         borderColor: 'rgba(42,38,33,0.10)', borderRadius: 16,
         overflow: 'hidden', marginBottom: 12,
     },
-    sep: { height: 1, backgroundColor: 'rgba(42,38,33,0.04)' },
+    sep: { height: 1, backgroundColor: 'rgba(42,38,33,0.06)' },
 
     notesCard: {
         backgroundColor: '#fffef9', borderWidth: 1,
         borderColor: 'rgba(42,38,33,0.10)', borderRadius: 16,
         paddingHorizontal: 16, paddingVertical: 14, marginBottom: 14,
     },
-    notesLabel: { fontSize: 10, color: 'rgba(122,115,106,0.4)', letterSpacing: 1.1, marginBottom: 8 },
+    notesLabel: { fontSize: 11, color: 'rgba(122,115,106,0.5)', letterSpacing: 0.5, marginBottom: 8 },
     notesInput: { ...BASE_TXT, minHeight: 72, lineHeight: 20, padding: 0 },
 
     submitError: { fontSize: 12, color: 'rgba(200,80,80,0.8)', textAlign: 'center', marginBottom: 8 },

@@ -17,7 +17,7 @@ import { KeyboardScreen } from "../../components/KeyboardScreen";
 import {
     ESTIMATE_OPTIONS, PROGRESS_PRESETS,
     FieldRow, ProgressSlider, DeadlineExpanded,
-    getEstimateLabel, formatDeadlineValue,
+    getEstimateLabel, formatDeadlineValue, effortDotColor,
     defaultTime,
     tf,
 } from "../../components/TaskFields";
@@ -349,6 +349,7 @@ export default function TaskDetailScreen() {
                                         style={[tf.pill, effort === e && tf.pillOn]}
                                         onPress={() => handleEffortSelect(e)}
                                     >
+                                        <View style={[tf.dot, { backgroundColor: effortDotColor(e) }]} />
                                         <Text style={[tf.pillTxt, effort === e && tf.pillTxtOn]}>
                                             {e.charAt(0) + e.slice(1).toLowerCase()}
                                         </Text>
@@ -481,8 +482,8 @@ const s = StyleSheet.create({
     content: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40, gap: 12 },
 
     titleInput: {
-        ...BASE_TXT, fontSize: 23.2, fontWeight: '500',
-        letterSpacing: -0.3, lineHeight: 32, padding: 0,
+        ...BASE_TXT, fontSize: 22, fontWeight: '500',
+        letterSpacing: -0.4, lineHeight: 30, padding: 0,
         paddingHorizontal: 4,
     },
     titleInputError: { borderBottomWidth: 1, borderBottomColor: 'rgba(200,80,80,0.4)' },
@@ -507,14 +508,14 @@ const s = StyleSheet.create({
         backgroundColor: '#fffef9', borderWidth: 1,
         borderColor: 'rgba(42,38,33,0.10)', borderRadius: 16, overflow: 'hidden',
     },
-    sep: { height: 1, backgroundColor: 'rgba(42,38,33,0.10)' },
+    sep: { height: 1, backgroundColor: 'rgba(42,38,33,0.06)' },
 
     notesCard: {
         backgroundColor: '#fffef9', borderWidth: 1,
         borderColor: 'rgba(42,38,33,0.10)', borderRadius: 16,
         paddingHorizontal: 16, paddingVertical: 14,
     },
-    notesLabel: { fontSize: 10, color: 'rgba(122,115,106,0.4)', letterSpacing: 1.1, marginBottom: 8 },
+    notesLabel: { fontSize: 11, color: 'rgba(122,115,106,0.5)', letterSpacing: 0.5, marginBottom: 8 },
     notesInput: { ...BASE_TXT, minHeight: 72, lineHeight: 20, padding: 0 },
 
     deleteButton: {

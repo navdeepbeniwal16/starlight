@@ -540,7 +540,7 @@ export default function TodayScreen() {
         });
     }
 
-    const handleTaskPress = (taskId: string) => router.push(`/task/${taskId}`);
+    const handleTaskPress = (taskId: string) => router.push(`/task/${taskId}?from=Today`);
 
     // The plan is only created on confirm, so entering the flow is just
     // navigation. Eligibility errors (no template, no blocks left today) surface
