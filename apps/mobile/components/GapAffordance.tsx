@@ -2,6 +2,7 @@ import { Text, StyleSheet } from "react-native";
 import { TemplateGap } from "../lib/templateDraft";
 import { formatDuration, parseDisplayTime } from "../lib/time";
 import { PressableScale } from "./PressableScale";
+import { colors } from "../lib/theme";
 
 // Formats a range like "2:00–8:00 PM", collapsing the meridiem when both ends share it.
 function formatRange(start: string, end: string): string {
@@ -30,6 +31,6 @@ const styles = StyleSheet.create({
         flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
         paddingVertical: 6,
     },
-    plus: { fontSize: 14, fontWeight: '500', color: 'rgba(212,165,116,0.9)' },
-    label: { fontSize: 12.5, color: 'rgba(122,115,106,0.55)', letterSpacing: -0.1, fontVariant: ['tabular-nums'] },
+    plus: { fontSize: 14, fontWeight: '500', color: colors.accent.default },
+    label: { fontSize: 12.5, color: colors.text.secondary, letterSpacing: -0.1, fontVariant: ['tabular-nums'] },
 });

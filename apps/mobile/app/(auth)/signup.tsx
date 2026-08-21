@@ -1,12 +1,17 @@
 import { useRouter } from 'expo-router';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { useAuthStore } from '../../stores/auth.store';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { api } from '../../lib/api';
+import { KeyboardScreen } from '../../components/KeyboardScreen';
 
 export default function SignupScreen() {
     const router = useRouter();
     const setAuth = useAuthStore((state) => state.setAuth);
+
+    const emailRef = useRef<TextInput>(null);
+    const passwordRef = useRef<TextInput>(null);
+    const confirmRef = useRef<TextInput>(null);
 
     const [fullName, setFullName] = useState('');
     const [email, setEmail] = useState('');
@@ -51,58 +56,101 @@ export default function SignupScreen() {
         await setAuth(result.data.user, result.data.token);
         router.replace('/(onboarding)');
     }
-    
+
     return (
-        <View style={styles.container}>
-        {/* Logo */}
-        <View style={styles.logoContainer}>
-        <Text style={styles.appName}>Starlight</Text>
-        <Text style={styles.tagline}>Your day, handled.</Text>
-        </View>
-        
-        {/* Form */}
-        <View style={styles.form}>
-        <View style={styles.fieldContainer}>
-        <Text style={styles.label}>Full Name</Text>
-        <TextInput value={fullName} onChangeText={setFullName} style={styles.input} placeholder="John Doe" placeholderTextColor="rgba(122,115,106,0.5)" />
-        </View>
-        
-        <View style={styles.fieldContainer}>
-        <Text style={styles.label}>Email</Text>
-        <TextInput value={email} onChangeText={setEmail} style={styles.input} placeholder="you@example.com" placeholderTextColor="rgba(122,115,106,0.5)" keyboardType="email-address" autoCapitalize="none" />
-        </View>
-        
-        <View style={styles.fieldContainer}>
-        <Text style={styles.label}>Password</Text>
-        <TextInput value={password} onChangeText={setPassword} style={styles.input} placeholder="••••••••" placeholderTextColor="rgba(122,115,106,0.5)" secureTextEntry />
-        </View>
-        
-        <View style={styles.fieldContainer}>
-        <Text style={styles.label}>Confirm Password</Text>
-        <TextInput value={confirmPassword} onChangeText={setConfirmPassword} style={styles.input} placeholder="••••••••" placeholderTextColor="rgba(122,115,106,0.5)" secureTextEntry />
-        </View>
-        
-        <TouchableOpacity style={styles.button} onPress={handleSignup} disabled={isLoading}>
-        <Text style={styles.buttonText}>{isLoading ? 'Creating account...' : 'Create Account'}</Text>
-        </TouchableOpacity>
+        <KeyboardScreen style={styles.screen} contentContainerStyle={styles.container}>
+            <View style={styles.logoContainer}>
+                <Text style={styles.appName}>Starlight</Text>
+                <Text style={styles.tagline}>Your day, handled.</Text>
+            </View>
 
-        {error && <Text style={styles.errorText}>{error}</Text>}
+            <View style={styles.form}>
+                <View style={styles.fieldContainer}>
+                    <Text style={styles.label}>Full Name</Text>
+                    <TextInput
+                        value={fullName}
+                        onChangeText={setFullName}
+                        style={styles.input}
+                        placeholder="John Doe"
+                        placeholderTextColor="rgba(122,115,106,0.5)"
+                        returnKeyType="next"
+                        onSubmitEditing={() => emailRef.current?.focus()}
+                        blurOnSubmit={false}
+                    />
+                </View>
 
-        <View style={styles.loginRow}>
-        <Text style={styles.loginText}>Already have an account? </Text>
-        <TouchableOpacity onPress={() => router.replace('/(auth)/login')}>
-        <Text style={styles.loginLink}>Log in</Text>
-        </TouchableOpacity>
-        </View>
-        </View>
-        </View>
+                <View style={styles.fieldContainer}>
+                    <Text style={styles.label}>Email</Text>
+                    <TextInput
+                        ref={emailRef}
+                        value={email}
+                        onChangeText={setEmail}
+                        style={styles.input}
+                        placeholder="you@example.com"
+                        placeholderTextColor="rgba(122,115,106,0.5)"
+                        keyboardType="email-address"
+                        autoCapitalize="none"
+                        returnKeyType="next"
+                        onSubmitEditing={() => passwordRef.current?.focus()}
+                        blurOnSubmit={false}
+                    />
+                </View>
+
+                <View style={styles.fieldContainer}>
+                    <Text style={styles.label}>Password</Text>
+                    <TextInput
+                        ref={passwordRef}
+                        value={password}
+                        onChangeText={setPassword}
+                        style={styles.input}
+                        placeholder="••••••••"
+                        placeholderTextColor="rgba(122,115,106,0.5)"
+                        secureTextEntry
+                        returnKeyType="next"
+                        onSubmitEditing={() => confirmRef.current?.focus()}
+                        blurOnSubmit={false}
+                    />
+                </View>
+
+                <View style={styles.fieldContainer}>
+                    <Text style={styles.label}>Confirm Password</Text>
+                    <TextInput
+                        ref={confirmRef}
+                        value={confirmPassword}
+                        onChangeText={setConfirmPassword}
+                        style={styles.input}
+                        placeholder="••••••••"
+                        placeholderTextColor="rgba(122,115,106,0.5)"
+                        secureTextEntry
+                        returnKeyType="done"
+                        onSubmitEditing={handleSignup}
+                    />
+                </View>
+
+                <TouchableOpacity style={styles.button} onPress={handleSignup} disabled={isLoading}>
+                    <Text style={styles.buttonText}>{isLoading ? 'Creating account...' : 'Create Account'}</Text>
+                </TouchableOpacity>
+
+                {error && <Text style={styles.errorText}>{error}</Text>}
+
+                <View style={styles.loginRow}>
+                    <Text style={styles.loginText}>Already have an account? </Text>
+                    <TouchableOpacity onPress={() => router.replace('/(auth)/login')}>
+                        <Text style={styles.loginLink}>Log in</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        </KeyboardScreen>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
+    screen: {
         flex: 1,
         backgroundColor: '#fdfcfa',
+    },
+    container: {
+        flexGrow: 1,
         justifyContent: 'center',
         paddingHorizontal: 24,
         gap: 48,

@@ -5,10 +5,10 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    ScrollView,
     StyleSheet,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { KeyboardProvider, KeyboardToolbar, KeyboardAwareScrollView, type KeyboardAwareScrollViewRef } from "react-native-keyboard-controller";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../lib/api";
 import type { BacklogTask, Priority, EnergyLevel } from "../lib/api.types";
@@ -26,7 +26,7 @@ type Props = { visible: boolean; onClose: () => void; onCreated: (task: BacklogT
 
 export default function CreateTaskModal({ visible, onClose, onCreated }: Props) {
     const insets = useSafeAreaInsets();
-    const scrollViewRef = useRef<ScrollView>(null);
+    const scrollViewRef = useRef<KeyboardAwareScrollViewRef>(null);
 
     const [activeField, setActiveField] = useState<FieldKey | null>(null);
     const [title, setTitle]             = useState('');
@@ -96,9 +96,15 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
 
     const canSubmit = title.trim().length > 0 && estimatedMins !== null && !submitting;
 
+    const revealFocusedInput = () => {
+        scrollViewRef.current?.assureFocusedInputVisible();
+        setTimeout(() => scrollViewRef.current?.assureFocusedInputVisible(), 300);
+    };
+
     return (
         <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
-            <View style={[s.screen, { paddingTop: insets.top }]}>
+            <KeyboardProvider>
+                <View style={[s.screen, { paddingTop: insets.top }]}>
 
                 <View style={s.header}>
                     <Text style={s.headerTitle}>New Task</Text>
@@ -107,11 +113,14 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                     </TouchableOpacity>
                 </View>
 
-                <ScrollView
+                <KeyboardAwareScrollView
                     ref={scrollViewRef}
+                    style={s.scrollFlex}
                     contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + 32 }]}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
+                    bottomOffset={16}
+                    mode="layout"
                 >
                     <TextInput
                         style={[s.titleInput, titleError && s.titleInputError]}
@@ -119,6 +128,7 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                         placeholderTextColor="rgba(122,115,106,0.3)"
                         value={title}
                         onChangeText={(t) => { setTitle(t); if (t.trim()) setTitleError(false); }}
+                        onFocus={revealFocusedInput}
                         autoFocus multiline blurOnSubmit returnKeyType="done"
                     />
                     {titleError && <Text style={s.inlineError}>Title is required</Text>}
@@ -261,6 +271,7 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                             placeholderTextColor="rgba(122,115,106,0.3)"
                             value={notes}
                             onChangeText={setNotes}
+                            onFocus={revealFocusedInput}
                             multiline textAlignVertical="top"
                         />
                     </View>
@@ -275,8 +286,10 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                         <Text style={s.createBtnTxt}>{submitting ? 'Creating...' : 'Create task'}</Text>
                     </TouchableOpacity>
 
-                </ScrollView>
-            </View>
+                </KeyboardAwareScrollView>
+                </View>
+                <KeyboardToolbar />
+            </KeyboardProvider>
         </Modal>
     );
 }
@@ -298,6 +311,7 @@ const s = StyleSheet.create({
         justifyContent: 'center', alignItems: 'center',
     },
 
+    scrollFlex: { flex: 1 },
     scroll: { paddingHorizontal: 16, paddingTop: 20 },
 
     titleInput: {

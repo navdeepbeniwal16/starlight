@@ -1,9 +1,12 @@
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import { View, Text, StyleSheet, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import Constants from "expo-constants";
 import { useShallow } from "zustand/react/shallow";
 import { useAuthStore } from "../../stores/auth.store";
+import { PressableScale } from "../../components/PressableScale";
+import { colors, radius, spacing, shadow } from "../../lib/theme";
 
 export default function SettingsScreen() {
     const router = useRouter();
@@ -14,6 +17,8 @@ export default function SettingsScreen() {
     const initials = user
         ? `${user.firstName.charAt(0)}${user.lastName.charAt(0)}`.toUpperCase()
         : '';
+
+    const version = Constants.expoConfig?.version;
 
     async function handleLogout() {
         await clearAuth();
@@ -33,100 +38,99 @@ export default function SettingsScreen() {
 
     return (
         <SafeAreaView style={styles.safeArea}>
-
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>Settings</Text>
             </View>
 
-            <View style={styles.content}>
-
-                <View style={styles.card}>
-                    <View style={styles.profileRow}>
-                        <View style={styles.avatar}>
-                            <Text style={styles.avatarText}>{initials}</Text>
-                        </View>
-                        <View style={styles.profileInfo}>
-                            <Text style={styles.profileName}>
-                                {user?.firstName} {user?.lastName}
-                            </Text>
-                            <Text style={styles.profileEmail}>{user?.email}</Text>
-                        </View>
+            <View style={styles.body}>
+                <View style={styles.profile}>
+                    <View style={styles.avatar}>
+                        <Text style={styles.avatarText}>{initials}</Text>
+                    </View>
+                    <View style={styles.profileInfo}>
+                        <Text style={styles.profileName}>
+                            {user?.firstName} {user?.lastName}
+                        </Text>
+                        <Text style={styles.profileEmail}>{user?.email}</Text>
                     </View>
                 </View>
 
                 <View style={styles.card}>
-                    <TouchableOpacity
-                        style={styles.actionRow}
+                    <SettingsRow
+                        icon="calendar-outline"
+                        label="Day Template"
                         onPress={() => router.push('/day-template')}
-                        activeOpacity={0.7}
-                    >
-                        <Ionicons name="calendar-outline" size={18} color="#7a736a" />
-                        <Text style={styles.navLabel}>Day Template</Text>
-                        <Ionicons name="chevron-forward" size={18} color="#c0b8b0" style={styles.navChevron} />
-                    </TouchableOpacity>
+                    />
                 </View>
 
                 <View style={styles.card}>
-                    <TouchableOpacity style={styles.actionRow} onPress={confirmLogout} activeOpacity={0.7}>
-                        <Ionicons name="log-out-outline" size={18} color="rgba(200,80,80,0.85)" />
-                        <Text style={styles.actionLabel}>Log out</Text>
-                    </TouchableOpacity>
+                    <PressableScale style={styles.row} onPress={confirmLogout} activeScale={0.98}>
+                        <Ionicons name="log-out-outline" size={18} color={colors.danger.default} />
+                        <Text style={styles.logoutLabel}>Log out</Text>
+                    </PressableScale>
                 </View>
 
+                {version && <Text style={styles.version}>Starlight v{version}</Text>}
             </View>
         </SafeAreaView>
     );
 }
 
+function SettingsRow({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void }) {
+    return (
+        <PressableScale style={styles.row} onPress={onPress} activeScale={0.98}>
+            <Ionicons name={icon} size={18} color={colors.text.secondary} />
+            <Text style={styles.rowLabel}>{label}</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.text.muted} style={styles.rowChevron} />
+        </PressableScale>
+    );
+}
+
 const styles = StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: '#fdfcfa' },
+    safeArea: { flex: 1, backgroundColor: colors.surface.page },
 
-    header: {
-        paddingHorizontal: 20,
-        paddingTop: 16,
-        paddingBottom: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(42,38,33,0.04)',
-    },
-    headerTitle: { fontSize: 18, fontWeight: '500', color: '#2a2621' },
+    header: { paddingHorizontal: spacing.xl, paddingTop: spacing.lg, paddingBottom: spacing.lg },
+    headerTitle: { fontSize: 18, fontWeight: '600', color: colors.text.primary, letterSpacing: -0.3 },
 
-    content: { padding: 16, gap: 12 },
+    body: { flex: 1, paddingHorizontal: spacing.lg, gap: spacing.md },
 
-    card: {
-        backgroundColor: '#fffef9',
-        borderWidth: 1,
-        borderColor: 'rgba(42,38,33,0.06)',
-        borderRadius: 16,
-        overflow: 'hidden',
-    },
-
-    profileRow: {
+    profile: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 16,
         gap: 14,
+        padding: spacing.lg,
+        borderRadius: radius.lg,
+        backgroundColor: colors.surface.sunken,
     },
     avatar: {
         width: 52,
         height: 52,
         borderRadius: 26,
-        backgroundColor: '#2a2621',
+        backgroundColor: colors.text.primary,
         justifyContent: 'center',
         alignItems: 'center',
     },
-    avatarText: { fontSize: 18, fontWeight: '600', color: '#fdfcfa' },
+    avatarText: { fontSize: 18, fontWeight: '600', color: colors.surface.page },
     profileInfo: { flex: 1 },
-    profileName: { fontSize: 16, fontWeight: '500', color: '#2a2621', marginBottom: 3 },
-    profileEmail: { fontSize: 14, color: '#7a736a' },
+    profileName: { fontSize: 16, fontWeight: '500', color: colors.text.primary, marginBottom: 3 },
+    profileEmail: { fontSize: 14, color: colors.text.secondary },
 
-    actionRow: {
+    card: {
+        backgroundColor: colors.surface.raised,
+        borderRadius: radius.lg,
+        ...shadow.card,
+    },
+
+    row: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
-        paddingHorizontal: 16,
+        gap: spacing.md,
+        paddingHorizontal: spacing.lg,
         paddingVertical: 14,
     },
-    actionLabel: { fontSize: 14, fontWeight: '500', color: 'rgba(200,80,80,0.85)' },
-    navLabel: { fontSize: 14, fontWeight: '500', color: '#2a2621' },
-    navChevron: { marginLeft: 'auto' },
+    rowLabel: { fontSize: 14, fontWeight: '500', color: colors.text.primary },
+    rowChevron: { marginLeft: 'auto' },
+    logoutLabel: { fontSize: 14, fontWeight: '500', color: colors.danger.default },
+
+    version: { marginTop: 'auto', paddingVertical: spacing.xl, textAlign: 'center', fontSize: 12, color: colors.text.muted },
 });

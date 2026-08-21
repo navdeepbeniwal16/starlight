@@ -2,6 +2,7 @@ import { Tabs, useRouter } from "expo-router";
 import { useEffect, useRef } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuthStore } from "../../stores/auth.store";
+import { colors } from "../../lib/theme";
 
 export default function MainLayout() {
     const router = useRouter();
@@ -22,11 +23,11 @@ export default function MainLayout() {
         <Tabs
             screenOptions={{
                 headerShown: false,
-                tabBarActiveTintColor: '#2a2621',
-                tabBarInactiveTintColor: '#7a736a',
+                tabBarActiveTintColor: colors.text.primary,
+                tabBarInactiveTintColor: colors.text.secondary,
                 tabBarStyle: {
-                    backgroundColor: 'rgba(255,254,249,0.5)',
-                    borderTopColor: 'rgba(42,38,33,0.10)',
+                    backgroundColor: colors.surface.raised,
+                    borderTopColor: colors.border.hairline,
                     borderTopWidth: 1,
                     height: 70,
                 },

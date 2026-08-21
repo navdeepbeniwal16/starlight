@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useNavigation } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -12,11 +12,15 @@ import Animated, {
     LinearTransition,
     useSharedValue,
     useAnimatedStyle,
+    useAnimatedScrollHandler,
+    interpolate,
+    Extrapolation,
     withSequence,
     withTiming,
     type EntryOrExitLayoutType,
 } from "react-native-reanimated";
 import { api } from "../lib/api";
+import { colors, radius, spacing, shadow, typography } from "../lib/theme";
 import type { BlockInput } from "../lib/api.types";
 import { formatTime } from "../lib/time";
 import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, buildTimeline, hasContainer } from "../lib/templateDraft";
@@ -161,11 +165,17 @@ export default function DayTemplateScreen() {
 
     const canSave = dirty && valid && !saving;
 
+    const scrollY = useSharedValue(0);
+    const scrollHandler = useAnimatedScrollHandler((e) => { scrollY.value = e.contentOffset.y; });
+    const scrollEdgeStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(scrollY.value, [0, 12], [0, 1], Extrapolation.CLAMP),
+    }));
+
     return (
         <SafeAreaView style={styles.safeArea}>
             <View style={styles.backRow}>
                 <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.7} hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}>
-                    <Ionicons name="chevron-back" size={20} color="#7a736a" />
+                    <Ionicons name="chevron-back" size={20} color={colors.text.secondary} />
                     <Text style={styles.backLabel}>Settings</Text>
                 </TouchableOpacity>
             </View>
@@ -176,7 +186,7 @@ export default function DayTemplateScreen() {
 
             {loading && (
                 <Animated.View style={styles.centered} exiting={FadeOut.duration(220)}>
-                    <ActivityIndicator color="#d4a574" />
+                    <ActivityIndicator color={colors.accent.default} />
                 </Animated.View>
             )}
 
@@ -191,10 +201,13 @@ export default function DayTemplateScreen() {
 
             {!loading && !error && draft && (
                 <Animated.View style={styles.contentFill} entering={entering ? FadeIn.duration(240) : undefined}>
-                    <ScrollView
+                    <Animated.View pointerEvents="none" style={[styles.scrollEdge, scrollEdgeStyle]} />
+                    <Animated.ScrollView
                         style={styles.scroll}
                         contentContainerStyle={[styles.content, dirty && { paddingBottom: 96 + insets.bottom }]}
                         showsVerticalScrollIndicator={false}
+                        onScroll={scrollHandler}
+                        scrollEventThrottle={16}
                     >
                         <Animated.View
                             style={styles.wakeSleepSection}
@@ -215,6 +228,20 @@ export default function DayTemplateScreen() {
                                     {outOfBounds.map((o) => o.block.name).join(', ')}. Edit to fit the new window before saving.
                                 </Text>
                             )}
+                        </Animated.View>
+
+                        <Animated.View
+                            style={styles.legend}
+                            entering={entering ? FadeInDown.duration(300).delay(40) : undefined}
+                        >
+                            <View style={styles.legendItem}>
+                                <View style={[styles.legendSwatch, styles.legendSwatchContainer]} />
+                                <Text style={styles.legendText}>Container</Text>
+                            </View>
+                            <View style={styles.legendItem}>
+                                <View style={[styles.legendSwatch, styles.legendSwatchAnchor]} />
+                                <Text style={styles.legendText}>Anchor</Text>
+                            </View>
                         </Animated.View>
 
                         <View style={styles.blockList}>
@@ -252,7 +279,7 @@ export default function DayTemplateScreen() {
                                 )
                             )}
                         </View>
-                    </ScrollView>
+                    </Animated.ScrollView>
 
                     {dirty && (
                         <Animated.View
@@ -267,7 +294,7 @@ export default function DayTemplateScreen() {
                                 disabled={!canSave}
                             >
                                 {saving
-                                    ? <ActivityIndicator color="#2a2621" />
+                                    ? <ActivityIndicator color={colors.text.onAccent} />
                                     : <Text style={styles.saveButtonText}>Save</Text>}
                             </PressableScale>
                         </Animated.View>
@@ -282,7 +309,7 @@ export default function DayTemplateScreen() {
                     exiting={FadeOut.duration(500)}
                     pointerEvents="none"
                 >
-                    <Ionicons name="checkmark-circle" size={15} color="#7a736a" />
+                    <Ionicons name="checkmark-circle" size={15} color={colors.text.secondary} />
                     <Text style={styles.savedToastText}>Changes saved</Text>
                 </Animated.View>
             )}
@@ -335,61 +362,73 @@ function BlockRow({ signal, entering, children }: { signal: number; entering?: E
 }
 
 const styles = StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: '#fdfcfa' },
+    safeArea: { flex: 1, backgroundColor: colors.surface.page },
 
-    backRow: { paddingHorizontal: 12, paddingTop: 20, paddingBottom: 2 },
+    backRow: { paddingHorizontal: spacing.md, paddingTop: spacing.xl, paddingBottom: 2 },
     backButton: {
         flexDirection: 'row', alignItems: 'center', gap: 2,
-        alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 4,
+        alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: spacing.xs,
     },
-    backLabel: { fontSize: 15, color: '#7a736a' },
+    backLabel: { fontSize: 15, color: colors.text.secondary },
 
-    header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16 },
-    headerTitle: { fontSize: 24, fontWeight: '500', color: '#2a2621', letterSpacing: 0.07 },
+    header: { paddingHorizontal: spacing.xl, paddingTop: spacing.sm, paddingBottom: spacing.lg },
+    headerTitle: { ...typography.title, color: colors.text.primary, letterSpacing: 0.07 },
+
+    scrollEdge: {
+        position: 'absolute', top: 0, left: 0, right: 0, height: 1, zIndex: 5,
+        backgroundColor: colors.border.hairline,
+        shadowColor: '#2a2621',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.05,
+        shadowRadius: 6,
+    },
 
     contentFill: { flex: 1 },
     scroll: { flex: 1 },
-    content: { paddingHorizontal: 16, paddingBottom: 24, gap: 12 },
+    content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
 
-    wakeSleepSection: { gap: 10, paddingBottom: 4 },
-    // Subtle panel that groups the block timeline apart from the wake/sleep controls.
+    wakeSleepSection: { gap: 10, paddingBottom: spacing.xs },
+
+    legend: { flexDirection: 'row', gap: spacing.lg, paddingHorizontal: spacing.xs, paddingTop: spacing.xs },
+    legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    legendSwatch: { width: 12, height: 12, borderRadius: 3, borderWidth: 1, borderColor: colors.border.strong },
+    legendSwatchContainer: { backgroundColor: colors.surface.raised, borderStyle: 'dashed' },
+    legendSwatchAnchor: { backgroundColor: colors.surface.sunken, borderColor: colors.border.warm, borderStyle: 'solid' },
+    legendText: { fontSize: 12, color: colors.text.secondary, letterSpacing: -0.1 },
+
     blockList: {
-        gap: 12,
-        padding: 12,
-        borderRadius: 20,
-        backgroundColor: 'rgba(42,38,33,0.025)',
+        gap: spacing.md,
+        padding: spacing.sm,
+        borderRadius: radius.xxl,
+        backgroundColor: colors.surface.panel,
     },
-    boundsError: { fontSize: 13, color: '#c0392b', lineHeight: 19, letterSpacing: -0.1 },
+    boundsError: { fontSize: 13, color: colors.danger.default, lineHeight: 19, letterSpacing: -0.1 },
 
-    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: 16 },
-    errorText: { fontSize: 14, color: '#7a736a', textAlign: 'center' },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: spacing.lg },
+    errorText: { fontSize: 14, color: colors.text.secondary, textAlign: 'center' },
     retryButton: {
-        height: 44, paddingHorizontal: 24, backgroundColor: '#d4a574',
-        borderRadius: 14, justifyContent: 'center', alignItems: 'center',
+        height: 44, paddingHorizontal: spacing.xxl, backgroundColor: colors.accent.default,
+        borderRadius: radius.md, justifyContent: 'center', alignItems: 'center',
     },
-    retryButtonText: { fontSize: 15, fontWeight: '500', color: '#2a2621', letterSpacing: -0.2 },
+    retryButtonText: { fontSize: 15, fontWeight: '500', color: colors.text.onAccent, letterSpacing: -0.2 },
 
     footer: {
         position: 'absolute',
         left: 0, right: 0, bottom: 0,
-        paddingHorizontal: 16, paddingTop: 12,
-        gap: 8,
-        backgroundColor: '#fdfcfa',
+        paddingHorizontal: spacing.lg, paddingTop: spacing.md,
+        gap: spacing.sm,
+        backgroundColor: colors.surface.page,
         // A soft top-lift, rather than a hard divider, separates the footer from the scrolling content.
-        shadowColor: '#2a2621',
-        shadowOffset: { width: 0, height: -3 },
-        shadowOpacity: 0.06,
-        shadowRadius: 10,
-        elevation: 12,
+        ...shadow.footer,
     },
-    saveErrorText: { fontSize: 13, color: '#c0392b', textAlign: 'center' },
-    saveButton: { height: 52, backgroundColor: '#d4a574', borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
+    saveErrorText: { fontSize: 13, color: colors.danger.default, textAlign: 'center' },
+    saveButton: { height: 52, backgroundColor: colors.accent.default, borderRadius: radius.lg, justifyContent: 'center', alignItems: 'center' },
     saveButtonDisabled: { backgroundColor: 'rgba(212,165,116,0.35)' },
-    saveButtonText: { fontSize: 16, fontWeight: '500', color: '#2a2621', letterSpacing: -0.31 },
+    saveButtonText: { fontSize: 16, fontWeight: '500', color: colors.text.onAccent, letterSpacing: -0.31 },
 
     flashOverlay: {
         ...StyleSheet.absoluteFillObject,
-        borderRadius: 16,
+        borderRadius: radius.lg,
         backgroundColor: 'rgba(212,165,116,0.35)',
     },
 
@@ -400,5 +439,5 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: 6,
     },
-    savedToastText: { fontSize: 13, color: '#7a736a', letterSpacing: -0.1 },
+    savedToastText: { fontSize: 13, color: colors.text.secondary, letterSpacing: -0.1 },
 });

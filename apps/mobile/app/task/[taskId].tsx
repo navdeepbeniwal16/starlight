@@ -4,7 +4,6 @@ import {
     Text,
     TextInput,
     StyleSheet,
-    ScrollView,
     TouchableOpacity,
     Alert,
     ActivityIndicator,
@@ -14,6 +13,7 @@ import { useLocalSearchParams, useRouter, useNavigation } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
 import type { TaskDetail, EnergyLevel, Priority, UpdateTaskInput } from "../../lib/api.types";
+import { KeyboardScreen } from "../../components/KeyboardScreen";
 import {
     ESTIMATE_OPTIONS, PROGRESS_PRESETS,
     FieldRow, ProgressSlider, DeadlineExpanded,
@@ -287,11 +287,9 @@ export default function TaskDetailScreen() {
             )}
 
             {!loading && !fetchError && task && (
-                <ScrollView
+                <KeyboardScreen
                     style={s.scroll}
                     contentContainerStyle={s.content}
-                    showsVerticalScrollIndicator={false}
-                    keyboardShouldPersistTaps="handled"
                 >
                     {/* Title */}
                     <TextInput
@@ -480,7 +478,7 @@ export default function TaskDetailScreen() {
                         <Text style={s.deleteLabel}>Delete task</Text>
                     </TouchableOpacity>
 
-                </ScrollView>
+                </KeyboardScreen>
             )}
 
             {!loading && !fetchError && task && (
