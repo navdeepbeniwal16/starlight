@@ -24,7 +24,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
-import type { BacklogTask, BacklogBuckets, ScheduledTask, TaskDetail, Priority } from "../../lib/api.types";
+import type { BacklogTask, BacklogBuckets, ScheduledTask, TaskDetail } from "../../lib/api.types";
 import { formatTime } from "../../lib/time";
 import { applyCreated, applyToggle, bucketOf, createSequencer } from "../../lib/backlogState";
 import CreateTaskModal from "../../components/CreateTaskModal";
@@ -132,15 +132,6 @@ function StatusBadge({ status }: { status: BacklogTask['status'] }) {
     );
 }
 
-function PriorityBadge({ priority }: { priority: Priority }) {
-    const label = priority === 'HIGH' ? 'High priority' : priority === 'MEDIUM' ? 'Med priority' : 'Low priority';
-    return (
-        <View style={[styles.badge, styles.badgeMuted]}>
-            <Text style={[styles.badgeText, styles.badgeTextMuted]}>{label}</Text>
-        </View>
-    );
-}
-
 const RING_SIZE = 32;
 const RING_STROKE = 2.5;
 const RING_R = (RING_SIZE - RING_STROKE) / 2;
@@ -215,7 +206,6 @@ function TaskCard({ task, scheduledMeta, index, justArrived, onPress, onToggled 
                     </Text>
                     <View style={styles.badgeRow}>
                         <StatusBadge status={task.status} />
-                        {task.priority && <PriorityBadge priority={task.priority} />}
                         {scheduledMeta ? (
                             <Text style={styles.metaText}>{scheduledMeta}</Text>
                         ) : task.deadline && (

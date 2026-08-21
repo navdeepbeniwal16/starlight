@@ -12,19 +12,19 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useNavigation } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
-import type { TaskDetail, EnergyLevel, Priority, UpdateTaskInput } from "../../lib/api.types";
+import type { TaskDetail, EnergyLevel, UpdateTaskInput } from "../../lib/api.types";
 import { KeyboardScreen } from "../../components/KeyboardScreen";
 import {
     ESTIMATE_OPTIONS, PROGRESS_PRESETS,
     FieldRow, ProgressSlider, DeadlineExpanded,
-    getEstimateLabel, formatDeadlineValue, priorityDotColor,
+    getEstimateLabel, formatDeadlineValue,
     defaultTime,
     tf,
 } from "../../components/TaskFields";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-type FieldKey = 'estimate' | 'priority' | 'effort' | 'deadline' | 'progress';
+type FieldKey = 'estimate' | 'effort' | 'deadline' | 'progress';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 function deadlineToParts(iso: string): { day: Date; time: Date } {
@@ -51,7 +51,6 @@ export default function TaskDetailScreen() {
     const [title, setTitle]               = useState('');
     const [notes, setNotes]               = useState('');
     const [estimatedMins, setEstimatedMins] = useState(15);
-    const [priority, setPriority]         = useState<Priority | null>(null);
     const [effort, setEffort]             = useState<EnergyLevel | null>(null);
     const [deadlineDay, setDeadlineDay]   = useState<Date | null>(null);
     const [deadlineTime, setDeadlineTime] = useState<Date>(defaultTime());
@@ -77,7 +76,6 @@ export default function TaskDetailScreen() {
         setTitle(t.title);
         setNotes(t.notes ?? '');
         setEstimatedMins(t.estimatedMins);
-        setPriority(t.priority);
         setEffort(t.effort);
         setProgress(t.progress ?? 0);
         if (t.deadline) {
@@ -166,12 +164,6 @@ export default function TaskDetailScreen() {
         setEstimatedMins(mins);
         setActiveField(null);
         save({ estimatedMins: mins });
-    }
-
-    function handlePrioritySelect(p: Priority | null) {
-        setPriority(p);
-        setActiveField(null);
-        save({ priority: p });
     }
 
     function handleEffortSelect(e: EnergyLevel | null) {
@@ -338,36 +330,6 @@ export default function TaskDetailScreen() {
                                         <Text style={[tf.pillTxt, estimatedMins === o.value && tf.pillTxtOn]}>{o.label}</Text>
                                     </TouchableOpacity>
                                 ))}
-                            </View>
-                        )}
-
-                        <View style={s.sep} />
-
-                        <FieldRow
-                            label="Priority"
-                            value={priority ? priority.charAt(0) + priority.slice(1).toLowerCase() : 'Not set'}
-                            isOpen={activeField === 'priority'}
-                            onPress={() => toggleField('priority')}
-                        />
-                        {activeField === 'priority' && (
-                            <View style={tf.pills}>
-                                {(['HIGH','MEDIUM','LOW'] as Priority[]).map(p => (
-                                    <TouchableOpacity
-                                        key={p}
-                                        style={[tf.pill, priority === p && tf.pillOn]}
-                                        onPress={() => handlePrioritySelect(p)}
-                                    >
-                                        <View style={[tf.dot, { backgroundColor: priorityDotColor(p) }]} />
-                                        <Text style={[tf.pillTxt, priority === p && tf.pillTxtOn]}>
-                                            {p.charAt(0) + p.slice(1).toLowerCase()}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                                {priority !== null && (
-                                    <TouchableOpacity style={tf.pill} onPress={() => handlePrioritySelect(null)}>
-                                        <Text style={tf.pillTxt}>Clear</Text>
-                                    </TouchableOpacity>
-                                )}
                             </View>
                         )}
 

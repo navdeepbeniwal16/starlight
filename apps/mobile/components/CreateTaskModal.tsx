@@ -11,16 +11,16 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardProvider, KeyboardToolbar, KeyboardAwareScrollView, type KeyboardAwareScrollViewRef } from "react-native-keyboard-controller";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../lib/api";
-import type { BacklogTask, Priority, EnergyLevel } from "../lib/api.types";
+import type { BacklogTask, EnergyLevel } from "../lib/api.types";
 import {
     ESTIMATE_OPTIONS, PROGRESS_PRESETS,
     FieldRow, ProgressSlider, DeadlineExpanded,
-    getEstimateLabel, formatDeadlineValue, priorityDotColor,
+    getEstimateLabel, formatDeadlineValue,
     defaultTime,
     tf,
 } from "./TaskFields";
 
-type FieldKey = 'estimate' | 'priority' | 'effort' | 'deadline' | 'progress';
+type FieldKey = 'estimate' | 'effort' | 'deadline' | 'progress';
 
 type Props = { visible: boolean; onClose: () => void; onCreated: (task: BacklogTask) => void; };
 
@@ -32,7 +32,6 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
     const [title, setTitle]             = useState('');
     const [notes, setNotes]             = useState('');
     const [estimatedMins, setEstimatedMins] = useState<number | null>(null);
-    const [priority, setPriority]       = useState<Priority | null>(null);
     const [effort, setEffort]           = useState<EnergyLevel | null>(null);
     const [deadlineDay, setDeadlineDay] = useState<Date | null>(null);
     const [deadlineTime, setDeadlineTime] = useState<Date>(defaultTime);
@@ -46,7 +45,7 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
 
     function resetForm() {
         setActiveField(null); setTitle(''); setNotes('');
-        setEstimatedMins(null); setPriority(null); setEffort(null);
+        setEstimatedMins(null); setEffort(null);
         setDeadlineDay(null); setDeadlineTime(defaultTime()); setTempDay(new Date()); setShowTimePicker(false);
         setProgress(0);
         setSubmitting(false); setTitleError(false); setEstimateError(false); setSubmitError(null);
@@ -82,7 +81,6 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
 
         const result = await api.createTask({
             title: title.trim(), estimatedMins,
-            ...(priority && { priority }),
             ...(effort   && { effort }),
             ...(deadline && { deadline }),
             progress,
@@ -153,36 +151,6 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                                         <Text style={[tf.pillTxt, estimatedMins === o.value && tf.pillTxtOn]}>{o.label}</Text>
                                     </TouchableOpacity>
                                 ))}
-                            </View>
-                        )}
-
-                        <View style={s.sep} />
-
-                        <FieldRow
-                            label="Priority"
-                            value={priority ? priority.charAt(0) + priority.slice(1).toLowerCase() : 'Not set'}
-                            isOpen={activeField === 'priority'}
-                            onPress={() => toggleField('priority')}
-                        />
-                        {activeField === 'priority' && (
-                            <View style={tf.pills}>
-                                {(['HIGH','MEDIUM','LOW'] as Priority[]).map(p => (
-                                    <TouchableOpacity
-                                        key={p}
-                                        style={[tf.pill, priority === p && tf.pillOn]}
-                                        onPress={() => { setPriority(p); setActiveField(null); }}
-                                    >
-                                        <View style={[tf.dot, { backgroundColor: priorityDotColor(p) }]} />
-                                        <Text style={[tf.pillTxt, priority === p && tf.pillTxtOn]}>
-                                            {p.charAt(0) + p.slice(1).toLowerCase()}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                                {priority !== null && (
-                                    <TouchableOpacity style={tf.pill} onPress={() => { setPriority(null); setActiveField(null); }}>
-                                        <Text style={tf.pillTxt}>Clear</Text>
-                                    </TouchableOpacity>
-                                )}
                             </View>
                         )}
 

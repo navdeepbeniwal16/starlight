@@ -8,7 +8,6 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import type { Priority, EnergyLevel } from "../lib/api.types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -48,10 +47,6 @@ export function fmt12(date: Date): string {
 
 export function formatDeadlineValue(day: Date, time: Date): string {
     return `${MONTHS_SHORT[day.getMonth()]} ${day.getDate()}, ${fmt12(time)}`;
-}
-
-export function priorityDotColor(p: Priority): string {
-    return p === 'HIGH' ? '#d4a574' : p === 'MEDIUM' ? '#7a736a' : 'rgba(122,115,106,0.35)';
 }
 
 // ─── CalendarPicker ───────────────────────────────────────────────────────────
@@ -296,7 +291,6 @@ export const tf = StyleSheet.create({
     pillOn: { backgroundColor: '#2a2621' },
     pillTxt: { ...BASE_TXT },
     pillTxtOn: { color: '#fdfcfa' },
-    dot: { width: 7, height: 7, borderRadius: 3.5 },
 
     deadlineSection: {
         marginHorizontal: 12, marginTop: 4, marginBottom: 12,

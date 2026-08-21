@@ -17,7 +17,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
-import type { Priority, ReviewTask, TaskDetail } from "../../lib/api.types";
+import type { ReviewTask, TaskDetail } from "../../lib/api.types";
 import { usePlanningStore } from "../../stores/planning.store";
 import CreateTaskModal from "../../components/CreateTaskModal";
 
@@ -113,15 +113,6 @@ function StatusBadge({ status }: { status: ReviewTask['status'] }) {
     );
 }
 
-function PriorityBadge({ priority }: { priority: Priority }) {
-    const label = priority === 'HIGH' ? 'High' : priority === 'MEDIUM' ? 'Med' : 'Low';
-    return (
-        <View style={[s.badge, s.badgeMuted]}>
-            <Text style={[s.badgeText, s.badgeTextMuted]}>{label} priority</Text>
-        </View>
-    );
-}
-
 const RING = 30;
 const STROKE = 2.5;
 const RING_R = (RING - STROKE) / 2;
@@ -161,7 +152,6 @@ function TaskCard({ task, onPress, onDone }: { task: ReviewTask; onPress: () => 
                 <Text style={s.taskTitle} numberOfLines={2}>{task.title}</Text>
                 <View style={s.badgeRow}>
                     <StatusBadge status={task.status} />
-                    {task.priority && <PriorityBadge priority={task.priority} />}
                 </View>
             </View>
             <ProgressRing progress={task.progress ?? 0} />
