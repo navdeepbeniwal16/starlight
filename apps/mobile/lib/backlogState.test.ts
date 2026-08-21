@@ -1,4 +1,4 @@
-import { applyCreated, applyToggle, createSequencer, withoutTask } from "./backlogState";
+import { applyCreated, applyToggle, bucketOf, createSequencer, withoutTask } from "./backlogState";
 import type { BacklogBuckets, BacklogTask, ScheduledTask, TaskDetail } from "./api.types";
 
 function task(id: string, over: Partial<BacklogTask> = {}): BacklogTask {
@@ -52,17 +52,21 @@ describe("withoutTask", () => {
 });
 
 describe("applyToggle", () => {
-    it("moves a completed task to the top of doneToday", () => {
+    it("moves a completed task to the top of doneToday, settled (doneToday is authoritative)", () => {
         const buckets = { ...empty(), scheduled: [scheduled('a')], doneToday: [task('old')] };
-        const next = applyToggle(buckets, buckets.scheduled[0], detail({ id: 'a', status: 'DONE', progress: 100 }));
+        const { buckets: next, dest, settled } = applyToggle(buckets, buckets.scheduled[0], detail({ id: 'a', status: 'DONE', progress: 100 }));
+        expect(dest).toBe('doneToday');
+        expect(settled).toBe(true);
         expect(next.scheduled).toHaveLength(0);
         expect(next.doneToday.map(t => t.id)).toEqual(['a', 'old']);
         expect(next.doneToday[0]).toMatchObject({ status: 'DONE', progress: 100 });
     });
 
-    it("moves a reopened task to the top of remaining so it stays visible (not lost)", () => {
+    it("parks a reopened task in remaining but is unsettled (true bucket known only on refresh)", () => {
         const buckets = { ...empty(), doneToday: [task('a', { status: 'DONE', progress: 100 })] };
-        const next = applyToggle(buckets, buckets.doneToday[0], detail({ id: 'a', status: 'IN_PROGRESS', progress: 75 }));
+        const { buckets: next, dest, settled } = applyToggle(buckets, buckets.doneToday[0], detail({ id: 'a', status: 'IN_PROGRESS', progress: 75 }));
+        expect(dest).toBe('remaining');
+        expect(settled).toBe(false);
         expect(next.doneToday).toHaveLength(0);
         expect(next.remaining.map(t => t.id)).toEqual(['a']);
         expect(next.remaining[0]).toMatchObject({ status: 'IN_PROGRESS', progress: 75 });
@@ -79,14 +83,28 @@ describe("applyToggle", () => {
 describe("applyCreated", () => {
     it("adds an open task to the end of remaining", () => {
         const buckets = { ...empty(), remaining: [task('a')] };
-        const next = applyCreated(buckets, task('b'));
+        const { buckets: next, dest } = applyCreated(buckets, task('b'));
+        expect(dest).toBe('remaining');
         expect(next.remaining.map(t => t.id)).toEqual(['a', 'b']);
     });
 
     it("adds a done task to the top of doneToday", () => {
         const buckets = { ...empty(), doneToday: [task('a', { status: 'DONE' })] };
-        const next = applyCreated(buckets, task('b', { status: 'DONE', progress: 100 }));
+        const { buckets: next, dest } = applyCreated(buckets, task('b', { status: 'DONE', progress: 100 }));
+        expect(dest).toBe('doneToday');
         expect(next.doneToday.map(t => t.id)).toEqual(['b', 'a']);
+    });
+});
+
+describe("bucketOf", () => {
+    it("finds the bucket a task currently occupies", () => {
+        const buckets = { ...empty(), scheduled: [scheduled('a')], remaining: [task('b')] };
+        expect(bucketOf(buckets, 'a')).toBe('scheduled');
+        expect(bucketOf(buckets, 'b')).toBe('remaining');
+    });
+
+    it("returns null when the task is absent", () => {
+        expect(bucketOf(empty(), 'ghost')).toBeNull();
     });
 });
 

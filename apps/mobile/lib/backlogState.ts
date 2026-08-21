@@ -9,23 +9,37 @@ export function withoutTask(buckets: BacklogBuckets, taskId: string): BacklogBuc
     };
 }
 
+// `dest` is where the mutation optimistically places the task, so the caller's
+// arrival cue reveals exactly that bucket. `settled` says whether `dest` is the
+// task's final home: when false, only the next refresh knows the true bucket, so
+// the caller must re-target the cue against reconciled data (see bucketOf).
+export type Placement = { buckets: BacklogBuckets; dest: 'doneToday' | 'remaining'; settled: boolean };
+
 // A reopened task goes to remaining (not its true bucket) so it stays visible;
-// the follow-up refresh, which knows its plan placement, reconciles it.
-export function applyToggle(buckets: BacklogBuckets, task: BacklogTask, updated: TaskDetail): BacklogBuckets {
+// the follow-up refresh, which knows its plan placement, reconciles it — hence
+// `settled` is only true for a completion, whose doneToday home is authoritative.
+export function applyToggle(buckets: BacklogBuckets, task: BacklogTask, updated: TaskDetail): Placement {
     const next = withoutTask(buckets, task.id);
     const patched: BacklogTask = { ...task, status: updated.status, progress: updated.progress };
-    if (updated.status === 'DONE') {
-        next.doneToday = [patched, ...next.doneToday];
-    } else {
-        next.remaining = [patched, ...next.remaining];
-    }
-    return next;
+    const done = updated.status === 'DONE';
+    const dest = done ? 'doneToday' : 'remaining';
+    next[dest] = [patched, ...next[dest]];
+    return { buckets: next, dest, settled: done };
 }
 
-export function applyCreated(buckets: BacklogBuckets, task: BacklogTask): BacklogBuckets {
+export function applyCreated(buckets: BacklogBuckets, task: BacklogTask): Placement {
     return task.status === 'DONE'
-        ? { ...buckets, doneToday: [task, ...buckets.doneToday] }
-        : { ...buckets, remaining: [...buckets.remaining, task] };
+        ? { buckets: { ...buckets, doneToday: [task, ...buckets.doneToday] }, dest: 'doneToday', settled: true }
+        : { buckets: { ...buckets, remaining: [...buckets.remaining, task] }, dest: 'remaining', settled: true };
+}
+
+// The bucket a task currently sits in, or null if absent — used to re-target the
+// arrival cue after a refresh reconciles an optimistic move to its true bucket.
+export function bucketOf(buckets: BacklogBuckets, taskId: string): keyof BacklogBuckets | null {
+    for (const key of Object.keys(buckets) as (keyof BacklogBuckets)[]) {
+        if (buckets[key].some(t => t.id === taskId)) return key;
+    }
+    return null;
 }
 
 // Token gate so out-of-order fetch responses can't clobber fresher state: only

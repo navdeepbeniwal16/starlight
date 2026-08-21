@@ -15,6 +15,7 @@ import Animated, {
     LinearTransition,
     useAnimatedStyle,
     useSharedValue,
+    withSequence,
     withTiming,
 } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
@@ -25,23 +26,23 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
 import type { BacklogTask, BacklogBuckets, ScheduledTask, TaskDetail, Priority } from "../../lib/api.types";
 import { formatTime } from "../../lib/time";
-import { applyCreated, applyToggle, createSequencer } from "../../lib/backlogState";
+import { applyCreated, applyToggle, bucketOf, createSequencer } from "../../lib/backlogState";
 import CreateTaskModal from "../../components/CreateTaskModal";
 
 // Shared motion constants. The standard curve is interruptible and settles calmly.
 const EASE = Easing.bezier(0.2, 0, 0, 1);
-const SECTION_LAYOUT = LinearTransition.duration(220).easing(EASE.factory());
+const SECTION_LAYOUT = LinearTransition.duration(260).easing(EASE.factory());
 
 // The four lifecycle sections, in fixed display order. Bucket membership and
 // ordering are computed server-side; this screen just renders what it gets.
 // Collapse state is seeded from these defaults and then persists across visits.
 type SectionKey = keyof BacklogBuckets;
 
-const SECTIONS: Array<{ key: SectionKey; label: string; hint: string; defaultOpen: boolean }> = [
-    { key: 'carriedOver', label: 'Carried over',    hint: 'Nothing carried over',  defaultOpen: true },
-    { key: 'scheduled',   label: 'Scheduled today', hint: 'No plan for today yet', defaultOpen: true },
-    { key: 'remaining',   label: 'Remaining',       hint: 'Backlog is clear',      defaultOpen: false },
-    { key: 'doneToday',   label: 'Done today',      hint: 'Nothing completed yet', defaultOpen: false },
+const SECTIONS: Array<{ key: SectionKey; label: string; description: string; hint: string; defaultOpen: boolean }> = [
+    { key: 'carriedOver', label: 'Carried over',    description: 'Unfinished tasks carried over from your previous plan', hint: 'Nothing carried over',  defaultOpen: true },
+    { key: 'scheduled',   label: 'Scheduled today', description: "Tasks planned into today's blocks",                     hint: 'No plan for today yet', defaultOpen: true },
+    { key: 'remaining',   label: 'Remaining',       description: 'Backlog tasks not yet scheduled',                       hint: 'Backlog is clear',      defaultOpen: false },
+    { key: 'doneToday',   label: 'Done today',      description: "Tasks you've completed today",                          hint: 'Nothing completed yet', defaultOpen: false },
 ];
 
 const DEFAULT_OPEN = Object.fromEntries(
@@ -173,21 +174,40 @@ function CircularProgress({ progress }: { progress: number }) {
     );
 }
 
-function TaskCard({ task, scheduledMeta, index, onPress, onToggled }: {
+function TaskCard({ task, scheduledMeta, index, justArrived, onPress, onToggled }: {
     task: BacklogTask;
     scheduledMeta?: string;
     index: number;
+    justArrived: boolean;
     onPress: () => void;
     onToggled: (updated: TaskDetail) => void;
 }) {
     const isDone = task.status === 'DONE';
+
+    const wash = useSharedValue(0);
+    const pop = useSharedValue(0);
+    useEffect(() => {
+        if (!justArrived) return;
+        wash.value = 1;
+        wash.value = withTiming(0, { duration: 1300, easing: Easing.inOut(Easing.quad) });
+        pop.value = withSequence(
+            withTiming(1, { duration: 220, easing: EASE }),
+            withTiming(0, { duration: 560, easing: EASE }),
+        );
+    }, [justArrived, wash, pop]);
+
+    const washStyle = useAnimatedStyle(() => ({ opacity: wash.value }));
+    const popStyle = useAnimatedStyle(() => ({ transform: [{ scale: 1 + 0.03 * pop.value }] }));
+
     return (
         <Animated.View
             entering={FadeIn.duration(180).delay(Math.min(index * 30, 240))}
             exiting={FadeOut.duration(120)}
             layout={SECTION_LAYOUT}
         >
-            <ScaleOnPress onPress={onPress} style={styles.taskCard}>
+          <Animated.View style={popStyle}>
+            <ScaleOnPress onPress={onPress} style={[styles.taskCard, isDone && styles.taskCardDone]}>
+                <Animated.View pointerEvents="none" style={[styles.arrivalWash, washStyle]} />
                 <DoneToggle task={task} onToggled={onToggled} />
                 <View style={styles.taskCardContent}>
                     <Text style={[styles.taskTitle, isDone && styles.taskTitleDone]} numberOfLines={2}>
@@ -205,14 +225,16 @@ function TaskCard({ task, scheduledMeta, index, onPress, onToggled }: {
                 </View>
                 <CircularProgress progress={task.progress ?? 0} />
             </ScaleOnPress>
+          </Animated.View>
         </Animated.View>
     );
 }
 
-function SectionHeader({ label, count, open, onToggle }: {
+function SectionHeader({ label, count, open, justReceived, onToggle }: {
     label: string;
     count: number;
     open: boolean;
+    justReceived: boolean;
     onToggle: () => void;
 }) {
     const rotation = useSharedValue(open ? 90 : 0);
@@ -221,6 +243,20 @@ function SectionHeader({ label, count, open, onToggle }: {
     }, [open, rotation]);
     const chevronStyle = useAnimatedStyle(() => ({
         transform: [{ rotate: `${rotation.value}deg` }],
+    }));
+
+    // The count of the section a task just moved into pulses, so a change in a
+    // collapsed section still registers.
+    const countPop = useSharedValue(0);
+    useEffect(() => {
+        if (!justReceived) return;
+        countPop.value = withSequence(
+            withTiming(1, { duration: 200, easing: EASE }),
+            withTiming(0, { duration: 420, easing: EASE }),
+        );
+    }, [justReceived, countPop]);
+    const countStyle = useAnimatedStyle(() => ({
+        transform: [{ scale: 1 + 0.24 * countPop.value }],
     }));
 
     return (
@@ -233,7 +269,7 @@ function SectionHeader({ label, count, open, onToggle }: {
                 <Ionicons name="chevron-forward" size={13} color="rgba(122,115,106,0.6)" />
             </Animated.View>
             <Text style={styles.sectionLabel}>{label}</Text>
-            <Text style={styles.sectionCount}>{count}</Text>
+            <Animated.Text style={[styles.sectionCount, countStyle]}>{count}</Animated.Text>
         </TouchableOpacity>
     );
 }
@@ -241,9 +277,7 @@ function SectionHeader({ label, count, open, onToggle }: {
 function EmptyIllustration() {
     return (
         <View style={styles.illustration}>
-            <View style={[styles.illustrationCard, { transform: [{ rotate: '-4deg' }], opacity: 0.15 }]} />
-            <View style={[styles.illustrationCard, { transform: [{ rotate: '2deg' }], opacity: 0.25, marginTop: -28 }]} />
-            <View style={[styles.illustrationCard, { opacity: 0.4, marginTop: -28 }]} />
+            <Ionicons name="list-outline" size={64} color="rgba(42,38,33,0.18)" />
         </View>
     );
 }
@@ -255,6 +289,29 @@ export default function BacklogScreen() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [showCreateModal, setShowCreateModal] = useState(false);
+
+    // Which task/section just received a move, for the landing cue. Cleared on a
+    // timer so a later refresh re-rendering the same card doesn't replay it.
+    const [arrivedTaskId, setArrivedTaskId] = useState<string | null>(null);
+    const [receivedSection, setReceivedSection] = useState<SectionKey | null>(null);
+    const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current); }, []);
+
+    const flashArrival = useCallback((taskId: string, dest: SectionKey) => {
+        setArrivedTaskId(taskId);
+        setReceivedSection(dest);
+        setOpen(prev => (prev[dest] ? prev : { ...prev, [dest]: true }));
+        if (flashTimer.current) clearTimeout(flashTimer.current);
+        flashTimer.current = setTimeout(() => {
+            setArrivedTaskId(null);
+            setReceivedSection(null);
+        }, 1300);
+    }, []);
+
+    // A move whose destination the client can't predict (a reopen lands in its
+    // plan bucket, known only server-side); the next refresh flashes wherever it
+    // actually reconciled, so the cue is consistent regardless of destination.
+    const pendingArrival = useRef<string | null>(null);
 
     // Only the most recently issued fetch may apply its result, so an out-of-order
     // response can't clobber fresher state or a pending optimistic update.
@@ -268,17 +325,27 @@ export default function BacklogScreen() {
         api.getBacklog().then(result => {
             if (showLoading) setLoading(false);   // clear the spinner even if superseded
             if (!seq.isCurrent(token)) return;     // a newer fetch owns the data
-            if (result.ok) setBuckets(result.data);
-            else if (showLoading) setError(result.error);
+            if (!result.ok) { if (showLoading) setError(result.error); return; }
+            setBuckets(result.data);
+            const pending = pendingArrival.current;
+            if (pending) {
+                pendingArrival.current = null;
+                const landed = bucketOf(result.data, pending);
+                if (landed) flashArrival(pending, landed);
+            }
         });
-    }, [seq]);
+    }, [seq, flashArrival]);
 
     useFocusEffect(
         useCallback(() => { loadBuckets(true); }, [loadBuckets])
     );
 
     function handleToggled(task: BacklogTask, updated: TaskDetail) {
-        setBuckets(prev => prev ? applyToggle(prev, task, updated) : prev);
+        if (!buckets) return;
+        const { buckets: next, dest, settled } = applyToggle(buckets, task, updated);
+        setBuckets(next);
+        if (settled) flashArrival(task.id, dest);
+        else pendingArrival.current = task.id;   // reveal wherever the refresh reconciles it
         loadBuckets(false);
     }
 
@@ -288,14 +355,17 @@ export default function BacklogScreen() {
     const showFab = !loading && !error;
 
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>Backlog</Text>
-                {buckets !== null && (
-                    <Text style={styles.headerCount}>
-                        {taskCount === 1 ? '1 task' : `${taskCount} tasks`}
-                    </Text>
-                )}
+                <TouchableOpacity
+                    style={styles.seeAllLink}
+                    activeOpacity={0.6}
+                    onPress={() => {/* Placeholder: routes to the all-tasks view once it exists. */}}
+                >
+                    <Text style={styles.seeAllText}>See all</Text>
+                    <Ionicons name="chevron-forward" size={14} color="#b07841" />
+                </TouchableOpacity>
             </View>
 
             {loading && (
@@ -314,14 +384,7 @@ export default function BacklogScreen() {
                 <View style={styles.centered}>
                     <EmptyIllustration />
                     <Text style={styles.emptyTitle}>Your backlog is clear</Text>
-                    <Text style={styles.emptySubtitle}>Add tasks to track and prioritise your work</Text>
-                    <TouchableOpacity
-                        style={styles.addFirstButton}
-                        onPress={() => setShowCreateModal(true)}
-                    >
-                        <Ionicons name="add" size={16} color="rgba(42,38,33,0.7)" />
-                        <Text style={styles.addFirstLabel}>Add your first task</Text>
-                    </TouchableOpacity>
+                    <Text style={styles.emptySubtitle}>Add tasks you want to track and schedule into your days</Text>
                 </View>
             )}
 
@@ -333,37 +396,43 @@ export default function BacklogScreen() {
                     {SECTIONS.map((section, si) => {
                         const tasks = buckets[section.key];
                         const isOpen = open[section.key];
-                        const muted = section.key === 'doneToday';
                         return (
                             <Animated.View
                                 key={section.key}
-                                style={[styles.zone, muted && styles.zoneMuted]}
+                                style={styles.zone}
                                 entering={FadeIn.duration(220).delay(si * 70)}
                                 layout={SECTION_LAYOUT}
                             >
-                                <SectionHeader
-                                    label={section.label}
-                                    count={tasks.length}
-                                    open={isOpen}
-                                    onToggle={() => setOpen(prev => ({ ...prev, [section.key]: !prev[section.key] }))}
-                                />
-                                {tasks.length === 0 ? (
-                                    <Text style={styles.sectionHint}>{section.hint}</Text>
-                                ) : isOpen && (
-                                    <View style={styles.cardGroup}>
-                                        {tasks.map((task, i) => (
-                                            <TaskCard
-                                                key={task.id}
-                                                task={task}
-                                                index={i}
-                                                scheduledMeta={section.key === 'scheduled'
-                                                    ? `${formatTime((task as ScheduledTask).blockStartTime)} · ${(task as ScheduledTask).blockName}`
-                                                    : undefined}
-                                                onPress={() => router.push(`/task/${task.id}`)}
-                                                onToggled={(updated) => handleToggled(task, updated)}
-                                            />
-                                        ))}
-                                    </View>
+                                <View>
+                                    <SectionHeader
+                                        label={section.label}
+                                        count={tasks.length}
+                                        open={isOpen}
+                                        justReceived={receivedSection === section.key}
+                                        onToggle={() => setOpen(prev => ({ ...prev, [section.key]: !prev[section.key] }))}
+                                    />
+                                    <Text style={styles.sectionDescription}>{section.description}</Text>
+                                </View>
+                                {isOpen && (
+                                    tasks.length === 0 ? (
+                                        <Text style={styles.sectionHint}>{section.hint}</Text>
+                                    ) : (
+                                        <View style={styles.cardGroup}>
+                                            {tasks.map((task, i) => (
+                                                <TaskCard
+                                                    key={task.id}
+                                                    task={task}
+                                                    index={i}
+                                                    justArrived={task.id === arrivedTaskId}
+                                                    scheduledMeta={section.key === 'scheduled'
+                                                        ? `${formatTime((task as ScheduledTask).blockStartTime)} · ${(task as ScheduledTask).blockName}`
+                                                        : undefined}
+                                                    onPress={() => router.push(`/task/${task.id}`)}
+                                                    onToggled={(updated) => handleToggled(task, updated)}
+                                                />
+                                            ))}
+                                        </View>
+                                    )
                                 )}
                             </Animated.View>
                         );
@@ -383,7 +452,11 @@ export default function BacklogScreen() {
                 visible={showCreateModal}
                 onClose={() => setShowCreateModal(false)}
                 onCreated={(task) => {
-                    setBuckets(prev => prev ? applyCreated(prev, task) : prev);
+                    if (buckets) {
+                        const { buckets: next, dest } = applyCreated(buckets, task);
+                        setBuckets(next);
+                        flashArrival(task.id, dest);
+                    }
                     loadBuckets(false);
                     setShowCreateModal(false);
                 }}
@@ -396,6 +469,9 @@ const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: '#fdfcfa' },
 
     header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         paddingHorizontal: 20,
         paddingTop: 16,
         paddingBottom: 12,
@@ -403,18 +479,17 @@ const styles = StyleSheet.create({
         borderBottomColor: 'rgba(42,38,33,0.06)',
     },
     headerTitle: { fontSize: 18, fontWeight: '600', color: '#2a2621', letterSpacing: -0.3 },
-    headerCount: { fontSize: 14, color: '#7a736a', marginTop: 2, fontVariant: ['tabular-nums'] },
+    seeAllLink: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 2,
+    },
+    seeAllText: { fontSize: 14, fontWeight: '500', color: '#b07841', letterSpacing: -0.15 },
 
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
     errorText: { fontSize: 14, color: '#7a736a', textAlign: 'center' },
 
-    illustration: { alignItems: 'center', marginBottom: 24, height: 80 },
-    illustrationCard: {
-        width: 120,
-        height: 36,
-        backgroundColor: '#2a2621',
-        borderRadius: 10,
-    },
+    illustration: { alignItems: 'center', justifyContent: 'center', marginBottom: 24, height: 80 },
     emptyTitle: { fontSize: 20, fontWeight: '500', color: '#2a2621', marginBottom: 8 },
     emptySubtitle: {
         fontSize: 14,
@@ -423,27 +498,9 @@ const styles = StyleSheet.create({
         maxWidth: 220,
         marginBottom: 20,
     },
-    addFirstButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        backgroundColor: '#f5f3ef',
-        borderRadius: 16,
-        paddingHorizontal: 20,
-        paddingVertical: 12,
-    },
-    addFirstLabel: { fontSize: 14, fontWeight: '500', color: 'rgba(42,38,33,0.7)' },
-
     list: { padding: 16, gap: 14, paddingBottom: 96 },
 
-    // Each lifecycle section is a surface; Done recedes on a muted wash.
-    zone: {
-        backgroundColor: '#fffef9',
-        borderRadius: 16,
-        padding: 14,
-        gap: 10,
-    },
-    zoneMuted: { backgroundColor: 'rgba(232,228,221,0.25)' },
+    zone: { gap: 10 },
 
     sectionHeaderRow: {
         flexDirection: 'row',
@@ -454,7 +511,7 @@ const styles = StyleSheet.create({
     },
     sectionLabel: {
         fontSize: 11,
-        color: 'rgba(122,115,106,0.55)',
+        color: 'rgba(122,115,106,0.5)',
         letterSpacing: 0.5,
         textTransform: 'uppercase',
     },
@@ -464,28 +521,37 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         fontVariant: ['tabular-nums'],
     },
-    sectionHint: { fontSize: 13, color: 'rgba(122,115,106,0.5)', fontStyle: 'italic' },
+    sectionDescription: { fontSize: 12, color: 'rgba(122,115,106,0.7)', marginLeft: 19, letterSpacing: -0.1 },
+    sectionHint: { fontSize: 12, color: 'rgba(122,115,106,0.45)', fontStyle: 'italic', marginLeft: 19 },
     cardGroup: { gap: 8 },
 
     taskCard: {
-        backgroundColor: '#ffffff',
+        backgroundColor: '#fffef9',
         borderWidth: 1,
-        borderColor: 'rgba(42,38,33,0.08)',
+        borderColor: 'rgba(42,38,33,0.10)',
         borderRadius: 14,
-        padding: 14,
+        paddingHorizontal: 13,
+        paddingVertical: 11,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: 10,
+    },
+    taskCardDone: { backgroundColor: 'rgba(232,228,221,0.35)' },
+    arrivalWash: {
+        position: 'absolute',
+        top: 0, left: 0, right: 0, bottom: 0,
+        borderRadius: 14,   // matches taskCard so the wash tracks the rounded edge
+        backgroundColor: 'rgba(212,165,116,0.28)',
     },
     taskCardContent: { flex: 1 },
-    taskTitle: { fontSize: 15, fontWeight: '500', color: '#2a2621', letterSpacing: -0.23 },
-    taskTitleDone: { color: '#7a736a', textDecorationLine: 'line-through' },
+    taskTitle: { fontSize: 14, fontWeight: '500', color: '#2a2621', letterSpacing: -0.15 },
+    taskTitleDone: { color: '#7a736a' },
     badgeRow: {
         flexDirection: 'row',
         alignItems: 'center',
         flexWrap: 'wrap',
         gap: 6,
-        marginTop: 8,
+        marginTop: 6,
     },
 
     toggleStack: { width: 22, height: 22 },
@@ -502,7 +568,7 @@ const styles = StyleSheet.create({
     metaText: {
         fontSize: 11,
         fontWeight: '500',
-        color: 'rgba(122,115,106,0.5)',
+        color: '#7a736a',
         fontVariant: ['tabular-nums'],
     },
 
@@ -520,8 +586,8 @@ const styles = StyleSheet.create({
 
     fabWrap: {
         position: 'absolute',
-        bottom: 24,
-        right: 20,
+        bottom: 16,
+        right: 16,
     },
     fab: {
         width: 48,
