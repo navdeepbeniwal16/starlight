@@ -43,3 +43,10 @@ export function formatTime(hhMm: string): string {
     const { time, period } = parseDisplayTime(hhMm);
     return `${time} ${period}`;
 }
+
+export function formatTimeRange(startHhMm: string, endHhMm: string): string {
+    const start = parseDisplayTime(startHhMm);
+    const end = parseDisplayTime(endHhMm);
+    const startLabel = start.period === end.period ? start.time : `${start.time} ${start.period}`;
+    return `${startLabel} – ${end.time} ${end.period}`;
+}

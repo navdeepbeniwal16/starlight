@@ -1,11 +1,13 @@
 import { Tabs, useRouter } from "expo-router";
 import { useEffect, useRef } from "react";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuthStore } from "../../stores/auth.store";
 import { colors } from "../../lib/theme";
 
 export default function MainLayout() {
     const router = useRouter();
+    const insets = useSafeAreaInsets();
     const user = useAuthStore(state => state.user);
     const prevUserRef = useRef(user);
 
@@ -29,12 +31,13 @@ export default function MainLayout() {
                     backgroundColor: colors.surface.raised,
                     borderTopColor: colors.border.hairline,
                     borderTopWidth: 1,
-                    height: 70,
+                    height: 52 + insets.bottom,
+                    paddingTop: 8,
+                    paddingBottom: insets.bottom + 6,
                 },
                 tabBarLabelStyle: {
                     fontSize: 12,
                     fontWeight: '500',
-                    marginBottom: 8,
                 },
             }}
         >

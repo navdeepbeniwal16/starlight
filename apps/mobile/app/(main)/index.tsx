@@ -9,20 +9,12 @@ import {
     ActivityIndicator,
 } from "react-native";
 import CreateTaskModal from "../../components/CreateTaskModal";
+import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Rect } from "react-native-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
 import { DayPlan, DayTemplate, DayTemplateBlock, PlannedBlock, PlannedTask, TaskStatus } from "../../lib/api.types";
-import { toMins, toHHmm, formatTime } from "../../lib/time";
-
-function formatDuration(startTime: string, endTime: string): string {
-    const mins = toMins(endTime) - toMins(startTime);
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
-    if (h === 0) return `${m}m`;
-    if (m === 0) return `${h}h`;
-    return `${h}h ${m}m`;
-}
+import { toMins, toHHmm, formatTime, formatTimeRange, formatDuration } from "../../lib/time";
 
 function formatEstimatedMins(mins: number): string {
     if (mins < 60) return `${mins}m`;
@@ -72,10 +64,10 @@ function DayBoundaryMarker({ label, time }: { label: 'Wake' | 'Sleep'; time: str
 function FreeSlotIndicator({ startTime, endTime, elapsed }: { startTime: string; endTime: string; elapsed?: boolean }) {
     return (
         <View style={[styles.freeSlotRow, elapsed && styles.elapsedOpacity]}>
+            <View style={styles.freeSlotThread} />
             <View style={styles.freeSlotPill}>
-                <Text style={styles.freeSlotText}>
-                    {formatTime(startTime)} – {formatTime(endTime)}  ·  {formatDuration(startTime, endTime)}  ·  free slot
-                </Text>
+                <Ionicons name="chevron-expand-outline" size={11} color="rgba(122,115,106,0.7)" />
+                <Text style={styles.freeSlotText}>{formatDuration(toMins(endTime) - toMins(startTime))} available</Text>
             </View>
         </View>
     );
@@ -191,21 +183,48 @@ function EmptyState({ template }: { template: DayTemplate | null }) {
 
 // ─── Populated timeline components ───────────────────────────────────────────
 
-function CurrentTimeIndicator({ time }: { time: string }) {
+function BlockProgressFill({ progress, gradientId }: { progress: number; gradientId: string }) {
+    const [width, setWidth] = useState(0);
+    const clamped = Math.max(0, Math.min(1, progress));
+    // Feather over a fixed 16px span so the fade looks the same on short and long blocks.
+    const featherFrac = width > 0 ? Math.min(clamped, 16 / width) : Math.min(clamped, 0.04);
+
     return (
-        <View style={styles.currentTimeRow}>
-            <View style={styles.currentTimeDot} />
-            <View style={styles.currentTimeLine} />
-            <Text style={styles.currentTimeLabel}>{formatTime(time)}</Text>
+        <View style={StyleSheet.absoluteFill} pointerEvents="none" onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+            <Svg width="100%" height="100%">
+                <Defs>
+                    <SvgLinearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
+                        <Stop offset={0} stopColor="#d4a574" stopOpacity={0.2} />
+                        <Stop offset={clamped - featherFrac} stopColor="#d4a574" stopOpacity={0.2} />
+                        <Stop offset={clamped} stopColor="#d4a574" stopOpacity={0} />
+                        <Stop offset={1} stopColor="#d4a574" stopOpacity={0} />
+                    </SvgLinearGradient>
+                </Defs>
+                <Rect x="0" y="0" width="100%" height="100%" fill={`url(#${gradientId})`} />
+            </Svg>
         </View>
     );
 }
 
-function AnchorBlockCard({ block, elapsed }: { block: PlannedBlock; elapsed: boolean }) {
+function BlockTimeMeta({ block, isActive, progress }: { block: PlannedBlock; isActive: boolean; progress: number }) {
+    const totalMins = toMins(block.endTime) - toMins(block.startTime);
+    const remainingMins = Math.round(totalMins * (1 - progress));
     return (
-        <View style={[styles.anchorCard, elapsed && styles.elapsedOpacity]}>
-            <Text style={styles.blockName}>{block.name}</Text>
-            <Text style={styles.blockTime}>{formatTime(block.startTime)} – {formatTime(block.endTime)}</Text>
+        <Text style={styles.blockTime}>
+            {formatTimeRange(block.startTime, block.endTime)}  ·  {isActive
+                ? <Text style={styles.blockTimeRemaining}>{formatDuration(remainingMins)} left</Text>
+                : formatDuration(totalMins)}
+        </Text>
+    );
+}
+
+function AnchorBlockCard({ block, elapsed, progress }: { block: PlannedBlock; elapsed: boolean; progress: number }) {
+    const isActive = progress > 0 && progress < 1;
+    return (
+        <View style={[styles.anchorCard, elapsed && styles.elapsedOpacity, isActive && styles.blockCardActive]}>
+            {isActive && <BlockProgressFill progress={progress} gradientId={`blockProgressFill-${block.id}`} />}
+            <Text style={[styles.blockName, isActive && styles.blockNameActive]}>{block.name}</Text>
+            <BlockTimeMeta block={block} isActive={isActive} progress={progress} />
         </View>
     );
 }
@@ -234,24 +253,27 @@ function TaskDoneToggle({ task, onDone }: { task: PlannedTask; onDone: () => voi
         >
             <Ionicons
                 name={isDone ? 'checkmark-circle' : 'checkmark-circle-outline'}
-                size={20}
+                size={18}
                 color={isDone ? '#5c5248' : 'rgba(122,115,106,0.3)'}
             />
         </TouchableOpacity>
     );
 }
 
-function ContainerBlockCard({ block, elapsed, onTaskDone, onTaskPress }: { block: PlannedBlock; elapsed: boolean; onTaskDone: (taskId: string) => void; onTaskPress: (taskId: string) => void }) {
+function ContainerBlockCard({ block, elapsed, progress, onTaskDone, onTaskPress }: { block: PlannedBlock; elapsed: boolean; progress: number; onTaskDone: (taskId: string) => void; onTaskPress: (taskId: string) => void }) {
     const energyLabel = block.energyLevel
         ? block.energyLevel.charAt(0) + block.energyLevel.slice(1).toLowerCase() + ' energy'
         : null;
 
+    const isActive = progress > 0 && progress < 1;
+
     return (
-        <View style={[styles.containerCard, elapsed && styles.elapsedOpacity]}>
+        <View style={[styles.containerCard, elapsed && styles.elapsedOpacity, isActive && styles.blockCardActive]}>
+            {isActive && <BlockProgressFill progress={progress} gradientId={`blockProgressFill-${block.id}`} />}
             <View style={styles.containerCardHeader}>
                 <View style={styles.containerCardHeaderLeft}>
-                    <Text style={styles.blockName}>{block.name}</Text>
-                    <Text style={styles.blockTime}>{formatTime(block.startTime)} – {formatTime(block.endTime)}</Text>
+                    <Text style={[styles.blockName, isActive && styles.blockNameActive]}>{block.name}</Text>
+                    <BlockTimeMeta block={block} isActive={isActive} progress={progress} />
                 </View>
                 {energyLabel && (
                     <View style={styles.energyBadge}>
@@ -265,7 +287,7 @@ function ContainerBlockCard({ block, elapsed, onTaskDone, onTaskPress }: { block
                         <TouchableOpacity key={task.id} style={styles.taskCard} activeOpacity={0.7} onPress={() => onTaskPress(task.id)}>
                             <TaskDoneToggle task={task} onDone={() => onTaskDone(task.id)} />
                             <Text style={styles.taskTitle} numberOfLines={2}>{task.title}</Text>
-                            <Text style={styles.taskEstimate}>{formatEstimatedMins(task.estimatedMins)}</Text>
+                            <Text style={styles.taskEstimate}>{formatEstimatedMins(task.remainingMins)}</Text>
                         </TouchableOpacity>
                     ))}
                 </View>
@@ -275,7 +297,7 @@ function ContainerBlockCard({ block, elapsed, onTaskDone, onTaskPress }: { block
 }
 
 type TimelineItem =
-    | { kind: 'block'; block: PlannedBlock; elapsed: boolean }
+    | { kind: 'block'; block: PlannedBlock; elapsed: boolean; progress: number }
     | { kind: 'gap'; start: string; end: string; elapsed: boolean }
     | { kind: 'boundary'; label: 'Wake' | 'Sleep'; time: string }
     | { kind: 'current-time'; time: string };
@@ -300,10 +322,14 @@ function buildTimelineItems(plan: DayPlan, currentTime: string): TimelineItem[] 
                 elapsed: nowMins >= toMins(block.startTime),
             });
         }
+        const startMins = toMins(block.startTime);
+        const endMins = toMins(block.endTime);
+        const active = nowMins >= startMins && nowMins < endMins;
         items.push({
             kind: 'block',
             block,
-            elapsed: nowMins >= toMins(block.endTime),
+            elapsed: nowMins >= endMins,
+            progress: active && endMins > startMins ? (nowMins - startMins) / (endMins - startMins) : 0,
         });
         prev = block.endTime;
     }
@@ -353,13 +379,9 @@ function Timeline({
 
     const elements: ReactNode[] = [];
     items.forEach((item, i) => {
-        // Skip the thread segment on either side of the current-time indicator —
-        // it serves as its own visual separator.
-        if (i > 0) {
-            const prev = items[i - 1];
-            if (item.kind !== 'current-time' && prev.kind !== 'current-time') {
-                elements.push(<ThreadSegment key={`sep-${i}`} />);
-            }
+        // Skip the thread after the invisible zero-height now-anchor to avoid a double gap.
+        if (i > 0 && items[i - 1].kind !== 'current-time') {
+            elements.push(<ThreadSegment key={`sep-${i}`} />);
         }
 
         if (item.kind === 'boundary') {
@@ -367,15 +389,11 @@ function Timeline({
         } else if (item.kind === 'gap') {
             elements.push(<FreeSlotIndicator key={`item-${i}`} startTime={item.start} endTime={item.end} elapsed={item.elapsed} />);
         } else if (item.kind === 'current-time') {
-            elements.push(
-                <View key={`item-${i}`} onLayout={(e) => onNowLayout(e.nativeEvent.layout.y)}>
-                    <CurrentTimeIndicator time={item.time} />
-                </View>
-            );
+            elements.push(<View key={`item-${i}`} onLayout={(e) => onNowLayout(e.nativeEvent.layout.y)} />);
         } else if (item.block.type === 'CONTAINER') {
-            elements.push(<ContainerBlockCard key={`item-${i}`} block={item.block} elapsed={item.elapsed} onTaskDone={onTaskDone} onTaskPress={onTaskPress} />);
+            elements.push(<ContainerBlockCard key={`item-${i}`} block={item.block} elapsed={item.elapsed} progress={item.progress} onTaskDone={onTaskDone} onTaskPress={onTaskPress} />);
         } else {
-            elements.push(<AnchorBlockCard key={`item-${i}`} block={item.block} elapsed={item.elapsed} />);
+            elements.push(<AnchorBlockCard key={`item-${i}`} block={item.block} elapsed={item.elapsed} progress={item.progress} />);
         }
     });
 
@@ -475,7 +493,7 @@ export default function TodayScreen() {
     const handleAddTask = () => setShowCreateModal(true);
 
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <View style={styles.header}>
                 <View>
                     <Text style={styles.dayOfWeek}>{dayOfWeek}</Text>
@@ -487,7 +505,7 @@ export default function TodayScreen() {
                     activeOpacity={0.8}
                 >
                     <Text style={styles.planButtonIcon}>✦</Text>
-                    <Text style={styles.planButtonText}>Plan day</Text>
+                    <Text style={styles.planButtonText}>Plan your day</Text>
                 </TouchableOpacity>
             </View>
 
@@ -670,12 +688,19 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    freeSlotThread: {
+        position: 'absolute',
+        left: 10,
+        top: 0,
+        bottom: 0,
+        width: 1,
+        backgroundColor: 'rgba(42,38,33,0.12)',
+    },
     freeSlotPill: {
-        backgroundColor: 'rgba(42,38,33,0.05)',
-        borderWidth: 0.5,
-        borderColor: 'rgba(42,38,33,0.14)',
-        borderRadius: 100,
-        paddingHorizontal: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        paddingHorizontal: 8,
         paddingVertical: 4,
         marginHorizontal: 8,
     },
@@ -683,32 +708,6 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontWeight: '400',
         color: 'rgba(122,115,106,0.8)',
-    },
-
-    // Current time indicator
-    currentTimeRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 6,
-    },
-    currentTimeDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: '#d4a574',
-    },
-    currentTimeLine: {
-        flex: 1,
-        height: 1,
-        borderTopWidth: 1,
-        borderStyle: 'dashed',
-        borderColor: 'rgba(212,165,116,0.5)',
-        marginHorizontal: 6,
-    },
-    currentTimeLabel: {
-        fontSize: 11,
-        fontWeight: '500',
-        color: '#d4a574',
     },
 
     // Elapsed opacity (shared)
@@ -721,14 +720,16 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(232,228,221,0.45)',
         borderRadius: 16,
         padding: 16,
+        overflow: 'hidden',
     },
     containerCard: {
-        backgroundColor: '#fdfcfa',
+        backgroundColor: 'rgba(232,228,221,0.45)',
         borderWidth: 1.5,
         borderColor: 'rgba(42,38,33,0.16)',
         borderStyle: 'dashed',
         borderRadius: 16,
         padding: 16,
+        overflow: 'hidden',
     },
     containerCardHeader: {
         flexDirection: 'row',
@@ -744,11 +745,23 @@ const styles = StyleSheet.create({
         color: '#2a2621',
         letterSpacing: -0.23,
     },
+    blockNameActive: {
+        fontWeight: '600',
+    },
+    blockCardActive: {
+        borderWidth: 1.5,
+        borderStyle: 'solid',
+        borderColor: 'rgba(212,165,116,0.55)',
+    },
     blockTime: {
-        fontSize: 12,
+        fontSize: 11,
         color: '#9a9389',
         letterSpacing: -0.15,
-        marginTop: 2,
+        marginTop: 3,
+    },
+    blockTimeRemaining: {
+        color: '#7a9a6f',
+        fontWeight: '500',
     },
     taskList: {
         gap: 6,
@@ -758,21 +771,23 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 10,
-        backgroundColor: '#fffef9',
+        backgroundColor: '#ffffff',
         borderWidth: 1,
         borderColor: 'rgba(42,38,33,0.04)',
-        borderRadius: 16,
-        padding: 15,
+        borderRadius: 12,
+        paddingHorizontal: 13,
+        paddingVertical: 9,
+        minHeight: 38,
     },
     taskTitle: {
         flex: 1,
-        fontSize: 15,
+        fontSize: 14,
         color: '#2a2621',
-        letterSpacing: -0.23,
-        marginRight: 12,
+        letterSpacing: -0.15,
+        marginRight: 10,
     },
     taskEstimate: {
-        fontSize: 14,
+        fontSize: 13,
         color: '#7a736a',
         letterSpacing: -0.15,
     },
@@ -881,6 +896,7 @@ const styles = StyleSheet.create({
         borderRadius: 16,
         paddingHorizontal: 17,
         paddingVertical: 13,
+        minHeight: 46,
         marginTop: 16,
     },
     noTasksDot: {
