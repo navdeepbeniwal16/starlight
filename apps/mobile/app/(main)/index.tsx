@@ -218,6 +218,24 @@ function BlockProgressFill({ progress, gradientId }: { progress: number; gradien
     );
 }
 
+// The header's most important action, so it gets gradient depth the flat accent
+// chips elsewhere don't.
+function PlanButtonGradient() {
+    return (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            <Svg width="100%" height="100%">
+                <Defs>
+                    <SvgLinearGradient id="planButtonFill" x1="0" y1="0" x2="1" y2="1">
+                        <Stop offset={0} stopColor="#e3bd8c" />
+                        <Stop offset={1} stopColor="#bd8447" />
+                    </SvgLinearGradient>
+                </Defs>
+                <Rect x="0" y="0" width="100%" height="100%" fill="url(#planButtonFill)" />
+            </Svg>
+        </View>
+    );
+}
+
 function BlockTimeMeta({ block, isActive, progress }: { block: PlannedBlock; isActive: boolean; progress: number }) {
     const totalMins = toMins(block.endTime) - toMins(block.startTime);
     const remainingMins = Math.round(totalMins * (1 - progress));
@@ -556,6 +574,7 @@ export default function TodayScreen() {
                     <Text style={styles.date}>{date}</Text>
                 </View>
                 <PressableScale style={styles.planButton} onPress={handlePlanDay}>
+                    <PlanButtonGradient />
                     <Text style={styles.planButtonIcon}>✦</Text>
                     <Text style={styles.planButtonText}>Plan your day</Text>
                 </PressableScale>
@@ -646,8 +665,8 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 6,
-        backgroundColor: '#d4a574',
         borderRadius: 16,
+        overflow: 'hidden',
         paddingHorizontal: 12,
         paddingVertical: 10,
     },
