@@ -11,6 +11,7 @@ import {
 import Animated, { FadeInDown, useSharedValue, useAnimatedStyle, withSpring } from "react-native-reanimated";
 import CreateTaskModal from "../../components/CreateTaskModal";
 import { PressableScale } from "../../components/PressableScale";
+import { Wordmark } from "../../components/Wordmark";
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Rect } from "react-native-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -478,9 +479,6 @@ export default function TodayScreen() {
     const scrollViewHeight = useRef(0);
     const hasScrolledToNow = useRef(false);
 
-    const dayOfWeek = useMemo(() => new Date().toLocaleDateString('en-US', { weekday: 'long' }), []);
-    const date = useMemo(() => new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }), []);
-
     const load = useCallback(async () => {
         hasScrolledToNow.current = false;
         setEntrance(true);
@@ -569,10 +567,7 @@ export default function TodayScreen() {
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <View style={styles.header}>
-                <View>
-                    <Text style={styles.dayOfWeek}>{dayOfWeek}</Text>
-                    <Text style={styles.date}>{date}</Text>
-                </View>
+                <Wordmark size={34} />
                 <PressableScale style={styles.planButton} onPress={handlePlanDay}>
                     <PlanButtonGradient />
                     <Text style={styles.planButtonIcon}>✦</Text>

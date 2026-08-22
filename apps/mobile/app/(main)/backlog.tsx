@@ -351,7 +351,7 @@ export default function BacklogScreen() {
                 <TouchableOpacity
                     style={styles.seeAllLink}
                     activeOpacity={0.6}
-                    onPress={() => {/* Placeholder: routes to the all-tasks view once it exists. */}}
+                    onPress={() => router.push('/tasks')}
                 >
                     <Text style={styles.seeAllText}>See all</Text>
                     <Ionicons name="chevron-forward" size={14} color="#b07841" />

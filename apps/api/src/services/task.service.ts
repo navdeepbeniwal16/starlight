@@ -100,6 +100,14 @@ export async function getBacklog(userId: string, date: string, utcOffsetMins?: n
     };
 }
 
+export async function getAllTasks(userId: string): Promise<BacklogTask[]> {
+    return prisma.task.findMany({
+        where: { userId },
+        orderBy: { updatedAt: 'desc' },
+        select: backlogTaskSelect,
+    });
+}
+
 function deriveStatus(progress: number): TaskStatus {
     if (progress === 0) return 'TODO';
     if (progress === 100) return 'DONE';

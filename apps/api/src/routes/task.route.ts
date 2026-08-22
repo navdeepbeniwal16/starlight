@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
-import { getBacklog, createTask, getTaskById, deleteTask, updateTask, InvalidProgressError, InvalidDeadlineError, TaskNotFoundError } from "../services/task.service";
+import { getBacklog, getAllTasks, createTask, getTaskById, deleteTask, updateTask, InvalidProgressError, InvalidDeadlineError, TaskNotFoundError } from "../services/task.service";
 import type { CreateTaskInput, UpdateTaskInput } from "../types/task.types";
 import { todayDateString, parseTimezoneOffset } from "../lib/clientDate";
 
@@ -14,6 +14,14 @@ router.get("/", authenticate, async (req: Request, res: Response): Promise<void>
 
     const buckets = await getBacklog(req.user!.sub, date, utcOffsetMins);
     res.status(200).json({ success: true, data: buckets });
+});
+
+// Must precede GET "/:id" — Express matches in order, so "/:id" would otherwise capture "all".
+router.get("/all", authenticate, async (req: Request, res: Response): Promise<void> => {
+    res.set("Cache-Control", "no-store, private");
+
+    const tasks = await getAllTasks(req.user!.sub);
+    res.status(200).json({ success: true, data: tasks });
 });
 
 router.post("/", authenticate, async (req: Request, res: Response): Promise<void> => {

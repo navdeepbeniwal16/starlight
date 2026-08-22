@@ -160,6 +160,8 @@ export type BacklogBuckets = {
 
 export type GetBacklogResponse = ApiResult<BacklogBuckets>;
 
+export type GetAllTasksResponse = ApiResult<BacklogTask[]>;
+
 export type CreateTaskInput = {
     title: string;
     estimatedMins: number;

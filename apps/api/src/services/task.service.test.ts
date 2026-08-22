@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma";
-import { getBacklog } from "./task.service";
+import { getBacklog, getAllTasks } from "./task.service";
 import type { DayPlanStatus } from "@prisma/client";
 
 const TEST_EMAIL = "test-task-service@starlight.test";
@@ -235,5 +235,41 @@ describe("getBacklog", () => {
         const buckets = await getBacklog(userId, TODAY, UTC_OFFSET);
 
         expect(buckets).toEqual({ carriedOver: [], scheduled: [], remaining: [], doneToday: [] });
+    });
+});
+
+describe("getAllTasks", () => {
+    let userId: string;
+
+    beforeEach(async () => {
+        const user = await seedUser(TEST_EMAIL);
+        userId = user.id;
+        await cleanup(userId);
+    });
+
+    it("returns every task, including done ones from earlier days, ordered by updatedAt desc", async () => {
+        const oldest = await seedTask(userId, { title: "Oldest" });
+        const middle = await seedTask(userId, { title: "Middle", done: true });
+        await seedTask(userId, { title: "Newest" });
+
+        // Backdate the first two so ordering is deterministic rather than tied to insert timing.
+        await backdateUpdatedAt(oldest.id, new Date(Date.now() - 3 * DAY_MS));
+        await backdateUpdatedAt(middle.id, new Date(Date.now() - 1 * DAY_MS));
+
+        const tasks = await getAllTasks(userId);
+
+        expect(tasks.map((t) => t.title)).toEqual(["Newest", "Middle", "Oldest"]);
+    });
+
+    it("returns an empty array when the user has no tasks", async () => {
+        expect(await getAllTasks(userId)).toEqual([]);
+    });
+
+    it("does not return another user's tasks", async () => {
+        const other = await seedUser(OTHER_EMAIL);
+        await cleanup(other.id);
+        await seedTask(other.id, { title: "Other task" });
+
+        expect(await getAllTasks(userId)).toEqual([]);
     });
 });
