@@ -1,5 +1,24 @@
 import type { BacklogBuckets, BacklogTask, TaskDetail } from "./api.types";
 
+// Presentation-only regrouping of the four server buckets; never round-trips.
+export type ReconcileGroups = {
+    pickUp: BacklogTask[];
+    everythingElse: BacklogTask[];
+    doneToday: BacklogTask[];
+};
+
+export function groupForReconcile(buckets: BacklogBuckets): ReconcileGroups {
+    return {
+        pickUp: [
+            ...buckets.carriedOver,
+            ...buckets.scheduled,
+            ...buckets.remaining.filter(t => t.status === 'IN_PROGRESS'),
+        ],
+        everythingElse: buckets.remaining.filter(t => t.status === 'TODO'),
+        doneToday: buckets.doneToday,
+    };
+}
+
 export function withoutTask(buckets: BacklogBuckets, taskId: string): BacklogBuckets {
     return {
         carriedOver: buckets.carriedOver.filter(t => t.id !== taskId),

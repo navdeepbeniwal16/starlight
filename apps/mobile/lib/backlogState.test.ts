@@ -1,4 +1,4 @@
-import { applyCreated, applyToggle, bucketOf, createSequencer, withoutTask } from "./backlogState";
+import { applyCreated, applyToggle, bucketOf, createSequencer, groupForReconcile, withoutTask } from "./backlogState";
 import type { BacklogBuckets, BacklogTask, ScheduledTask, TaskDetail } from "./api.types";
 
 function task(id: string, over: Partial<BacklogTask> = {}): BacklogTask {
@@ -28,6 +28,39 @@ function detail(over: Partial<TaskDetail>): TaskDetail {
 function empty(): BacklogBuckets {
     return { carriedOver: [], scheduled: [], remaining: [], doneToday: [] };
 }
+
+describe("groupForReconcile", () => {
+    it("routes carried-over, scheduled, and in-progress remaining into pickUp", () => {
+        const buckets: BacklogBuckets = {
+            carriedOver: [task('a')],
+            scheduled: [scheduled('b')],
+            remaining: [task('c', { status: 'IN_PROGRESS', progress: 40 }), task('d')],
+            doneToday: [task('e', { status: 'DONE', progress: 100 })],
+        };
+        const groups = groupForReconcile(buckets);
+        expect(groups.pickUp.map(t => t.id)).toEqual(['a', 'b', 'c']);
+        expect(groups.everythingElse.map(t => t.id)).toEqual(['d']);
+        expect(groups.doneToday.map(t => t.id)).toEqual(['e']);
+    });
+
+    it("puts only todo remaining into everythingElse", () => {
+        const buckets: BacklogBuckets = {
+            carriedOver: [],
+            scheduled: [],
+            remaining: [task('a'), task('b', { status: 'IN_PROGRESS', progress: 20 })],
+            doneToday: [],
+        };
+        const groups = groupForReconcile(buckets);
+        expect(groups.everythingElse.map(t => t.id)).toEqual(['a']);
+        expect(groups.pickUp.map(t => t.id)).toEqual(['b']);
+    });
+
+    it("does not mutate the input buckets", () => {
+        const buckets = { ...empty(), remaining: [task('a'), task('b', { status: 'IN_PROGRESS' })] };
+        groupForReconcile(buckets);
+        expect(buckets.remaining.map(t => t.id)).toEqual(['a', 'b']);
+    });
+});
 
 describe("withoutTask", () => {
     it("removes the task from every bucket and leaves others untouched", () => {
