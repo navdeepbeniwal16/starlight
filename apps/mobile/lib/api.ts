@@ -282,7 +282,7 @@ export const api = {
 
   // Returns a plan proposal; nothing is persisted server-side. The proposal is
   // held client-side during review and sent back via confirmPlan.
-  generatePlan: async (): Promise<GeneratePlanResponse> => {
+  generatePlan: async (signal?: AbortSignal): Promise<GeneratePlanResponse> => {
     const token = await getToken();
     if (!token) return { ok: false, error: 'No token found' };
     try {
@@ -292,6 +292,7 @@ export const api = {
           'Authorization': `Bearer ${token}`,
           'X-Timezone-Offset': String(-new Date().getTimezoneOffset()),
         },
+        signal,
       });
       const responseJson = await response.json();
       if (!response.ok) {

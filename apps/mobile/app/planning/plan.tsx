@@ -21,6 +21,7 @@ import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-g
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { api } from "../../lib/api";
 import type { ConfirmAssignment, PlanProposal } from "../../lib/api.types";
 import { usePlanningStore } from "../../stores/planning.store";
@@ -114,6 +115,7 @@ function boardFromProposal(proposal: PlanProposal): Board {
     return {
         blocks: proposal.blocks
             .filter(b => b.type === 'CONTAINER')
+            .sort((a, b) => toMins(a.startTime) - toMins(b.startTime))
             .map(b => ({
                 id: b.blockId,
                 name: b.name,
@@ -290,6 +292,7 @@ export default function ReviewPlanScreen() {
         setConfirming(true);
         const res = await api.confirmPlan(assignmentsFromBoard(snapshot));
         if (res.ok) {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             dismissFlow();
             return;
         }
@@ -412,7 +415,7 @@ export default function ReviewPlanScreen() {
                     >
                         {confirming
                             ? <ActivityIndicator size="small" color="#fdfcfa" />
-                            : <Text style={s.confirmButtonLabel}>Confirm plan</Text>
+                            : <Text style={s.confirmButtonLabel}>Confirm my plan</Text>
                         }
                     </TouchableOpacity>
                 </View>
@@ -426,10 +429,18 @@ export default function ReviewPlanScreen() {
 function Header({ onClose }: { onClose: () => void }) {
     return (
         <View style={s.header}>
-            <Text style={s.headerTitle}>Review plan</Text>
-            <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} activeOpacity={0.6}>
-                <Ionicons name="close" size={22} color="#2a2621" />
-            </TouchableOpacity>
+            <View style={s.stepEyebrow}>
+                <View style={[s.stepPip, s.stepPipDone]} />
+                <View style={[s.stepPip, s.stepPipActive]} />
+                <Text style={s.stepLabel}>Step 2 of 2</Text>
+            </View>
+            <View style={s.headerRow}>
+                <Text style={s.headerTitle}>Review your plan</Text>
+                <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} activeOpacity={0.6}>
+                    <Ionicons name="close" size={22} color="#2a2621" />
+                </TouchableOpacity>
+            </View>
+            <Text style={s.headerSubtitle}>Rearrange anything, then confirm.</Text>
         </View>
     );
 }
@@ -471,8 +482,9 @@ function DropZone({
     variant?: 'block' | 'unscheduled';
     children: React.ReactNode;
 }) {
+    const restBorder = variant === 'unscheduled' ? 'transparent' : 'rgba(42,38,33,0.08)';
     const highlight = useAnimatedStyle(() => ({
-        borderColor: hoveredZone.value === zoneId ? '#d4a574' : 'transparent',
+        borderColor: hoveredZone.value === zoneId ? '#d4a574' : restBorder,
     }));
     return (
         <Animated.View
@@ -650,7 +662,7 @@ function DraggableTask({
                         accessibilityLabel={`Remove ${task.title} from the plan`}
                         style={s.removeButton}
                     >
-                        <Ionicons name="close" size={16} color="rgba(122,115,106,0.7)" />
+                        <Ionicons name="remove" size={16} color="rgba(122,115,106,0.7)" />
                     </TouchableOpacity>
                 )}
             </Animated.View>
@@ -664,25 +676,62 @@ const s = StyleSheet.create({
     flex: { flex: 1 },
     container: { flex: 1, backgroundColor: '#fdfcfa' },
     header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
         paddingHorizontal: 20,
         paddingTop: 24,
         paddingBottom: 16,
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(42,38,33,0.06)',
     },
+    stepEyebrow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginBottom: 10,
+    },
+    stepPip: {
+        width: 5,
+        height: 5,
+        borderRadius: 2.5,
+        backgroundColor: 'rgba(42,38,33,0.14)',
+    },
+    stepPipDone: {
+        backgroundColor: '#d4a574',
+    },
+    stepPipActive: {
+        width: 14,
+        backgroundColor: '#d4a574',
+    },
+    stepLabel: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: 'rgba(122,115,106,0.5)',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
+        marginLeft: 2,
+        fontVariant: ['tabular-nums'],
+    },
+    headerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
     headerTitle: { fontSize: 16, fontWeight: '600', color: '#2a2621', letterSpacing: -0.3 },
+    headerSubtitle: {
+        fontSize: 13,
+        color: '#7a736a',
+        lineHeight: 18,
+        marginTop: 6,
+        maxWidth: 320,
+    },
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
     muted: { fontSize: 13, color: '#7a736a', textAlign: 'center', lineHeight: 18 },
 
     scrollContent: { padding: 16, gap: 14, paddingBottom: 24 },
-    hint: { fontSize: 12, color: 'rgba(122,115,106,0.7)', textAlign: 'center', marginBottom: 2 },
+    hint: { fontSize: 12, color: 'rgba(122,115,106,0.7)', lineHeight: 16, letterSpacing: -0.1, textAlign: 'center' },
 
     zoneHighlightBase: { borderWidth: 1.5, borderColor: 'transparent' },
     blockZone: {
-        backgroundColor: '#fffef9',
+        backgroundColor: 'rgba(232,228,221,0.45)',
         borderRadius: 16,
         padding: 16,
         gap: 10,

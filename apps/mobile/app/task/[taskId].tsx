@@ -4,7 +4,6 @@ import {
     Text,
     TextInput,
     StyleSheet,
-    ScrollView,
     TouchableOpacity,
     Alert,
     ActivityIndicator,
@@ -13,18 +12,19 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useNavigation } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
-import type { TaskDetail, EnergyLevel, Priority, UpdateTaskInput } from "../../lib/api.types";
+import type { TaskDetail, EnergyLevel, UpdateTaskInput } from "../../lib/api.types";
+import { KeyboardScreen } from "../../components/KeyboardScreen";
 import {
     ESTIMATE_OPTIONS, PROGRESS_PRESETS,
     FieldRow, ProgressSlider, DeadlineExpanded,
-    getEstimateLabel, formatDeadlineValue, priorityDotColor,
+    getEstimateLabel, formatDeadlineValue, effortDotColor,
     defaultTime,
     tf,
 } from "../../components/TaskFields";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-type FieldKey = 'estimate' | 'priority' | 'effort' | 'deadline' | 'progress';
+type FieldKey = 'estimate' | 'effort' | 'deadline' | 'progress';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 function deadlineToParts(iso: string): { day: Date; time: Date } {
@@ -51,7 +51,6 @@ export default function TaskDetailScreen() {
     const [title, setTitle]               = useState('');
     const [notes, setNotes]               = useState('');
     const [estimatedMins, setEstimatedMins] = useState(15);
-    const [priority, setPriority]         = useState<Priority | null>(null);
     const [effort, setEffort]             = useState<EnergyLevel | null>(null);
     const [deadlineDay, setDeadlineDay]   = useState<Date | null>(null);
     const [deadlineTime, setDeadlineTime] = useState<Date>(defaultTime());
@@ -77,7 +76,6 @@ export default function TaskDetailScreen() {
         setTitle(t.title);
         setNotes(t.notes ?? '');
         setEstimatedMins(t.estimatedMins);
-        setPriority(t.priority);
         setEffort(t.effort);
         setProgress(t.progress ?? 0);
         if (t.deadline) {
@@ -166,12 +164,6 @@ export default function TaskDetailScreen() {
         setEstimatedMins(mins);
         setActiveField(null);
         save({ estimatedMins: mins });
-    }
-
-    function handlePrioritySelect(p: Priority | null) {
-        setPriority(p);
-        setActiveField(null);
-        save({ priority: p });
     }
 
     function handleEffortSelect(e: EnergyLevel | null) {
@@ -287,11 +279,9 @@ export default function TaskDetailScreen() {
             )}
 
             {!loading && !fetchError && task && (
-                <ScrollView
+                <KeyboardScreen
                     style={s.scroll}
                     contentContainerStyle={s.content}
-                    showsVerticalScrollIndicator={false}
-                    keyboardShouldPersistTaps="handled"
                 >
                     {/* Title */}
                     <TextInput
@@ -346,36 +336,6 @@ export default function TaskDetailScreen() {
                         <View style={s.sep} />
 
                         <FieldRow
-                            label="Priority"
-                            value={priority ? priority.charAt(0) + priority.slice(1).toLowerCase() : 'Not set'}
-                            isOpen={activeField === 'priority'}
-                            onPress={() => toggleField('priority')}
-                        />
-                        {activeField === 'priority' && (
-                            <View style={tf.pills}>
-                                {(['HIGH','MEDIUM','LOW'] as Priority[]).map(p => (
-                                    <TouchableOpacity
-                                        key={p}
-                                        style={[tf.pill, priority === p && tf.pillOn]}
-                                        onPress={() => handlePrioritySelect(p)}
-                                    >
-                                        <View style={[tf.dot, { backgroundColor: priorityDotColor(p) }]} />
-                                        <Text style={[tf.pillTxt, priority === p && tf.pillTxtOn]}>
-                                            {p.charAt(0) + p.slice(1).toLowerCase()}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                                {priority !== null && (
-                                    <TouchableOpacity style={tf.pill} onPress={() => handlePrioritySelect(null)}>
-                                        <Text style={tf.pillTxt}>Clear</Text>
-                                    </TouchableOpacity>
-                                )}
-                            </View>
-                        )}
-
-                        <View style={s.sep} />
-
-                        <FieldRow
                             label="Effort" subLabel="Est. energy required"
                             value={effort ? effort.charAt(0) + effort.slice(1).toLowerCase() : 'Not set'}
                             isOpen={activeField === 'effort'}
@@ -389,6 +349,7 @@ export default function TaskDetailScreen() {
                                         style={[tf.pill, effort === e && tf.pillOn]}
                                         onPress={() => handleEffortSelect(e)}
                                     >
+                                        <View style={[tf.dot, { backgroundColor: effortDotColor(e) }]} />
                                         <Text style={[tf.pillTxt, effort === e && tf.pillTxtOn]}>
                                             {e.charAt(0) + e.slice(1).toLowerCase()}
                                         </Text>
@@ -480,7 +441,7 @@ export default function TaskDetailScreen() {
                         <Text style={s.deleteLabel}>Delete task</Text>
                     </TouchableOpacity>
 
-                </ScrollView>
+                </KeyboardScreen>
             )}
 
             {!loading && !fetchError && task && (
@@ -521,8 +482,8 @@ const s = StyleSheet.create({
     content: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40, gap: 12 },
 
     titleInput: {
-        ...BASE_TXT, fontSize: 23.2, fontWeight: '500',
-        letterSpacing: -0.3, lineHeight: 32, padding: 0,
+        ...BASE_TXT, fontSize: 22, fontWeight: '500',
+        letterSpacing: -0.4, lineHeight: 30, padding: 0,
         paddingHorizontal: 4,
     },
     titleInputError: { borderBottomWidth: 1, borderBottomColor: 'rgba(200,80,80,0.4)' },
@@ -547,14 +508,14 @@ const s = StyleSheet.create({
         backgroundColor: '#fffef9', borderWidth: 1,
         borderColor: 'rgba(42,38,33,0.10)', borderRadius: 16, overflow: 'hidden',
     },
-    sep: { height: 1, backgroundColor: 'rgba(42,38,33,0.10)' },
+    sep: { height: 1, backgroundColor: 'rgba(42,38,33,0.06)' },
 
     notesCard: {
         backgroundColor: '#fffef9', borderWidth: 1,
         borderColor: 'rgba(42,38,33,0.10)', borderRadius: 16,
         paddingHorizontal: 16, paddingVertical: 14,
     },
-    notesLabel: { fontSize: 10, color: 'rgba(122,115,106,0.4)', letterSpacing: 1.1, marginBottom: 8 },
+    notesLabel: { fontSize: 11, color: 'rgba(122,115,106,0.5)', letterSpacing: 0.5, marginBottom: 8 },
     notesInput: { ...BASE_TXT, minHeight: 72, lineHeight: 20, padding: 0 },
 
     deleteButton: {

@@ -1,25 +1,50 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
     ActivityIndicator,
+    Alert,
     Animated,
     Easing,
+    LayoutAnimation,
+    Platform,
     Pressable,
     ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
+    UIManager,
     View,
     type StyleProp,
     type ViewStyle,
 } from "react-native";
-import Svg, { Circle } from "react-native-svg";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
-import type { Priority, ReviewTask, TaskDetail } from "../../lib/api.types";
+import { formatTime } from "../../lib/time";
+import type { BacklogBuckets, BacklogTask, ScheduledTask, TaskDetail } from "../../lib/api.types";
+import { applyCreated, applyProgress, applyToggle, createSequencer, groupForReconcile, patchTask, restoreTask, withoutTask } from "../../lib/backlogState";
 import { usePlanningStore } from "../../stores/planning.store";
 import CreateTaskModal from "../../components/CreateTaskModal";
+import { ProgressSlider } from "../../components/TaskFields";
+import ReanimatedSwipeable, { SwipeDirection, type SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+const QUICK_MARKS = [25, 50, 75];
+
+// pickUp stays open always — it's the one group asking for a decision.
+type GroupKey = 'pickUp' | 'everythingElse' | 'doneToday';
+
+const GROUPS: Array<{ key: GroupKey; label: string; description: string; collapsible: boolean }> = [
+    { key: 'pickUp',         label: 'Pick up where you left off', description: 'Carried over, scheduled, or in progress', collapsible: false },
+    { key: 'everythingElse', label: 'Everything else',            description: 'Other tasks still on your backlog',      collapsible: true  },
+    { key: 'doneToday',      label: 'Done today',                 description: 'Finished today',                          collapsible: true  },
+];
+
+// Above this, "Everything else" defaults collapsed so the backlog isn't a wall.
+const EVERYTHING_ELSE_COLLAPSE_THRESHOLD = 6;
 
 // ─── Motion primitives ────────────────────────────────────────────────────────
 
@@ -27,17 +52,20 @@ import CreateTaskModal from "../../components/CreateTaskModal";
 // sequence (~60ms apart) rather than animating the whole container at once.
 function EnterView({ index = 0, style, children }: { index?: number; style?: StyleProp<ViewStyle>; children: ReactNode }) {
     const t = useRef(new Animated.Value(0)).current;
+    // Frozen at mount: a later reorder changing `index` must not replay the fade,
+    // or an in-place edit reads as the card closing and reopening.
+    const delay = useRef(index * 60).current;
     useEffect(() => {
         const anim = Animated.timing(t, {
             toValue: 1,
             duration: 320,
-            delay: index * 60,
+            delay,
             easing: Easing.out(Easing.cubic),
             useNativeDriver: true,
         });
         anim.start();
         return () => anim.stop();
-    }, [t, index]);
+    }, [t, delay]);
     return (
         <Animated.View
             style={[
@@ -69,20 +97,16 @@ function PressableScale({ onPress, disabled, style, children }: { onPress?: () =
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function DoneToggle({ task, onDone }: { task: ReviewTask; onDone: (updated: TaskDetail) => void }) {
-    const [completing, setCompleting] = useState(false);
-    const isDone = task.status === 'DONE' || completing;
+function DoneToggle({ task, onToggle }: { task: BacklogTask; onToggle: (updated: TaskDetail) => void }) {
+    const [busy, setBusy] = useState(false);
+    const isDone = task.status === 'DONE';
 
     async function handlePress() {
-        if (completing || task.status === 'DONE') return;
-        setCompleting(true);
-        const result = await api.updateTask(task.id, { progress: 100 });
-        if (result.ok) {
-            setCompleting(false);
-            onDone(result.data);
-        } else {
-            setCompleting(false);
-        }
+        if (busy) return;
+        setBusy(true);
+        const result = await api.updateTask(task.id, { progress: isDone ? 75 : 100 });
+        setBusy(false);
+        if (result.ok) onToggle(result.data);
     }
 
     return (
@@ -100,7 +124,7 @@ function DoneToggle({ task, onDone }: { task: ReviewTask; onDone: (updated: Task
     );
 }
 
-function StatusBadge({ status }: { status: ReviewTask['status'] }) {
+function StatusBadge({ status }: { status: BacklogTask['status'] }) {
     const inProgress = status === 'IN_PROGRESS';
     const done = status === 'DONE';
     const label = done ? 'Done' : inProgress ? 'In Progress' : 'Todo';
@@ -113,58 +137,159 @@ function StatusBadge({ status }: { status: ReviewTask['status'] }) {
     );
 }
 
-function PriorityBadge({ priority }: { priority: Priority }) {
-    const label = priority === 'HIGH' ? 'High' : priority === 'MEDIUM' ? 'Med' : 'Low';
+function formatDeadline(iso: string): string {
+    const d = new Date(iso);
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `Due ${months[d.getMonth()]} ${d.getDate()}`;
+}
+
+// Scheduled tasks land here still carrying their block fields; everything else
+// falls back to its deadline, matching the backlog card's meta line.
+function taskMeta(task: BacklogTask): string | null {
+    const sched = task as Partial<ScheduledTask>;
+    if (sched.blockStartTime && sched.blockName) return `${formatTime(sched.blockStartTime)} · ${sched.blockName}`;
+    return task.deadline ? formatDeadline(task.deadline) : null;
+}
+
+function TaskCard({ task, expanded, onToggleExpand, onToggleDone, onSetProgress, onOpen }: {
+    task: BacklogTask;
+    expanded: boolean;
+    onToggleExpand: () => void;
+    onToggleDone: (updated: TaskDetail) => void;
+    onSetProgress: (value: number) => void;
+    onOpen: () => void;
+}) {
+    const progress = task.progress ?? 0;
+    const isDone = task.status === 'DONE';
+    const meta = taskMeta(task);
     return (
-        <View style={[s.badge, s.badgeMuted]}>
-            <Text style={[s.badgeText, s.badgeTextMuted]}>{label} priority</Text>
+        <View style={[s.taskCard, expanded && s.taskCardExpanded]}>
+            <TouchableOpacity style={s.taskRow} activeOpacity={0.7} onPress={onToggleExpand}>
+                <DoneToggle task={task} onToggle={onToggleDone} />
+                <View style={s.taskContent}>
+                    <Text style={[s.taskTitle, isDone && s.taskTitleDone]} numberOfLines={2}>{task.title}</Text>
+                    <View style={s.badgeRow}>
+                        <StatusBadge status={task.status} />
+                        {meta && <Text style={s.metaText}>{meta}</Text>}
+                    </View>
+                </View>
+                <Ionicons
+                    name={expanded ? 'chevron-up' : 'chevron-down'}
+                    size={16}
+                    color="rgba(122,115,106,0.45)"
+                />
+            </TouchableOpacity>
+
+            {expanded && (
+                <View style={s.expandPanel}>
+                    <ProgressSlider value={progress} onChange={() => {}} onRelease={onSetProgress} />
+                    <View style={s.quickMarks}>
+                        {QUICK_MARKS.map(mark => (
+                            <TouchableOpacity
+                                key={mark}
+                                style={[s.markPill, progress === mark && s.markPillOn]}
+                                activeOpacity={0.7}
+                                onPress={() => onSetProgress(mark)}
+                            >
+                                <Text style={[s.markPillText, progress === mark && s.markPillTextOn]}>{mark}%</Text>
+                            </TouchableOpacity>
+                        ))}
+                        <TouchableOpacity style={s.openTask} activeOpacity={0.7} onPress={onOpen}>
+                            <Text style={s.openTaskText}>Open task</Text>
+                            <Ionicons name="chevron-forward" size={13} color="#7a736a" />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            )}
         </View>
     );
 }
 
-const RING = 30;
-const STROKE = 2.5;
-const RING_R = (RING - STROKE) / 2;
-const RING_CIRC = 2 * Math.PI * RING_R;
-
-function ProgressRing({ progress }: { progress: number }) {
-    const done = progress === 100;
-    const fill = done ? '#5c5248' : 'rgba(212,165,116,0.85)';
-    const offset = RING_CIRC * (1 - progress / 100);
+function renderDoneAction() {
     return (
-        <View style={s.ringWrap}>
-            <Svg width={RING} height={RING}>
-                <Circle
-                    cx={RING / 2} cy={RING / 2} r={RING_R}
-                    stroke="rgba(232,228,221,0.7)" strokeWidth={STROKE} fill="none"
-                />
-                {progress > 0 && (
-                    <Circle
-                        cx={RING / 2} cy={RING / 2} r={RING_R}
-                        stroke={fill} strokeWidth={STROKE} fill="none"
-                        strokeDasharray={RING_CIRC} strokeDashoffset={offset}
-                        strokeLinecap="round"
-                        transform={`rotate(-90 ${RING / 2} ${RING / 2})`}
+        <View style={[s.swipeAction, s.swipeDone]}>
+            <Ionicons name="checkmark-circle" size={22} color="#fdfcfa" />
+        </View>
+    );
+}
+
+function renderDeleteAction() {
+    return (
+        <View style={[s.swipeAction, s.swipeDelete]}>
+            <Ionicons name="trash-outline" size={20} color="#fdfcfa" />
+        </View>
+    );
+}
+
+// Swipe is just an alternate trigger for the same optimistic paths as the inline
+// controls: right reveals done (progress 100), left reveals delete. Disabled while
+// expanded so the gesture can't fight the panel's horizontal slider.
+function SwipeableTaskCard({ task, expanded, onMarkDone, onDelete, children }: {
+    task: BacklogTask;
+    expanded: boolean;
+    onMarkDone: () => void;
+    onDelete: () => void;
+    children: ReactNode;
+}) {
+    const ref = useRef<SwipeableMethods | null>(null);
+    const isDone = task.status === 'DONE';
+
+    function handleOpen(direction: SwipeDirection) {
+        ref.current?.close();
+        // `direction` is the row's travel, not the panel: revealing the left (done)
+        // panel moves the row right, so RIGHT means done and LEFT means delete.
+        if (direction === SwipeDirection.RIGHT) onMarkDone();
+        else onDelete();
+    }
+
+    return (
+        <ReanimatedSwipeable
+            ref={ref}
+            enabled={!expanded}
+            friction={2}
+            overshootLeft={false}
+            overshootRight={false}
+            leftThreshold={40}
+            rightThreshold={40}
+            dragOffsetFromLeftEdge={24}
+            dragOffsetFromRightEdge={24}
+            renderLeftActions={isDone ? undefined : renderDoneAction}
+            renderRightActions={renderDeleteAction}
+            onSwipeableOpen={handleOpen}
+        >
+            {children}
+        </ReanimatedSwipeable>
+    );
+}
+
+function GroupHeader({ label, description, count, collapsible, open, onToggle }: {
+    label: string;
+    description: string;
+    count: number;
+    collapsible: boolean;
+    open: boolean;
+    onToggle: () => void;
+}) {
+    const content = (
+        <View>
+            <View style={s.groupHeaderRow}>
+                {collapsible && (
+                    <Ionicons
+                        name={open ? 'chevron-down' : 'chevron-forward'}
+                        size={13}
+                        color="rgba(122,115,106,0.6)"
                     />
                 )}
-            </Svg>
-            <Text style={[s.ringLabel, done && s.ringLabelDone]}>{progress}%</Text>
+                <Text style={s.groupLabel}>{label}</Text>
+                <Text style={s.groupCount}>{count}</Text>
+            </View>
+            <Text style={[s.groupDescription, collapsible && s.groupDescriptionIndented]}>{description}</Text>
         </View>
     );
-}
-
-function TaskCard({ task, onPress, onDone }: { task: ReviewTask; onPress: () => void; onDone: (updated: TaskDetail) => void }) {
+    if (!collapsible) return content;
     return (
-        <TouchableOpacity style={s.taskCard} activeOpacity={0.7} onPress={onPress}>
-            <DoneToggle task={task} onDone={onDone} />
-            <View style={s.taskContent}>
-                <Text style={s.taskTitle} numberOfLines={2}>{task.title}</Text>
-                <View style={s.badgeRow}>
-                    <StatusBadge status={task.status} />
-                    {task.priority && <PriorityBadge priority={task.priority} />}
-                </View>
-            </View>
-            <ProgressRing progress={task.progress ?? 0} />
+        <TouchableOpacity onPress={onToggle} activeOpacity={0.6}>
+            {content}
         </TouchableOpacity>
     );
 }
@@ -176,72 +301,136 @@ export default function PlanningReviewScreen() {
     const insets = useSafeAreaInsets();
     const setProposal = usePlanningStore(s => s.setProposal);
 
-    const [carriedOver, setCarriedOver] = useState<ReviewTask[] | null>(null);
-    const [backlog, setBacklog] = useState<ReviewTask[]>([]);
+    const [buckets, setBuckets] = useState<BacklogBuckets | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [showCreateModal, setShowCreateModal] = useState(false);
+
+    const [openOverrides, setOpenOverrides] = useState<Partial<Record<GroupKey, boolean>>>({});
+    const [expandedId, setExpandedId] = useState<string | null>(null);
 
     // Agent plan generation: full-screen while the agent runs, retry on error.
     const [generating, setGenerating] = useState(false);
     const [generateError, setGenerateError] = useState<string | null>(null);
 
-    const handleDoneReviewing = useCallback(async () => {
+    // Gates out slow responses that would otherwise clobber an optimistic update.
+    const seq = useRef(createSequencer()).current;
+
+    const loadBuckets = useCallback((showLoading: boolean) => {
+        const token = seq.next();
+        if (showLoading) setError(null);
+        api.getBacklog().then(result => {
+            if (!seq.isCurrent(token)) return;
+            if (!result.ok) { if (showLoading) setError(result.error); return; }
+            setBuckets(result.data);
+        });
+    }, [seq]);
+
+    const planRun = useRef<AbortController | null>(null);
+
+    const handlePlanDay = useCallback(async () => {
         if (generating) return;
+        const run = new AbortController();
+        planRun.current = run;
         setGenerating(true);
         setGenerateError(null);
-        const result = await api.generatePlan();
+        const result = await api.generatePlan(run.signal);
+        // Drop the result if this run was superseded, so an aborted request
+        // (cancel) or a stale one never errors or navigates.
+        if (planRun.current !== run) return;
+        planRun.current = null;
+        setGenerating(false);
         if (result.ok) {
             setProposal(result.data);
-            setGenerating(false);
             router.push('/planning/plan');
         } else {
-            setGenerating(false);
             setGenerateError(result.error);
         }
     }, [generating, router, setProposal]);
 
-    // Refetch whenever the screen regains focus (e.g. returning from task detail)
-    // so edits made there are reflected on the review cards. The full-screen
-    // loader only shows on the first load (carriedOver === null).
+    const cancelPlanDay = useCallback(() => {
+        planRun.current?.abort();
+        planRun.current = null;
+        setGenerating(false);
+    }, []);
+
+    // Refetch on focus so edits made on the task detail screen reflect here.
     useFocusEffect(
-        useCallback(() => {
-            let active = true;
-            api.getReviewTasks().then(result => {
-                if (!active) return;
-                if (result.ok) {
-                    setCarriedOver(result.data.carriedOver);
-                    setBacklog(result.data.backlog);
-                    setError(null);
-                } else {
-                    setError(result.error);
-                }
-            });
-            return () => { active = false; };
-        }, [])
+        useCallback(() => { loadBuckets(true); }, [loadBuckets])
     );
 
-    function patchTask(section: 'carriedOver' | 'backlog', taskId: string, updated: TaskDetail) {
-        const patch = (tasks: ReviewTask[]) =>
-            tasks.map(t => t.id === taskId ? { ...t, status: updated.status, progress: updated.progress } : t);
-        if (section === 'carriedOver') setCarriedOver(prev => prev ? patch(prev) : prev);
-        else setBacklog(prev => patch(prev));
+    // Placed optimistically off the confirmed status; the refetch then reconciles
+    // the true bucket (e.g. a reopened task's plan placement).
+    function handleToggleDone(task: BacklogTask, updated: TaskDetail) {
+        setBuckets(prev => prev ? applyToggle(prev, task, updated).buckets : prev);
+        loadBuckets(false);
     }
 
-    const loading = carriedOver === null && !error;
-    const carried = carriedOver ?? [];
-    const isEmpty = carried.length === 0 && backlog.length === 0;
+    const commitProgress = useCallback(async (task: BacklogTask, value: number) => {
+        const result = await api.updateTask(task.id, { progress: value });
+        if (!result.ok) return;
+        // Burn a token so a refetch in flight (e.g. a prior completion's) can't land
+        // with a pre-write snapshot and revert this scrub; the done path refetches below.
+        seq.next();
+        const done = result.data.status === 'DONE';
+        // Completion and a todo→in-progress regroup both relocate the card; animate it.
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setBuckets(prev => {
+            if (!prev) return prev;
+            return done ? applyProgress(prev, task, result.data).buckets : patchTask(prev, task.id, result.data);
+        });
+        if (done) loadBuckets(false);
+    }, [loadBuckets, seq]);
+
+    function toggleExpand(taskId: string) {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setExpandedId(prev => prev === taskId ? null : taskId);
+    }
+
+    const handleDelete = useCallback(async (task: BacklogTask) => {
+        const snapshot = buckets;
+        if (!snapshot) return;
+        // Burn a token so a refetch already in flight can't resurrect the removed task.
+        seq.next();
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setExpandedId(current => current === task.id ? null : current);
+        setBuckets(prev => prev ? withoutTask(prev, task.id) : prev);
+        const result = await api.deleteTask(task.id);
+        if (!result.ok) {
+            setBuckets(prev => prev ? restoreTask(prev, snapshot, task.id) : snapshot);
+            Alert.alert("Couldn't delete task", result.error);
+        }
+    }, [buckets, seq]);
+
+    function isGroupOpen(key: GroupKey, count: number): boolean {
+        if (key in openOverrides) return openOverrides[key]!;
+        if (key === 'doneToday') return false;
+        if (key === 'everythingElse') return count <= EVERYTHING_ELSE_COLLAPSE_THRESHOLD;
+        return true;
+    }
+
+    const loading = buckets === null && !error;
+    const groups = buckets ? groupForReconcile(buckets) : null;
+    const isEmpty = groups !== null && GROUPS.every(g => groups[g.key].length === 0);
 
     return (
         <SafeAreaView style={s.container} edges={['top']}>
             <View style={s.header}>
-                <Text style={s.headerTitle}>Plan day</Text>
-                <TouchableOpacity
-                    onPress={() => router.back()}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    activeOpacity={0.6}
-                >
-                    <Ionicons name="close" size={22} color="#2a2621" />
-                </TouchableOpacity>
+                <View style={s.stepEyebrow}>
+                    <View style={[s.stepPip, s.stepPipActive]} />
+                    <View style={s.stepPip} />
+                    <Text style={s.stepLabel}>Step 1 of 2</Text>
+                </View>
+                <View style={s.headerRow}>
+                    <Text style={s.headerTitle}>Let's plan your day</Text>
+                    <TouchableOpacity
+                        onPress={() => router.back()}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        activeOpacity={0.6}
+                    >
+                        <Ionicons name="close" size={22} color="#2a2621" />
+                    </TouchableOpacity>
+                </View>
+                <Text style={s.headerSubtitle}>Sync up your tasks, then let Starlight plan your day.</Text>
             </View>
 
             {loading && (
@@ -256,53 +445,72 @@ export default function PlanningReviewScreen() {
                 </View>
             )}
 
-            {!loading && !error && (
+            {!loading && !error && groups !== null && (
                 <ScrollView contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
                     {isEmpty && (
                         <EnterView style={s.emptyState}>
                             <View style={s.emptyIconCircle}>
                                 <Ionicons name="sparkles-outline" size={20} color="#d4a574" />
                             </View>
-                            <Text style={s.emptyTitle}>Nothing to review</Text>
-                            <Text style={s.emptySubtitle}>Add a task below, or proceed to let the agent plan your day.</Text>
+                            <Text style={s.emptyTitle}>Nothing to reconcile</Text>
+                            <Text style={s.emptySubtitle}>Add a task below, or plan your day and let the agent schedule it.</Text>
                         </EnterView>
                     )}
 
-                    {carried.length > 0 && (
-                        <View style={s.section}>
-                            <EnterView><Text style={s.sectionLabel}>CARRIED OVER</Text></EnterView>
-                            <View style={s.cardGroup}>
-                                {carried.map((task, i) => (
-                                    <EnterView key={task.id} index={i + 1}>
-                                        <TaskCard
-                                            task={task}
-                                            onPress={() => router.push(`/task/${task.id}?from=Review`)}
-                                            onDone={(updated) => patchTask('carriedOver', task.id, updated)}
-                                        />
-                                    </EnterView>
-                                ))}
-                            </View>
-                        </View>
+                    {!isEmpty && (
+                        <EnterView>
+                            <Text style={s.hint}>Tap a task to update it · swipe right to complete, left to delete.</Text>
+                        </EnterView>
                     )}
 
-                    {backlog.length > 0 && (
-                        <View style={s.section}>
-                            <EnterView index={carried.length + 1}><Text style={s.sectionLabel}>BACKLOG</Text></EnterView>
-                            <View style={s.cardGroup}>
-                                {backlog.map((task, i) => (
-                                    <EnterView key={task.id} index={carried.length + 2 + i}>
-                                        <TaskCard
-                                            task={task}
-                                            onPress={() => router.push(`/task/${task.id}?from=Review`)}
-                                            onDone={(updated) => patchTask('backlog', task.id, updated)}
+                    {(() => {
+                        let animIndex = 0;
+                        return GROUPS.map(group => {
+                            const tasks = groups[group.key];
+                            if (tasks.length === 0) return null;
+                            const open = isGroupOpen(group.key, tasks.length);
+                            const headerIndex = animIndex++;
+                            return (
+                                <View key={group.key} style={s.section}>
+                                    <EnterView index={headerIndex}>
+                                        <GroupHeader
+                                            label={group.label}
+                                            description={group.description}
+                                            count={tasks.length}
+                                            collapsible={group.collapsible}
+                                            open={open}
+                                            onToggle={() => setOpenOverrides(prev => ({ ...prev, [group.key]: !open }))}
                                         />
                                     </EnterView>
-                                ))}
-                            </View>
-                        </View>
-                    )}
+                                    {open && (
+                                        <View style={s.cardGroup}>
+                                            {tasks.map(task => (
+                                                <EnterView key={task.id} index={animIndex++}>
+                                                    <SwipeableTaskCard
+                                                        task={task}
+                                                        expanded={expandedId === task.id}
+                                                        onMarkDone={() => commitProgress(task, 100)}
+                                                        onDelete={() => handleDelete(task)}
+                                                    >
+                                                        <TaskCard
+                                                            task={task}
+                                                            expanded={expandedId === task.id}
+                                                            onToggleExpand={() => toggleExpand(task.id)}
+                                                            onToggleDone={(updated) => handleToggleDone(task, updated)}
+                                                            onSetProgress={(value) => commitProgress(task, value)}
+                                                            onOpen={() => router.push(`/task/${task.id}?from=Review`)}
+                                                        />
+                                                    </SwipeableTaskCard>
+                                                </EnterView>
+                                            ))}
+                                        </View>
+                                    )}
+                                </View>
+                            );
+                        });
+                    })()}
 
-                    <EnterView index={carried.length + backlog.length + 2} style={s.addTaskWrap}>
+                    <EnterView style={s.addTaskWrap}>
                         <PressableScale style={s.addTaskButton} onPress={() => setShowCreateModal(true)}>
                             <Ionicons name="add" size={16} color="#7a736a" />
                             <Text style={s.addTaskLabel}>Add task</Text>
@@ -315,9 +523,9 @@ export default function PlanningReviewScreen() {
                 <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
                     <PressableScale
                         style={s.doneButton}
-                        onPress={handleDoneReviewing}
+                        onPress={handlePlanDay}
                     >
-                        <Text style={s.doneButtonLabel}>Done reviewing</Text>
+                        <Text style={s.doneButtonLabel}>Plan my day</Text>
                     </PressableScale>
                 </View>
             )}
@@ -326,9 +534,8 @@ export default function PlanningReviewScreen() {
                 visible={showCreateModal}
                 onClose={() => setShowCreateModal(false)}
                 onCreated={(task) => {
-                    if (task.status !== 'DONE') {
-                        setBacklog(prev => [...prev, task]);
-                    }
+                    if (buckets) setBuckets(applyCreated(buckets, task).buckets);
+                    loadBuckets(false);
                     setShowCreateModal(false);
                 }}
             />
@@ -338,8 +545,10 @@ export default function PlanningReviewScreen() {
                     {generating ? (
                         <>
                             <ActivityIndicator color="#d4a574" size="large" />
-                            <Text style={s.generateTitle}>Building your plan</Text>
-                            <Text style={s.generateSubtitle}>The agent is scheduling your tasks into the day.</Text>
+                            <Text style={s.generateSubtitle}>Starlight is scheduling your tasks into your day.</Text>
+                            <PressableScale style={s.cancelButton} onPress={cancelPlanDay}>
+                                <Text style={s.cancelButtonLabel}>Cancel</Text>
+                            </PressableScale>
                         </>
                     ) : (
                         <>
@@ -348,11 +557,11 @@ export default function PlanningReviewScreen() {
                             </View>
                             <Text style={s.generateTitle}>Couldn't build your plan</Text>
                             <Text style={s.generateSubtitle}>{generateError}</Text>
-                            <PressableScale style={s.retryButton} onPress={handleDoneReviewing}>
+                            <PressableScale style={s.retryButton} onPress={handlePlanDay}>
                                 <Text style={s.retryButtonLabel}>Try again</Text>
                             </PressableScale>
                             <TouchableOpacity onPress={() => setGenerateError(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                                <Text style={s.retryDismiss}>Back to review</Text>
+                                <Text style={s.retryDismiss}>Back to tasks</Text>
                             </TouchableOpacity>
                         </>
                     )}
@@ -370,20 +579,54 @@ const s = StyleSheet.create({
         backgroundColor: '#fdfcfa',
     },
     header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
         paddingHorizontal: 20,
         paddingTop: 24,
         paddingBottom: 16,
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(42,38,33,0.06)',
     },
+    stepEyebrow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginBottom: 10,
+    },
+    stepPip: {
+        width: 5,
+        height: 5,
+        borderRadius: 2.5,
+        backgroundColor: 'rgba(42,38,33,0.14)',
+    },
+    stepPipActive: {
+        width: 14,
+        backgroundColor: '#d4a574',
+    },
+    stepLabel: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: 'rgba(122,115,106,0.5)',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
+        marginLeft: 2,
+        fontVariant: ['tabular-nums'],
+    },
+    headerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
     headerTitle: {
         fontSize: 16,
         fontWeight: '600',
         color: '#2a2621',
         letterSpacing: -0.3,
+    },
+    headerSubtitle: {
+        fontSize: 13,
+        color: '#7a736a',
+        lineHeight: 18,
+        marginTop: 6,
+        maxWidth: 320,
     },
 
     centered: {
@@ -404,14 +647,41 @@ const s = StyleSheet.create({
         gap: 24,
     },
 
+    hint: {
+        fontSize: 12,
+        color: 'rgba(122,115,106,0.7)',
+        lineHeight: 16,
+        letterSpacing: -0.1,
+        textAlign: 'center',
+    },
+
     section: {
         gap: 10,
     },
-    sectionLabel: {
-        fontSize: 11,
-        color: 'rgba(122,115,106,0.5)',
-        letterSpacing: 0.5,
-        textTransform: 'uppercase',
+    groupDescription: {
+        fontSize: 12,
+        color: 'rgba(122,115,106,0.7)',
+        letterSpacing: -0.1,
+        marginTop: 3,
+    },
+    groupDescriptionIndented: { marginLeft: 20 },
+    groupHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 7,
+        minHeight: 24,
+    },
+    groupLabel: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#5c5248',
+        letterSpacing: -0.15,
+    },
+    groupCount: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: 'rgba(122,115,106,0.6)',
+        fontVariant: ['tabular-nums'],
     },
     cardGroup: {
         gap: 8,
@@ -421,27 +691,74 @@ const s = StyleSheet.create({
         backgroundColor: '#fffef9',
         borderWidth: 1,
         borderColor: 'rgba(42,38,33,0.10)',
-        borderRadius: 16,
-        padding: 16,
+        borderRadius: 14,
+        overflow: 'hidden',
+    },
+    taskCardExpanded: {
+        borderColor: 'rgba(42,38,33,0.20)',
+    },
+    swipeAction: {
+        width: 76,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderRadius: 14,
+    },
+    swipeDone: { backgroundColor: '#5c5248' },
+    swipeDelete: { backgroundColor: '#c85050' },
+    taskRow: {
+        paddingHorizontal: 13,
+        paddingVertical: 11,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: 10,
     },
     taskContent: {
         flex: 1,
+    },
+    expandPanel: {
+        paddingHorizontal: 13,
+        paddingBottom: 13,
+        paddingTop: 4,
+        gap: 10,
+        borderTopWidth: 1,
+        borderTopColor: 'rgba(42,38,33,0.06)',
+    },
+    quickMarks: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flexWrap: 'wrap',
         gap: 8,
     },
+    markPill: {
+        borderRadius: 999,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        backgroundColor: 'rgba(42,38,33,0.06)',
+    },
+    markPillOn: { backgroundColor: '#2a2621' },
+    markPillText: { fontSize: 13, fontWeight: '500', color: '#2a2621' },
+    markPillTextOn: { color: '#fdfcfa' },
+    openTask: {
+        marginLeft: 'auto',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 2,
+        paddingVertical: 6,
+    },
+    openTaskText: { fontSize: 13, fontWeight: '500', color: '#7a736a' },
     taskTitle: {
-        fontSize: 15,
+        fontSize: 14,
         fontWeight: '500',
         color: '#2a2621',
-        letterSpacing: -0.23,
+        letterSpacing: -0.15,
     },
+    taskTitleDone: { color: '#7a736a' },
     badgeRow: {
         flexDirection: 'row',
         alignItems: 'center',
         flexWrap: 'wrap',
         gap: 6,
+        marginTop: 6,
     },
 
     badge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
@@ -452,21 +769,12 @@ const s = StyleSheet.create({
     badgeTextDone: { color: '#5c5248' },
     badgeMuted: { backgroundColor: 'rgba(232,228,221,0.4)' },
     badgeTextMuted: { color: 'rgba(122,115,106,0.6)' },
-
-    ringWrap: {
-        width: RING,
-        height: RING,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    ringLabel: {
-        position: 'absolute',
-        fontSize: 7,
-        fontWeight: '600',
-        color: 'rgba(122,115,106,0.5)',
+    metaText: {
+        fontSize: 11,
+        fontWeight: '500',
+        color: '#7a736a',
         fontVariant: ['tabular-nums'],
     },
-    ringLabelDone: { color: '#5c5248' },
 
     addTaskWrap: {
         alignItems: 'flex-start',
@@ -581,5 +889,17 @@ const s = StyleSheet.create({
         fontSize: 14,
         color: '#7a736a',
         marginTop: 4,
+    },
+    cancelButton: {
+        marginTop: 8,
+        paddingVertical: 10,
+        paddingHorizontal: 20,
+        borderRadius: 12,
+        backgroundColor: '#f5f3ef',
+    },
+    cancelButtonLabel: {
+        fontSize: 14,
+        fontWeight: '500',
+        color: '#7a736a',
     },
 });

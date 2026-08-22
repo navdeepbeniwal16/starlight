@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Platform, Modal, TouchableWit
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { toHHmm, hhMmToDate, parseDisplayTime, toMins, formatDuration } from "../lib/time";
+import { colors, radius, spacing } from "../lib/theme";
 
 type PickerTarget = 'wake' | 'sleep' | null;
 
@@ -52,7 +53,7 @@ export function WakeSleepBar({
             <View>
                 <View style={styles.captionRow}>
                     <View style={styles.caption}>
-                        <Ionicons name="sunny-outline" size={13} color="#d4a574" />
+                        <Ionicons name="sunny-outline" size={13} color={colors.accent.default} />
                         <Text style={styles.label}>WAKE</Text>
                         <View style={styles.connectorLine} />
                     </View>
@@ -66,7 +67,7 @@ export function WakeSleepBar({
                     <View style={[styles.caption, styles.captionRight]}>
                         <View style={styles.connectorLine} />
                         <Text style={styles.label}>SLEEP</Text>
-                        <Ionicons name="moon-outline" size={13} color="#7a736a" />
+                        <Ionicons name="moon-outline" size={13} color={colors.text.secondary} />
                     </View>
                 </View>
 
@@ -124,31 +125,31 @@ function TimeChip({ time, period, onPress }: { time: string; period: string; onP
                 <Text style={styles.time}>{time}</Text>
                 <Text style={styles.period}>{period}</Text>
             </View>
-            <Ionicons name="chevron-down" size={15} color="rgba(122,115,106,0.5)" />
+            <Ionicons name="chevron-down" size={15} color={colors.text.secondary} />
         </TouchableOpacity>
     );
 }
 
 const styles = StyleSheet.create({
-    captionRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4, marginBottom: 7 },
+    captionRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.xs, marginBottom: 7 },
     caption: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
     captionRight: { justifyContent: 'flex-end' },
-    label: { fontSize: 10, fontWeight: '600', color: 'rgba(122,115,106,0.65)', letterSpacing: 0.8 },
-    connectorLine: { flex: 1, height: 1, backgroundColor: 'rgba(42,38,33,0.10)' },
+    label: { fontSize: 10, fontWeight: '600', color: colors.text.secondary, letterSpacing: 0.8 },
+    connectorLine: { flex: 1, height: 1, backgroundColor: colors.border.hairline },
 
-    durationPill: { backgroundColor: 'rgba(232,228,221,0.5)', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, marginHorizontal: 6 },
-    durationText: { fontSize: 11, fontWeight: '500', color: 'rgba(122,115,106,0.7)', fontVariant: ['tabular-nums'] },
+    durationPill: { backgroundColor: colors.surface.sunken, borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 3, marginHorizontal: 6 },
+    durationText: { fontSize: 11, fontWeight: '500', color: colors.text.secondary, fontVariant: ['tabular-nums'] },
 
-    chipRow: { flexDirection: 'row', gap: 8 },
+    chipRow: { flexDirection: 'row', gap: spacing.sm },
     chip: {
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        backgroundColor: '#fffef9',
+        backgroundColor: colors.surface.raised,
         borderWidth: 1,
-        borderColor: 'rgba(42,38,33,0.10)',
-        borderRadius: 14,
+        borderColor: colors.border.hairline,
+        borderRadius: radius.md,
         paddingHorizontal: 14,
         paddingVertical: 12,
         // Soft lift so each chip reads as a raised, tappable control.
@@ -158,14 +159,14 @@ const styles = StyleSheet.create({
         shadowRadius: 4,
         elevation: 1,
     },
-    timeRow: { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
-    time: { fontSize: 17, fontWeight: '500', color: '#2a2621', letterSpacing: -0.2, fontVariant: ['tabular-nums'] },
-    period: { fontSize: 11, fontWeight: '600', color: '#d4a574' },
+    timeRow: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.xs },
+    time: { fontSize: 17, fontWeight: '500', color: colors.text.primary, letterSpacing: -0.2, fontVariant: ['tabular-nums'] },
+    period: { fontSize: 11, fontWeight: '600', color: colors.accent.default },
 
-    pickerOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.3)' },
-    pickerSheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 40 },
-    pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingTop: 20, paddingBottom: 4 },
-    pickerTitle: { fontSize: 15, fontWeight: '500', color: '#2a2621' },
-    pickerDoneText: { fontSize: 16, fontWeight: '600', color: '#d4a574' },
+    pickerOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.scrim },
+    pickerSheet: { backgroundColor: '#fff', borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, paddingBottom: 40 },
+    pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingTop: 20, paddingBottom: spacing.xs },
+    pickerTitle: { fontSize: 15, fontWeight: '500', color: colors.text.primary },
+    pickerDoneText: { fontSize: 16, fontWeight: '600', color: colors.accent.default },
     picker: { width: '100%' },
 });

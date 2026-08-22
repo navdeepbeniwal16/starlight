@@ -5,34 +5,34 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    ScrollView,
     StyleSheet,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { KeyboardProvider, KeyboardToolbar, KeyboardAwareScrollView, type KeyboardAwareScrollViewRef } from "react-native-keyboard-controller";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../lib/api";
-import type { BacklogTask, Priority, EnergyLevel } from "../lib/api.types";
+import type { BacklogTask, EnergyLevel } from "../lib/api.types";
 import {
     ESTIMATE_OPTIONS, PROGRESS_PRESETS,
     FieldRow, ProgressSlider, DeadlineExpanded,
-    getEstimateLabel, formatDeadlineValue, priorityDotColor,
+    getEstimateLabel, formatDeadlineValue, effortDotColor,
     defaultTime,
     tf,
 } from "./TaskFields";
 
-type FieldKey = 'estimate' | 'priority' | 'effort' | 'deadline' | 'progress';
+type FieldKey = 'estimate' | 'effort' | 'deadline' | 'progress';
 
 type Props = { visible: boolean; onClose: () => void; onCreated: (task: BacklogTask) => void; };
 
 export default function CreateTaskModal({ visible, onClose, onCreated }: Props) {
     const insets = useSafeAreaInsets();
-    const scrollViewRef = useRef<ScrollView>(null);
+    const scrollViewRef = useRef<KeyboardAwareScrollViewRef>(null);
 
-    const [activeField, setActiveField] = useState<FieldKey | null>(null);
+    // Estimate is required for scheduling, so surface it expanded from the start.
+    const [activeField, setActiveField] = useState<FieldKey | null>('estimate');
     const [title, setTitle]             = useState('');
     const [notes, setNotes]             = useState('');
     const [estimatedMins, setEstimatedMins] = useState<number | null>(null);
-    const [priority, setPriority]       = useState<Priority | null>(null);
     const [effort, setEffort]           = useState<EnergyLevel | null>(null);
     const [deadlineDay, setDeadlineDay] = useState<Date | null>(null);
     const [deadlineTime, setDeadlineTime] = useState<Date>(defaultTime);
@@ -45,8 +45,8 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
     const [submitError, setSubmitError]   = useState<string | null>(null);
 
     function resetForm() {
-        setActiveField(null); setTitle(''); setNotes('');
-        setEstimatedMins(null); setPriority(null); setEffort(null);
+        setActiveField('estimate'); setTitle(''); setNotes('');
+        setEstimatedMins(null); setEffort(null);
         setDeadlineDay(null); setDeadlineTime(defaultTime()); setTempDay(new Date()); setShowTimePicker(false);
         setProgress(0);
         setSubmitting(false); setTitleError(false); setEstimateError(false); setSubmitError(null);
@@ -82,7 +82,6 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
 
         const result = await api.createTask({
             title: title.trim(), estimatedMins,
-            ...(priority && { priority }),
             ...(effort   && { effort }),
             ...(deadline && { deadline }),
             progress,
@@ -96,9 +95,15 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
 
     const canSubmit = title.trim().length > 0 && estimatedMins !== null && !submitting;
 
+    const revealFocusedInput = () => {
+        scrollViewRef.current?.assureFocusedInputVisible();
+        setTimeout(() => scrollViewRef.current?.assureFocusedInputVisible(), 300);
+    };
+
     return (
         <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
-            <View style={[s.screen, { paddingTop: insets.top }]}>
+            <KeyboardProvider>
+                <View style={[s.screen, { paddingTop: insets.top }]}>
 
                 <View style={s.header}>
                     <Text style={s.headerTitle}>New Task</Text>
@@ -107,11 +112,14 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                     </TouchableOpacity>
                 </View>
 
-                <ScrollView
+                <KeyboardAwareScrollView
                     ref={scrollViewRef}
+                    style={s.scrollFlex}
                     contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + 32 }]}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
+                    bottomOffset={16}
+                    mode="layout"
                 >
                     <TextInput
                         style={[s.titleInput, titleError && s.titleInputError]}
@@ -119,6 +127,7 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                         placeholderTextColor="rgba(122,115,106,0.3)"
                         value={title}
                         onChangeText={(t) => { setTitle(t); if (t.trim()) setTitleError(false); }}
+                        onFocus={revealFocusedInput}
                         autoFocus multiline blurOnSubmit returnKeyType="done"
                     />
                     {titleError && <Text style={s.inlineError}>Title is required</Text>}
@@ -149,36 +158,6 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                         <View style={s.sep} />
 
                         <FieldRow
-                            label="Priority"
-                            value={priority ? priority.charAt(0) + priority.slice(1).toLowerCase() : 'Not set'}
-                            isOpen={activeField === 'priority'}
-                            onPress={() => toggleField('priority')}
-                        />
-                        {activeField === 'priority' && (
-                            <View style={tf.pills}>
-                                {(['HIGH','MEDIUM','LOW'] as Priority[]).map(p => (
-                                    <TouchableOpacity
-                                        key={p}
-                                        style={[tf.pill, priority === p && tf.pillOn]}
-                                        onPress={() => { setPriority(p); setActiveField(null); }}
-                                    >
-                                        <View style={[tf.dot, { backgroundColor: priorityDotColor(p) }]} />
-                                        <Text style={[tf.pillTxt, priority === p && tf.pillTxtOn]}>
-                                            {p.charAt(0) + p.slice(1).toLowerCase()}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                                {priority !== null && (
-                                    <TouchableOpacity style={tf.pill} onPress={() => { setPriority(null); setActiveField(null); }}>
-                                        <Text style={tf.pillTxt}>Clear</Text>
-                                    </TouchableOpacity>
-                                )}
-                            </View>
-                        )}
-
-                        <View style={s.sep} />
-
-                        <FieldRow
                             label="Effort" subLabel="Est. energy required"
                             value={effort ? effort.charAt(0) + effort.slice(1).toLowerCase() : 'Not set'}
                             isOpen={activeField === 'effort'}
@@ -192,6 +171,7 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                                         style={[tf.pill, effort === e && tf.pillOn]}
                                         onPress={() => { setEffort(e); setActiveField(null); }}
                                     >
+                                        <View style={[tf.dot, { backgroundColor: effortDotColor(e) }]} />
                                         <Text style={[tf.pillTxt, effort === e && tf.pillTxtOn]}>
                                             {e.charAt(0) + e.slice(1).toLowerCase()}
                                         </Text>
@@ -261,6 +241,7 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                             placeholderTextColor="rgba(122,115,106,0.3)"
                             value={notes}
                             onChangeText={setNotes}
+                            onFocus={revealFocusedInput}
                             multiline textAlignVertical="top"
                         />
                     </View>
@@ -275,8 +256,10 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                         <Text style={s.createBtnTxt}>{submitting ? 'Creating...' : 'Create task'}</Text>
                     </TouchableOpacity>
 
-                </ScrollView>
-            </View>
+                </KeyboardAwareScrollView>
+                </View>
+                <KeyboardToolbar />
+            </KeyboardProvider>
         </Modal>
     );
 }
@@ -288,16 +271,16 @@ const s = StyleSheet.create({
 
     header: {
         flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        paddingHorizontal: 20, paddingVertical: 14,
-        borderBottomWidth: 1, borderBottomColor: 'rgba(42,38,33,0.10)',
+        paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12,
+        borderBottomWidth: 1, borderBottomColor: 'rgba(42,38,33,0.06)',
     },
-    headerTitle: { ...BASE_TXT, fontSize: 16, fontWeight: '500', letterSpacing: -0.2 },
+    headerTitle: { ...BASE_TXT, fontSize: 18, fontWeight: '600', letterSpacing: -0.3 },
     closeBtn: {
-        width: 30, height: 30, borderRadius: 15,
-        backgroundColor: 'rgba(42,38,33,0.10)',
+        width: 30, height: 30,
         justifyContent: 'center', alignItems: 'center',
     },
 
+    scrollFlex: { flex: 1 },
     scroll: { paddingHorizontal: 16, paddingTop: 20 },
 
     titleInput: {
@@ -312,14 +295,14 @@ const s = StyleSheet.create({
         borderColor: 'rgba(42,38,33,0.10)', borderRadius: 16,
         overflow: 'hidden', marginBottom: 12,
     },
-    sep: { height: 1, backgroundColor: 'rgba(42,38,33,0.04)' },
+    sep: { height: 1, backgroundColor: 'rgba(42,38,33,0.06)' },
 
     notesCard: {
         backgroundColor: '#fffef9', borderWidth: 1,
         borderColor: 'rgba(42,38,33,0.10)', borderRadius: 16,
         paddingHorizontal: 16, paddingVertical: 14, marginBottom: 14,
     },
-    notesLabel: { fontSize: 10, color: 'rgba(122,115,106,0.4)', letterSpacing: 1.1, marginBottom: 8 },
+    notesLabel: { fontSize: 11, color: 'rgba(122,115,106,0.5)', letterSpacing: 0.5, marginBottom: 8 },
     notesInput: { ...BASE_TXT, minHeight: 72, lineHeight: 20, padding: 0 },
 
     submitError: { fontSize: 12, color: 'rgba(200,80,80,0.8)', textAlign: 'center', marginBottom: 8 },

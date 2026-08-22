@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
     View, Text, TouchableOpacity, StyleSheet,
-    Modal, TextInput, Platform, TouchableWithoutFeedback, ScrollView, KeyboardAvoidingView,
+    Modal, TextInput, Platform, TouchableWithoutFeedback, ScrollView,
     NativeSyntheticEvent, NativeScrollEvent,
 } from "react-native";
+import { KeyboardProvider, KeyboardToolbar, KeyboardAwareScrollView, type KeyboardAwareScrollViewRef } from "react-native-keyboard-controller";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import Animated, { useAnimatedStyle, withTiming } from "react-native-reanimated";
 import { Feather } from "@expo/vector-icons";
@@ -14,6 +15,7 @@ import {
     validateBlockDraft, blockDraftErrorMessage, toBlockInput,
 } from "../lib/templateBlocks";
 import { computeGaps, MIN_GAP_MINUTES } from "../lib/templateDraft";
+import { colors, radius, spacing } from "../lib/theme";
 
 type PickerTarget = 'start' | 'end' | null;
 
@@ -71,6 +73,12 @@ export function BlockEditorModal({
     // drag doesn't re-render the modal every frame; only the two arrow-visibility
     // booleans are state, and they flip only when a scroll boundary is crossed.
     const chipScrollRef = useRef<ScrollView>(null);
+    const scrollRef = useRef<KeyboardAwareScrollViewRef>(null);
+
+    const revealFocusedInput = () => {
+        scrollRef.current?.assureFocusedInputVisible();
+        setTimeout(() => scrollRef.current?.assureFocusedInputVisible(), 300);
+    };
     const chipScrollX = useRef(0);
     const [chipContentWidth, setChipContentWidth] = useState(0);
     const [chipViewportWidth, setChipViewportWidth] = useState(0);
@@ -181,12 +189,13 @@ export function BlockEditorModal({
 
     return (
         <Modal visible={visible} animationType="slide" transparent>
+            <KeyboardProvider>
             <TouchableWithoutFeedback onPress={handleClose}>
                 <View style={styles.modalOverlay}>
                     <TouchableWithoutFeedback>
-                        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalSheet}>
+                        <View style={styles.modalSheet}>
                             <View style={styles.dragIndicator} />
-                            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                            <KeyboardAwareScrollView ref={scrollRef} style={styles.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" bottomOffset={16} mode="layout">
                                 {/* Header */}
                                 <View style={styles.modalHeader}>
                                     <Text style={styles.modalTitle}>{isEditMode ? 'Edit block' : 'Add a block'}</Text>
@@ -237,6 +246,7 @@ export function BlockEditorModal({
                                         style={styles.textInput}
                                         value={name}
                                         onChangeText={setName}
+                                        onFocus={revealFocusedInput}
                                         placeholder="e.g. Focus time, Deep work, Reading"
                                         placeholderTextColor="rgba(122,115,106,0.4)"
                                     />
@@ -288,7 +298,7 @@ export function BlockEditorModal({
                                                         hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
                                                         style={styles.chipChevron}
                                                     >
-                                                        <Feather name="chevron-left" size={20} color="#7a736a" />
+                                                        <Feather name="chevron-left" size={20} color={colors.text.secondary} />
                                                     </TouchableOpacity>
                                                 </Animated.View>
 
@@ -334,7 +344,7 @@ export function BlockEditorModal({
                                                         hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
                                                         style={styles.chipChevron}
                                                     >
-                                                        <Feather name="chevron-right" size={20} color="#7a736a" />
+                                                        <Feather name="chevron-right" size={20} color={colors.text.secondary} />
                                                     </TouchableOpacity>
                                                 </Animated.View>
                                             </View>
@@ -385,7 +395,7 @@ export function BlockEditorModal({
                                 )}
 
                                 <View style={{ height: 32 }} />
-                            </ScrollView>
+                            </KeyboardAwareScrollView>
 
                             {/* Time picker — iOS nested modal */}
                             {Platform.OS === 'ios' && pickerTarget && (
@@ -420,76 +430,79 @@ export function BlockEditorModal({
                                     onChange={handlePickerChange}
                                 />
                             )}
-                        </KeyboardAvoidingView>
+                        </View>
                     </TouchableWithoutFeedback>
                 </View>
             </TouchableWithoutFeedback>
+            <KeyboardToolbar />
+            </KeyboardProvider>
         </Modal>
     );
 }
 
 const styles = StyleSheet.create({
-    errorText: { fontSize: 13, color: '#c0392b', textAlign: 'center', marginTop: 10, marginHorizontal: 24 },
+    errorText: { fontSize: 13, color: colors.danger.default, textAlign: 'center', marginTop: 10, marginHorizontal: 24 },
 
-    modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.3)' },
-    modalSheet: { backgroundColor: '#fdfcfa', borderTopLeftRadius: 24, borderTopRightRadius: 24, height: '94%' },
-    dragIndicator: { width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(42,38,33,0.15)', alignSelf: 'center', marginTop: 10, marginBottom: 2 },
+    modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.scrim },
+    modalSheet: { backgroundColor: colors.surface.page, borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl, height: '94%' },
+    scroll: { flex: 1 },
+    dragIndicator: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border.strong, alignSelf: 'center', marginTop: 10, marginBottom: 2 },
     modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingTop: 20, paddingBottom: 16 },
-    modalTitle: { fontSize: 18, fontWeight: '500', color: '#2a2621' },
+    modalTitle: { fontSize: 18, fontWeight: '500', color: colors.text.primary },
     modalCloseButton: { position: 'absolute', right: 24 },
-    modalClose: { fontSize: 22, color: '#7a736a' },
-    modalDivider: { height: 1, backgroundColor: 'rgba(42,38,33,0.10)' },
-    modalDividerLight: { height: 1, backgroundColor: 'rgba(42,38,33,0.10)', marginHorizontal: 24 },
-    modalSection: { paddingHorizontal: 24, paddingVertical: 20, gap: 12 },
-    modalLabel: { fontSize: 14, fontWeight: '500', color: '#7a736a', letterSpacing: -0.15 },
+    modalClose: { fontSize: 22, color: colors.text.secondary },
+    modalDivider: { height: 1, backgroundColor: colors.border.hairline },
+    modalDividerLight: { height: 1, backgroundColor: colors.border.hairline, marginHorizontal: 24 },
+    modalSection: { paddingHorizontal: 24, paddingVertical: 20, gap: spacing.md },
+    modalLabel: { fontSize: 14, fontWeight: '500', color: colors.text.secondary, letterSpacing: -0.15 },
 
-    pillRow: { flexDirection: 'row', gap: 8 },
-    pill: { flex: 1, height: 40, borderRadius: 12, backgroundColor: 'rgba(232,228,221,0.35)', justifyContent: 'center', alignItems: 'center' },
-    pillActive: { backgroundColor: 'rgba(212,165,116,0.15)', borderWidth: 1.5, borderColor: '#d4a574' },
-    pillText: { fontSize: 13, fontWeight: '500', color: '#7a736a' },
-    pillTextActive: { color: '#d4a574' },
+    pillRow: { flexDirection: 'row', gap: spacing.sm },
+    pill: { flex: 1, height: 40, borderRadius: radius.sm, backgroundColor: colors.surface.sunken, justifyContent: 'center', alignItems: 'center' },
+    pillActive: { backgroundColor: colors.accent.tint, borderWidth: 1.5, borderColor: colors.accent.default },
+    pillText: { fontSize: 13, fontWeight: '500', color: colors.text.secondary },
+    pillTextActive: { color: colors.accent.default },
 
     typeDescription: { fontSize: 13, color: 'rgba(122,115,106,0.75)' },
 
     typeLegend: { gap: 16, marginTop: 4 },
-    legendItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+    legendItem: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
     legendIcon: { width: 12, height: 12, borderRadius: 3, marginTop: 2 },
-    legendIconContainer: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.15)', borderStyle: 'dashed' },
+    legendIconContainer: { borderWidth: 1, borderColor: colors.border.strong, borderStyle: 'dashed' },
     legendIconAnchor: { backgroundColor: 'rgba(232,228,221,0.85)' },
-    legendIconNoTask: { backgroundColor: 'rgba(232,228,221,0.4)', borderWidth: 1, borderColor: 'rgba(42,38,33,0.15)', borderStyle: 'dashed' },
-    legendTitle: { fontSize: 13, fontWeight: '500', color: '#2a2621' },
+    legendIconNoTask: { backgroundColor: colors.surface.sunken, borderWidth: 1, borderColor: colors.border.strong, borderStyle: 'dashed' },
+    legendTitle: { fontSize: 13, fontWeight: '500', color: colors.text.primary },
     legendDesc: { fontSize: 11, color: 'rgba(122,115,106,0.8)', marginTop: 1 },
 
-    textInput: { height: 52, backgroundColor: '#fffef9', borderWidth: 1, borderColor: 'rgba(42,38,33,0.10)', borderRadius: 14, paddingHorizontal: 16, fontSize: 15, color: '#2a2621' },
+    textInput: { height: 52, backgroundColor: colors.surface.raised, borderWidth: 1, borderColor: colors.border.hairline, borderRadius: radius.md, paddingHorizontal: 16, fontSize: 15, color: colors.text.primary },
 
-    timeRow: { flexDirection: 'row', gap: 12 },
-    timeField: { flex: 1, gap: 12 },
-    timeInput: { height: 52, backgroundColor: '#fffef9', borderWidth: 1, borderColor: 'rgba(42,38,33,0.10)', borderRadius: 14, justifyContent: 'center', paddingHorizontal: 16 },
-    timeInputValueRow: { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
-    timeInputValue: { fontSize: 15, fontWeight: '500', color: '#2a2621', fontVariant: ['tabular-nums'] },
-    timeInputPeriod: { fontSize: 11, fontWeight: '500', color: '#d4a574' },
+    timeRow: { flexDirection: 'row', gap: spacing.md },
+    timeField: { flex: 1, gap: spacing.md },
+    timeInput: { height: 52, backgroundColor: colors.surface.raised, borderWidth: 1, borderColor: colors.border.hairline, borderRadius: radius.md, justifyContent: 'center', paddingHorizontal: 16 },
+    timeInputValueRow: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.xs },
+    timeInputValue: { fontSize: 15, fontWeight: '500', color: colors.text.primary, fontVariant: ['tabular-nums'] },
+    timeInputPeriod: { fontSize: 11, fontWeight: '500', color: colors.accent.default },
     timeInputPlaceholder: { fontSize: 15, color: 'rgba(122,115,106,0.35)' },
 
-    availableSection: { gap: 12, marginTop: 16 },
+    availableSection: { gap: spacing.md, marginTop: 16 },
     chipStrip: { flexDirection: 'row', alignItems: 'center' },
     chipScroll: { flex: 1 },
-    chipRow: { flexDirection: 'row', gap: 8, alignItems: 'center', paddingHorizontal: 2 },
+    chipRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center', paddingHorizontal: 2 },
     chipGutter: { width: 30, alignSelf: 'stretch' },
     chipChevron: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-    chip: { height: 36, borderRadius: 12, backgroundColor: 'rgba(232,228,221,0.35)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 14 },
-    chipActive: { backgroundColor: 'rgba(212,165,116,0.15)', borderWidth: 1.5, borderColor: '#d4a574' },
-    chipText: { fontSize: 13, fontWeight: '500', color: '#7a736a', fontVariant: ['tabular-nums'] },
-    chipTextActive: { color: '#d4a574' },
+    chip: { height: 36, borderRadius: radius.sm, backgroundColor: colors.surface.sunken, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 14 },
+    chipActive: { backgroundColor: colors.accent.tint, borderWidth: 1.5, borderColor: colors.accent.default },
+    chipText: { fontSize: 13, fontWeight: '500', color: colors.text.secondary, fontVariant: ['tabular-nums'] },
+    chipTextActive: { color: colors.accent.default },
 
     energySubtitle: { fontSize: 12, color: 'rgba(122,115,106,0.6)', marginTop: -4 },
 
-    addButton: { marginHorizontal: 24, height: 52, backgroundColor: '#d4a574', borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
-    addButtonText: { fontSize: 16, fontWeight: '500', color: '#2a2621', letterSpacing: -0.31 },
-    deleteButton: { marginHorizontal: 24, height: 48, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
-    deleteButtonText: { fontSize: 15, fontWeight: '500', color: '#c0392b', letterSpacing: -0.23 },
+    addButton: { marginHorizontal: 24, height: 52, backgroundColor: colors.accent.default, borderRadius: radius.lg, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
+    addButtonText: { fontSize: 16, fontWeight: '500', color: colors.text.onAccent, letterSpacing: -0.31 },
+    deleteButton: { marginHorizontal: 24, height: 48, borderRadius: radius.lg, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
+    deleteButtonText: { fontSize: 15, fontWeight: '500', color: colors.danger.default, letterSpacing: -0.23 },
 
-    pickerOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.3)' },
-    pickerSheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 40 },
-    pickerHeader: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 24, paddingTop: 20, paddingBottom: 4 },
-    pickerDoneText: { fontSize: 16, fontWeight: '600', color: '#d4a574' },
+    pickerOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.scrim },
+    pickerSheet: { backgroundColor: '#fff', borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, paddingBottom: 40 },
+    pickerHeader: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 24, paddingTop: 20, paddingBottom: spacing.xs },
+    pickerDoneText: { fontSize: 16, fontWeight: '600', color: colors.accent.default },
 });
