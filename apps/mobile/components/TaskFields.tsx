@@ -226,6 +226,10 @@ export function ProgressSlider({ value, onChange, onRelease }: {
             onPanResponderTerminate: () => {
                 isDraggingRef.current = false;
             },
+            // Hold the gesture against the enclosing ScrollView; without this it
+            // steals the drag on the first vertical drift and the thumb drops.
+            onPanResponderTerminationRequest: () => false,
+            onShouldBlockNativeResponder: () => true,
         })
     ).current;
 
