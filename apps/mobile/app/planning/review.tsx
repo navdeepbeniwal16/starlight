@@ -652,6 +652,7 @@ const s = StyleSheet.create({
         color: 'rgba(122,115,106,0.7)',
         lineHeight: 16,
         letterSpacing: -0.1,
+        textAlign: 'center',
     },
 
     section: {
