@@ -325,20 +325,33 @@ export default function PlanningReviewScreen() {
         });
     }, [seq]);
 
+    const planRun = useRef<AbortController | null>(null);
+
     const handlePlanDay = useCallback(async () => {
         if (generating) return;
+        const run = new AbortController();
+        planRun.current = run;
         setGenerating(true);
         setGenerateError(null);
-        const result = await api.generatePlan();
+        const result = await api.generatePlan(run.signal);
+        // Drop the result if this run was superseded, so an aborted request
+        // (cancel) or a stale one never errors or navigates.
+        if (planRun.current !== run) return;
+        planRun.current = null;
+        setGenerating(false);
         if (result.ok) {
             setProposal(result.data);
-            setGenerating(false);
             router.push('/planning/plan');
         } else {
-            setGenerating(false);
             setGenerateError(result.error);
         }
     }, [generating, router, setProposal]);
+
+    const cancelPlanDay = useCallback(() => {
+        planRun.current?.abort();
+        planRun.current = null;
+        setGenerating(false);
+    }, []);
 
     // Refetch on focus so edits made on the task detail screen reflect here.
     useFocusEffect(
@@ -532,8 +545,10 @@ export default function PlanningReviewScreen() {
                     {generating ? (
                         <>
                             <ActivityIndicator color="#d4a574" size="large" />
-                            <Text style={s.generateTitle}>Building your plan</Text>
-                            <Text style={s.generateSubtitle}>The agent is scheduling your tasks into the day.</Text>
+                            <Text style={s.generateSubtitle}>Starlight is scheduling your tasks into your day.</Text>
+                            <PressableScale style={s.cancelButton} onPress={cancelPlanDay}>
+                                <Text style={s.cancelButtonLabel}>Cancel</Text>
+                            </PressableScale>
                         </>
                     ) : (
                         <>
@@ -873,5 +888,17 @@ const s = StyleSheet.create({
         fontSize: 14,
         color: '#7a736a',
         marginTop: 4,
+    },
+    cancelButton: {
+        marginTop: 8,
+        paddingVertical: 10,
+        paddingHorizontal: 20,
+        borderRadius: 12,
+        backgroundColor: '#f5f3ef',
+    },
+    cancelButtonLabel: {
+        fontSize: 14,
+        fontWeight: '500',
+        color: '#7a736a',
     },
 });
