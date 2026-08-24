@@ -247,22 +247,65 @@ describe("getAllTasks", () => {
         await cleanup(userId);
     });
 
-    it("returns every task, including done ones from earlier days, ordered by updatedAt desc", async () => {
+    async function seedThreeInOrder() {
         const oldest = await seedTask(userId, { title: "Oldest" });
         const middle = await seedTask(userId, { title: "Middle", done: true });
-        await seedTask(userId, { title: "Newest" });
-
-        // Backdate the first two so ordering is deterministic rather than tied to insert timing.
+        const newest = await seedTask(userId, { title: "Newest" });
         await backdateUpdatedAt(oldest.id, new Date(Date.now() - 3 * DAY_MS));
         await backdateUpdatedAt(middle.id, new Date(Date.now() - 1 * DAY_MS));
+        return { oldest, middle, newest };
+    }
 
-        const tasks = await getAllTasks(userId);
+    it("returns every task, including done ones from earlier days, newest-first", async () => {
+        await seedThreeInOrder();
 
-        expect(tasks.map((t) => t.title)).toEqual(["Newest", "Middle", "Oldest"]);
+        const page = await getAllTasks(userId);
+
+        expect(page.items.map((t) => t.title)).toEqual(["Newest", "Middle", "Oldest"]);
+        expect(page.nextCursor).toBeNull();
     });
 
-    it("returns an empty array when the user has no tasks", async () => {
-        expect(await getAllTasks(userId)).toEqual([]);
+    it("returns a bounded first page with a nextCursor when more tasks remain", async () => {
+        await seedThreeInOrder();
+
+        const page = await getAllTasks(userId, { limit: 2 });
+
+        expect(page.items.map((t) => t.title)).toEqual(["Newest", "Middle"]);
+        expect(page.nextCursor).toBe(page.items[1]!.id);
+    });
+
+    it("continues from the cursor onto the next page without repeats", async () => {
+        await seedThreeInOrder();
+
+        const first = await getAllTasks(userId, { limit: 2 });
+        const second = await getAllTasks(userId, { limit: 2, cursor: first.nextCursor! });
+
+        expect(second.items.map((t) => t.title)).toEqual(["Oldest"]);
+        expect(second.nextCursor).toBeNull();
+    });
+
+    it("pages stably when updatedAt ties, using id as the tiebreak", async () => {
+        const sameTime = new Date(Date.now() - DAY_MS);
+        for (const title of ["A", "B", "C"]) {
+            const t = await seedTask(userId, { title });
+            await backdateUpdatedAt(t.id, sameTime);
+        }
+
+        const seen: string[] = [];
+        let cursor: string | undefined;
+        // Cap iterations so a broken cursor can't loop the test forever.
+        for (let i = 0; i < 10; i++) {
+            const page = await getAllTasks(userId, { limit: 1, cursor });
+            seen.push(...page.items.map((t) => t.title));
+            if (page.nextCursor === null) break;
+            cursor = page.nextCursor;
+        }
+
+        expect(seen.sort()).toEqual(["A", "B", "C"]);
+    });
+
+    it("returns an empty page when the user has no tasks", async () => {
+        expect(await getAllTasks(userId)).toEqual({ items: [], nextCursor: null });
     });
 
     it("does not return another user's tasks", async () => {
@@ -270,6 +313,6 @@ describe("getAllTasks", () => {
         await cleanup(other.id);
         await seedTask(other.id, { title: "Other task" });
 
-        expect(await getAllTasks(userId)).toEqual([]);
+        expect(await getAllTasks(userId)).toEqual({ items: [], nextCursor: null });
     });
 });

@@ -1,36 +1,25 @@
-import { Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { TemplateGap } from "../lib/templateDraft";
-import { formatDuration, parseDisplayTime } from "../lib/time";
+import { formatDuration } from "../lib/time";
 import { PressableScale } from "./PressableScale";
 import { colors } from "../lib/theme";
 
-// Formats a range like "2:00–8:00 PM", collapsing the meridiem when both ends share it.
-function formatRange(start: string, end: string): string {
-    const s = parseDisplayTime(start);
-    const e = parseDisplayTime(end);
-    return s.period === e.period
-        ? `${s.time}–${e.time} ${e.period}`
-        : `${s.time} ${s.period} – ${e.time} ${e.period}`;
-}
-
-// A recessive add affordance for a free span: borderless and centered,
-// so it reads as an interstitial hint rather than another block.
 export function GapAffordance({ gap, onPress }: { gap: TemplateGap; onPress: () => void }) {
     return (
-        <PressableScale style={styles.gap} onPress={onPress} hitSlop={8}>
-            <Text style={styles.plus}>＋</Text>
-            <Text style={styles.label}>
-                {formatDuration(gap.durationMinutes)} free · {formatRange(gap.startTime, gap.endTime)}
-            </Text>
+        <PressableScale style={styles.row} onPress={onPress} hitSlop={8}>
+            <View style={styles.thread} />
+            <View style={styles.pill}>
+                <Ionicons name="add" size={13} color={colors.accent.default} />
+                <Text style={styles.label}>{formatDuration(gap.durationMinutes)} free</Text>
+            </View>
         </PressableScale>
     );
 }
 
 const styles = StyleSheet.create({
-    gap: {
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-        paddingVertical: 6,
-    },
-    plus: { fontSize: 14, fontWeight: '500', color: colors.accent.default },
-    label: { fontSize: 12.5, color: colors.text.secondary, letterSpacing: -0.1, fontVariant: ['tabular-nums'] },
+    row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+    thread: { position: 'absolute', left: 10, top: 0, bottom: 0, width: 1, backgroundColor: 'rgba(42,38,33,0.12)' },
+    pill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 4, marginHorizontal: 8 },
+    label: { fontSize: 11, color: 'rgba(122,115,106,0.8)', letterSpacing: -0.1, fontVariant: ['tabular-nums'] },
 });

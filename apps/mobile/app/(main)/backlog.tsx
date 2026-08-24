@@ -7,6 +7,7 @@ import {
     TouchableOpacity,
     Pressable,
     ActivityIndicator,
+    Alert,
 } from "react-native";
 import Animated, {
     Easing,
@@ -52,7 +53,8 @@ const DEFAULT_OPEN = Object.fromEntries(
 function formatDeadline(isoString: string): string {
     const d = new Date(isoString);
     const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return `Due ${months[d.getMonth()]} ${d.getDate()}`;
+    // Deadlines are stored at UTC midnight; read in UTC so the date doesn't shift a day back west of UTC.
+    return `Due ${months[d.getUTCMonth()]} ${d.getUTCDate()}`;
 }
 
 // Subtle press-down; 0.96 reads as tactile without feeling exaggerated.
@@ -98,7 +100,12 @@ function DoneToggle({ task, onToggled }: { task: BacklogTask; onToggled: (update
         // Reopening reverts to 75%, matching the task detail screen's toggle.
         const result = await api.updateTask(task.id, { progress: isDone ? 75 : 100 });
         setBusy(false);
-        if (result.ok) onToggled(result.data);
+        if (result.ok) {
+            onToggled(result.data);
+        } else {
+            // The ring animates back on its own (status is unchanged); tell the user why.
+            Alert.alert("Couldn't update task", 'Please check your connection and try again.');
+        }
     }
 
     return (

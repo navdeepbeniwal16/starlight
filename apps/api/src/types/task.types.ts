@@ -24,6 +24,11 @@ export type BacklogBuckets = {
     doneToday: BacklogTask[];
 };
 
+export type TaskPage = {
+    items: BacklogTask[];
+    nextCursor: string | null;
+};
+
 export type TaskDetail = {
     id: string;
     title: string;

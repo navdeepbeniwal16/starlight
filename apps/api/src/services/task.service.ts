@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma";
-import type { BacklogTask, BacklogBuckets, ScheduledTask, TaskDetail, CreateTaskInput, UpdateTaskInput } from "../types/task.types";
+import type { BacklogTask, BacklogBuckets, ScheduledTask, TaskDetail, TaskPage, CreateTaskInput, UpdateTaskInput } from "../types/task.types";
 import { TaskStatus, Priority } from "@prisma/client";
 
 export class InvalidProgressError extends Error {}
@@ -100,12 +100,27 @@ export async function getBacklog(userId: string, date: string, utcOffsetMins?: n
     };
 }
 
-export async function getAllTasks(userId: string): Promise<BacklogTask[]> {
-    return prisma.task.findMany({
+export const TASKS_PAGE_SIZE = 30;
+
+export async function getAllTasks(
+    userId: string,
+    opts?: { cursor?: string; limit?: number },
+): Promise<TaskPage> {
+    const limit = Math.min(Math.max(opts?.limit ?? TASKS_PAGE_SIZE, 1), 100);
+
+    // Over-fetch by one to learn whether a further page exists without a second query.
+    const rows = await prisma.task.findMany({
         where: { userId },
-        orderBy: { updatedAt: 'desc' },
+        // id breaks updatedAt ties so the sort is total — a cursor can't skip or repeat rows.
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
         select: backlogTaskSelect,
+        take: limit + 1,
+        ...(opts?.cursor ? { skip: 1, cursor: { id: opts.cursor } } : {}),
     });
+
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    return { items, nextCursor: hasMore ? items[items.length - 1]!.id : null };
 }
 
 function deriveStatus(progress: number): TaskStatus {

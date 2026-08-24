@@ -160,7 +160,12 @@ export type BacklogBuckets = {
 
 export type GetBacklogResponse = ApiResult<BacklogBuckets>;
 
-export type GetAllTasksResponse = ApiResult<BacklogTask[]>;
+export type TaskPage = {
+    items: BacklogTask[];
+    nextCursor: string | null;
+};
+
+export type GetAllTasksResponse = ApiResult<TaskPage>;
 
 export type CreateTaskInput = {
     title: string;

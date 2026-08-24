@@ -1,24 +1,17 @@
 import { View, Text, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { BlockInput } from "../lib/api.types";
-import { parseDisplayTime } from "../lib/time";
+import { formatTimeRange } from "../lib/time";
 import { ENERGY_LABELS } from "../lib/templateBlocks";
 import { PressableScale } from "./PressableScale";
-import { colors, radius, spacing, shadow } from "../lib/theme";
+import { colors, radius, spacing } from "../lib/theme";
 
-/**
- * A single day-template block row. Store-agnostic: fully driven by the `block`
- * prop
- */
 export function BlockListItem({ block, onPress, invalid }: { block: BlockInput; onPress?: () => void; invalid?: boolean }) {
     const isContainer = block.type === 'CONTAINER';
-    const isAnchor = block.type === 'ANCHOR';
 
     const containerStyle = [
         styles.blockItem,
         isContainer && styles.blockItemContainer,
-        isAnchor && styles.blockItemAnchor,
-        !isContainer && !isAnchor && styles.blockItemNoTask,
         invalid && styles.blockItemInvalid,
     ];
 
@@ -35,9 +28,7 @@ export function BlockListItem({ block, onPress, invalid }: { block: BlockInput; 
                         </View>
                     )}
                 </View>
-                <Text style={styles.blockItemTime}>
-                    {parseDisplayTime(block.startTime).time} {parseDisplayTime(block.startTime).period} – {parseDisplayTime(block.endTime).time} {parseDisplayTime(block.endTime).period}
-                </Text>
+                <Text style={styles.blockItemTime}>{formatTimeRange(block.startTime, block.endTime)}</Text>
             </View>
             {onPress && <Ionicons name="create-outline" size={18} color={colors.text.muted} />}
         </View>
@@ -57,18 +48,17 @@ export function BlockListItem({ block, onPress, invalid }: { block: BlockInput; 
 const styles = StyleSheet.create({
     blockItem: {
         borderRadius: radius.lg,
-        backgroundColor: colors.surface.raised,
+        backgroundColor: colors.surface.block,
+        overflow: 'hidden',
     },
-    blockItemContainer: { borderWidth: 1, borderColor: colors.border.strong, borderStyle: 'dashed', ...shadow.card },
-    blockItemAnchor: { backgroundColor: colors.surface.sunken, borderWidth: 1, borderColor: colors.border.warm, borderStyle: 'solid' },
-    blockItemNoTask: { backgroundColor: colors.surface.sunken, borderWidth: 1, borderColor: colors.border.warm, borderStyle: 'dashed' },
+    blockItemContainer: { borderWidth: 1.5, borderColor: 'rgba(42,38,33,0.16)', borderStyle: 'dashed' },
     blockItemInvalid: { borderWidth: 1, borderStyle: 'solid', borderColor: colors.danger.border, backgroundColor: colors.danger.tint },
 
-    blockItemInner: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: 17 },
-    blockItemMain: { flex: 1, gap: spacing.xs },
-    blockItemHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+    blockItemInner: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: 16 },
+    blockItemMain: { flex: 1 },
+    blockItemHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.sm },
     blockItemName: { fontSize: 15, fontWeight: '500', color: colors.text.primary, letterSpacing: -0.23, flexShrink: 1 },
-    blockItemTime: { fontSize: 14, color: colors.text.secondary, letterSpacing: -0.15, fontVariant: ['tabular-nums'] },
-    energyBadge: { backgroundColor: colors.accent.tint, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 3 },
-    energyBadgeText: { fontSize: 12, fontWeight: '500', color: colors.accent.strong },
+    blockItemTime: { fontSize: 11, color: '#9a9389', letterSpacing: -0.15, marginTop: 3, fontVariant: ['tabular-nums'] },
+    energyBadge: { backgroundColor: 'rgba(232,223,209,0.3)', borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start' },
+    energyBadgeText: { fontSize: 12, color: 'rgba(122,115,106,0.6)' },
 });

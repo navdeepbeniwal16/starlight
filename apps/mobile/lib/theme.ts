@@ -22,6 +22,9 @@ export const colors = {
         raised: '#fffef9',
         sunken: 'rgba(232,228,221,0.30)',
         panel: 'rgba(42,38,33,0.025)',
+        // Beige fill shared by every timeline block on Today and the template, so
+        // the two screens read as one timeline.
+        block: 'rgba(232,228,221,0.45)',
     },
     border: {
         hairline: 'rgba(42,38,33,0.10)',
@@ -58,13 +61,12 @@ export const spacing = {
 } as const;
 
 export const shadow = {
-    // Strengthened from the prior 0.05/r5 so raised cards separate from the near-white page.
-    card: {
+    soft: {
         shadowColor: '#2a2621',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 3,
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.05,
+        shadowRadius: 14,
+        elevation: 2,
     },
     // A soft top-lift for the footer — a divider without a hard line.
     footer: {

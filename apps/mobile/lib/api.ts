@@ -191,7 +191,7 @@ export const api = {
     }
 
     try {
-      const response = await fetch(`${API_URL}/tasks`, {
+      const response = await fetch(`${API_URL}/tasks/backlog`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -210,7 +210,7 @@ export const api = {
     }
   },
 
-  getAllTasks: async (): Promise<GetAllTasksResponse> => {
+  getAllTasks: async (cursor?: string): Promise<GetAllTasksResponse> => {
     const token = await getToken();
 
     if (!token) {
@@ -218,7 +218,8 @@ export const api = {
     }
 
     try {
-      const response = await fetch(`${API_URL}/tasks/all`, {
+      const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+      const response = await fetch(`${API_URL}/tasks${query}`, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` },
       });

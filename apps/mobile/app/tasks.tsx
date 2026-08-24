@@ -3,10 +3,11 @@ import {
     View,
     Text,
     StyleSheet,
-    ScrollView,
+    FlatList,
     TouchableOpacity,
     Pressable,
     ActivityIndicator,
+    Alert,
 } from "react-native";
 import Animated, {
     Easing,
@@ -32,7 +33,8 @@ const CARD_LAYOUT = LinearTransition.duration(260).easing(EASE.factory());
 function formatDeadline(isoString: string): string {
     const d = new Date(isoString);
     const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return `Due ${months[d.getMonth()]} ${d.getDate()}`;
+    // Deadlines are stored at UTC midnight; read in UTC so the date doesn't shift a day back west of UTC.
+    return `Due ${months[d.getUTCMonth()]} ${d.getUTCDate()}`;
 }
 
 // Subtle press-down; 0.96 reads as tactile without feeling exaggerated.
@@ -77,7 +79,12 @@ function DoneToggle({ task, onToggled }: { task: BacklogTask; onToggled: (update
         // Reopening reverts to 75%, matching the task detail screen's toggle.
         const result = await api.updateTask(task.id, { progress: isDone ? 75 : 100 });
         setBusy(false);
-        if (result.ok) onToggled(result.data);
+        if (result.ok) {
+            onToggled(result.data);
+        } else {
+            // The ring animates back on its own (status is unchanged); tell the user why.
+            Alert.alert("Couldn't update task", 'Please check your connection and try again.');
+        }
     }
 
     return (
@@ -179,33 +186,53 @@ function TaskCard({ task, index, onPress, onToggled }: {
 export default function AllTasksScreen() {
     const router = useRouter();
     const [tasks, setTasks] = useState<BacklogTask[] | null>(null);
+    const [cursor, setCursor] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Only the most recently issued fetch may apply its result, so an out-of-order
-    // response can't clobber fresher state or a pending optimistic update.
+    // A refocus reload supersedes any in-flight page append, so a stale append can't
+    // land on top of the freshly reloaded list.
     const seq = useRef(createSequencer()).current;
 
-    // `showLoading` drives the full-screen loader/error (first load, refocus);
-    // silent refreshes pass false so a toggle reconciles without a flash.
-    const loadTasks = useCallback((showLoading: boolean) => {
+    const loadFirstPage = useCallback((showLoading: boolean) => {
         const token = seq.next();
         if (showLoading) { setLoading(true); setError(null); }
         api.getAllTasks().then(result => {
             if (showLoading) setLoading(false);
             if (!seq.isCurrent(token)) return;
             if (!result.ok) { if (showLoading) setError(result.error); return; }
-            setTasks(result.data);
+            setTasks(result.data.items);
+            setCursor(result.data.nextCursor);
         });
     }, [seq]);
 
+    const loadMore = useCallback(() => {
+        if (loadingMore || cursor === null) return;
+        const token = seq.next();
+        setLoadingMore(true);
+        api.getAllTasks(cursor).then(result => {
+            setLoadingMore(false);
+            if (!seq.isCurrent(token)) return;
+            if (!result.ok) return;              // leave the list as-is; a further scroll retries
+            setTasks(prev => (prev ? [...prev, ...result.data.items] : result.data.items));
+            setCursor(result.data.nextCursor);
+        });
+    }, [loadingMore, cursor, seq]);
+
     useFocusEffect(
-        useCallback(() => { loadTasks(true); }, [loadTasks])
+        useCallback(() => { loadFirstPage(true); }, [loadFirstPage])
     );
 
+    // The list is ordered newest-updated first, and the toggle just bumped this task's
+    // updatedAt, so it belongs at the front.
     function handleToggled(taskId: string, updated: TaskDetail) {
-        setTasks(prev => prev?.map(t => (t.id === taskId ? { ...t, ...updated } : t)) ?? prev);
-        loadTasks(false);   // reconcile ordering (updatedAt moved) from the server
+        setTasks(prev => {
+            if (!prev) return prev;
+            const merged = prev.map(t => (t.id === taskId ? { ...t, ...updated } : t));
+            const toggled = merged.find(t => t.id === taskId);
+            return toggled ? [toggled, ...merged.filter(t => t.id !== taskId)] : merged;
+        });
     }
 
     return (
@@ -243,20 +270,27 @@ export default function AllTasksScreen() {
             )}
 
             {!loading && !error && tasks !== null && tasks.length > 0 && (
-                <ScrollView
+                <FlatList
+                    data={tasks}
+                    keyExtractor={(task) => task.id}
+                    renderItem={({ item, index }) => (
+                        <TaskCard
+                            task={item}
+                            index={index}
+                            onPress={() => router.push(`/task/${item.id}?from=All%20tasks`)}
+                            onToggled={(updated) => handleToggled(item.id, updated)}
+                        />
+                    )}
                     contentContainerStyle={styles.list}
                     showsVerticalScrollIndicator={false}
-                >
-                    {tasks.map((task, i) => (
-                        <TaskCard
-                            key={task.id}
-                            task={task}
-                            index={i}
-                            onPress={() => router.push(`/task/${task.id}?from=All tasks`)}
-                            onToggled={(updated) => handleToggled(task.id, updated)}
-                        />
-                    ))}
-                </ScrollView>
+                    onEndReached={loadMore}
+                    onEndReachedThreshold={0.5}
+                    ListFooterComponent={loadingMore ? (
+                        <View style={styles.footerLoader}>
+                            <ActivityIndicator color="#d4a574" />
+                        </View>
+                    ) : null}
+                />
             )}
         </SafeAreaView>
     );
@@ -287,6 +321,7 @@ const styles = StyleSheet.create({
     },
 
     list: { padding: 16, gap: 8, paddingBottom: 32 },
+    footerLoader: { paddingVertical: 16, alignItems: 'center' },
 
     taskCard: {
         backgroundColor: '#fffef9',

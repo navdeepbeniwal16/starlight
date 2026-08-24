@@ -18,6 +18,8 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
 import { DayPlan, DayTemplate, DayTemplateBlock, PlannedBlock, PlannedTask, TaskStatus } from "../../lib/api.types";
 import { toMins, toHHmm, formatTime, formatTimeRange, formatDuration } from "../../lib/time";
+import { TimelineThread as ThreadSegment, DayBoundaryMarker } from "../../components/timeline";
+import { colors } from "../../lib/theme";
 
 function formatEstimatedMins(mins: number): string {
     if (mins < 60) return `${mins}m`;
@@ -33,36 +35,6 @@ type ScreenState =
     | { status: 'error'; message: string }
     | { status: 'empty'; template: DayTemplate | null }
     | { status: 'loaded'; plan: DayPlan };
-
-// ─── Shared timeline primitives ───────────────────────────────────────────────
-
-function ThreadSegment() {
-    return (
-        <View style={styles.threadSegment}>
-            <View style={styles.threadLine} />
-        </View>
-    );
-}
-
-function DayBoundaryMarker({ label, time }: { label: 'Wake' | 'Sleep'; time: string }) {
-    const isWake = label === 'Wake';
-    return (
-        <View style={styles.boundaryRow}>
-            <Ionicons
-                name={isWake ? 'sunny-outline' : 'moon-outline'}
-                size={16}
-                color={isWake ? '#d4a574' : '#9b8c7f'}
-                style={styles.boundaryIcon}
-            />
-            <Text style={[styles.boundaryLabel, !isWake && styles.boundaryLabelSleep]}>
-                {label.toLowerCase()}
-            </Text>
-            <Text style={[styles.boundaryTime, !isWake && styles.boundaryTimeSleep]}>
-                {formatTime(time)}
-            </Text>
-        </View>
-    );
-}
 
 function FreeSlotIndicator({ startTime, endTime, elapsed }: { startTime: string; endTime: string; elapsed?: boolean }) {
     return (
@@ -249,13 +221,12 @@ function BlockTimeMeta({ block, isActive, progress }: { block: PlannedBlock; isA
     );
 }
 
-function AnchorBlockCard({ block, elapsed, progress }: { block: PlannedBlock; elapsed: boolean; progress: number }) {
-    const isActive = progress > 0 && progress < 1;
+function AnchorBlockCard({ block, elapsed, active, progress }: { block: PlannedBlock; elapsed: boolean; active: boolean; progress: number }) {
     return (
-        <View style={[styles.anchorCard, elapsed && styles.elapsedOpacity, isActive && styles.blockCardActive]}>
-            {isActive && <BlockProgressFill progress={progress} gradientId={`blockProgressFill-${block.id}`} />}
-            <Text style={[styles.blockName, isActive && styles.blockNameActive]}>{block.name}</Text>
-            <BlockTimeMeta block={block} isActive={isActive} progress={progress} />
+        <View style={[styles.anchorCard, elapsed && styles.elapsedOpacity, active && styles.blockCardActive]}>
+            {active && <BlockProgressFill progress={progress} gradientId={`blockProgressFill-${block.id}`} />}
+            <Text style={[styles.blockName, active && styles.blockNameActive]}>{block.name}</Text>
+            <BlockTimeMeta block={block} isActive={active} progress={progress} />
         </View>
     );
 }
@@ -306,20 +277,18 @@ function TaskDoneToggle({ task, onDone }: { task: PlannedTask; onDone: () => voi
     );
 }
 
-function ContainerBlockCard({ block, elapsed, progress, onTaskDone, onTaskPress }: { block: PlannedBlock; elapsed: boolean; progress: number; onTaskDone: (taskId: string) => void; onTaskPress: (taskId: string) => void }) {
+function ContainerBlockCard({ block, elapsed, active, progress, onTaskDone, onTaskPress }: { block: PlannedBlock; elapsed: boolean; active: boolean; progress: number; onTaskDone: (taskId: string) => void; onTaskPress: (taskId: string) => void }) {
     const energyLabel = block.energyLevel
         ? block.energyLevel.charAt(0) + block.energyLevel.slice(1).toLowerCase() + ' energy'
         : null;
 
-    const isActive = progress > 0 && progress < 1;
-
     return (
-        <View style={[styles.containerCard, elapsed && styles.elapsedOpacity, isActive && styles.blockCardActive]}>
-            {isActive && <BlockProgressFill progress={progress} gradientId={`blockProgressFill-${block.id}`} />}
+        <View style={[styles.containerCard, elapsed && styles.elapsedOpacity, active && styles.blockCardActive]}>
+            {active && <BlockProgressFill progress={progress} gradientId={`blockProgressFill-${block.id}`} />}
             <View style={styles.containerCardHeader}>
                 <View style={styles.containerCardHeaderLeft}>
-                    <Text style={[styles.blockName, isActive && styles.blockNameActive]}>{block.name}</Text>
-                    <BlockTimeMeta block={block} isActive={isActive} progress={progress} />
+                    <Text style={[styles.blockName, active && styles.blockNameActive]}>{block.name}</Text>
+                    <BlockTimeMeta block={block} isActive={active} progress={progress} />
                 </View>
                 {energyLabel && (
                     <View style={styles.energyBadge}>
@@ -343,7 +312,7 @@ function ContainerBlockCard({ block, elapsed, progress, onTaskDone, onTaskPress 
 }
 
 type TimelineItem =
-    | { kind: 'block'; block: PlannedBlock; elapsed: boolean; progress: number }
+    | { kind: 'block'; block: PlannedBlock; elapsed: boolean; active: boolean; progress: number }
     | { kind: 'gap'; start: string; end: string; elapsed: boolean }
     | { kind: 'boundary'; label: 'Wake' | 'Sleep'; time: string }
     | { kind: 'current-time'; time: string };
@@ -375,6 +344,7 @@ function buildTimelineItems(plan: DayPlan, currentTime: string): TimelineItem[] 
             kind: 'block',
             block,
             elapsed: nowMins >= endMins,
+            active,
             progress: active && endMins > startMins ? (nowMins - startMins) / (endMins - startMins) : 0,
         });
         prev = block.endTime;
@@ -450,9 +420,9 @@ function Timeline({
         } else if (item.kind === 'gap') {
             content = <FreeSlotIndicator startTime={item.start} endTime={item.end} elapsed={item.elapsed} />;
         } else if (item.block.type === 'CONTAINER') {
-            content = <ContainerBlockCard block={item.block} elapsed={item.elapsed} progress={item.progress} onTaskDone={onTaskDone} onTaskPress={onTaskPress} />;
+            content = <ContainerBlockCard block={item.block} elapsed={item.elapsed} active={item.active} progress={item.progress} onTaskDone={onTaskDone} onTaskPress={onTaskPress} />;
         } else {
-            content = <AnchorBlockCard block={item.block} elapsed={item.elapsed} progress={item.progress} />;
+            content = <AnchorBlockCard block={item.block} elapsed={item.elapsed} active={item.active} progress={item.progress} />;
         }
 
         elements.push(
@@ -482,6 +452,9 @@ export default function TodayScreen() {
     const load = useCallback(async () => {
         hasScrolledToNow.current = false;
         setEntrance(true);
+        // Re-seed the clock on focus so a just-created plan is compared against
+        // the real time, not whatever it was when this tab last mounted.
+        setCurrentTime(toHHmm(new Date()));
         setState({ status: 'loading' });
 
         const planResult = await api.getDayPlan();
@@ -512,12 +485,20 @@ export default function TodayScreen() {
         }, [load])
     );
 
-    // Keep current time fresh; re-renders the now indicator every minute.
+    // Align the first tick to the wall-clock minute boundary so a block activates
+    // when the clock actually rolls over, not up to ~59s later on an arbitrary offset.
     useEffect(() => {
-        const interval = setInterval(() => {
+        let interval: ReturnType<typeof setInterval>;
+        const now = new Date();
+        const msToNextMinute = 60_000 - (now.getSeconds() * 1000 + now.getMilliseconds());
+        const timeout = setTimeout(() => {
             setCurrentTime(toHHmm(new Date()));
-        }, 60_000);
-        return () => clearInterval(interval);
+            interval = setInterval(() => setCurrentTime(toHHmm(new Date())), 60_000);
+        }, msToNextMinute);
+        return () => {
+            clearTimeout(timeout);
+            clearInterval(interval);
+        };
     }, []);
 
     useEffect(() => {
@@ -707,50 +688,6 @@ const styles = StyleSheet.create({
         color: '#2a2621',
     },
 
-    // Thread primitives
-    threadSegment: {
-        height: 12,
-        paddingLeft: 10,
-        justifyContent: 'center',
-    },
-    threadLine: {
-        width: 1,
-        flex: 1,
-        backgroundColor: 'rgba(42,38,33,0.12)',
-    },
-
-    // Day boundary markers
-    boundaryRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 7,
-        paddingVertical: 2,
-    },
-    boundaryIcon: {
-        width: 22,
-        textAlign: 'center',
-    },
-    boundaryLabel: {
-        fontSize: 10,
-        fontWeight: '400',
-        color: '#d4a574',
-        letterSpacing: 0.5,
-        textTransform: 'uppercase',
-    },
-    boundaryLabelSleep: {
-        color: '#9b8c7f',
-    },
-    boundaryTime: {
-        fontSize: 13,
-        fontWeight: '500',
-        color: '#2a2621',
-        letterSpacing: -0.15,
-        fontVariant: ['tabular-nums'],
-    },
-    boundaryTimeSleep: {
-        color: 'rgba(42,38,33,0.6)',
-    },
-
     // Free slot indicator
     freeSlotRow: {
         flexDirection: 'row',
@@ -787,13 +724,13 @@ const styles = StyleSheet.create({
 
     // Populated timeline
     anchorCard: {
-        backgroundColor: 'rgba(232,228,221,0.45)',
+        backgroundColor: colors.surface.block,
         borderRadius: 16,
         padding: 16,
         overflow: 'hidden',
     },
     containerCard: {
-        backgroundColor: 'rgba(232,228,221,0.45)',
+        backgroundColor: colors.surface.block,
         borderWidth: 1.5,
         borderColor: 'rgba(42,38,33,0.16)',
         borderStyle: 'dashed',

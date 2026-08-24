@@ -28,6 +28,9 @@ const PEAK_GRADIENT = {
 } as const;
 
 export function Logo({ variant = 'full', size = 40, tone = 'dark' }: LogoProps) {
+    // Unconditional (before the variant early-returns) to satisfy the Rules of Hooks;
+    // only the full mark below consumes it, keeping each peak gradient def unique per instance.
+    const instanceId = useId();
     const starFill = tone === 'dark' ? colors.surface.raised : colors.text.primary;
 
     if (variant === 'glyph') {
@@ -50,8 +53,7 @@ export function Logo({ variant = 'full', size = 40, tone = 'dark' }: LogoProps) 
         );
     }
 
-    // Unique per instance so multiple full logos on one screen don't share a gradient def.
-    const gradientId = `starlight-peak-${useId()}`;
+    const gradientId = `starlight-peak-${instanceId}`;
     const [from, to] = PEAK_GRADIENT[tone];
     return (
         <Svg width={size} height={size} viewBox="0 0 100 100">

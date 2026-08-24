@@ -37,7 +37,7 @@ export default function SettingsScreen() {
     }
 
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>Settings</Text>
             </View>
@@ -89,10 +89,16 @@ function SettingsRow({ icon, label, onPress }: { icon: keyof typeof Ionicons.gly
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: colors.surface.page },
 
-    header: { paddingHorizontal: spacing.xl, paddingTop: spacing.lg, paddingBottom: spacing.lg },
+    header: {
+        paddingHorizontal: spacing.lg,
+        paddingTop: spacing.lg,
+        paddingBottom: 17,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(42,38,33,0.04)',
+    },
     headerTitle: { fontSize: 18, fontWeight: '600', color: colors.text.primary, letterSpacing: -0.3 },
 
-    body: { flex: 1, paddingHorizontal: spacing.lg, gap: spacing.md },
+    body: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, gap: spacing.md },
 
     profile: {
         flexDirection: 'row',
@@ -100,7 +106,7 @@ const styles = StyleSheet.create({
         gap: 14,
         padding: spacing.lg,
         borderRadius: radius.lg,
-        backgroundColor: colors.surface.sunken,
+        backgroundColor: colors.surface.block,
     },
     avatar: {
         width: 52,
@@ -112,13 +118,15 @@ const styles = StyleSheet.create({
     },
     avatarText: { fontSize: 18, fontWeight: '600', color: colors.surface.page },
     profileInfo: { flex: 1 },
-    profileName: { fontSize: 16, fontWeight: '500', color: colors.text.primary, marginBottom: 3 },
-    profileEmail: { fontSize: 14, color: colors.text.secondary },
+    profileName: { fontSize: 16, fontWeight: '500', color: colors.text.primary, letterSpacing: -0.23, marginBottom: 3 },
+    profileEmail: { fontSize: 14, color: colors.text.secondary, letterSpacing: -0.15 },
 
     card: {
         backgroundColor: colors.surface.raised,
         borderRadius: radius.lg,
-        ...shadow.card,
+        borderWidth: 1,
+        borderColor: 'rgba(42,38,33,0.04)',
+        ...shadow.soft,
     },
 
     row: {
@@ -127,10 +135,11 @@ const styles = StyleSheet.create({
         gap: spacing.md,
         paddingHorizontal: spacing.lg,
         paddingVertical: 14,
+        minHeight: 52,
     },
-    rowLabel: { fontSize: 14, fontWeight: '500', color: colors.text.primary },
+    rowLabel: { fontSize: 15, fontWeight: '500', color: colors.text.primary, letterSpacing: -0.15 },
     rowChevron: { marginLeft: 'auto' },
-    logoutLabel: { fontSize: 14, fontWeight: '500', color: colors.danger.default },
+    logoutLabel: { fontSize: 15, fontWeight: '500', color: colors.danger.default, letterSpacing: -0.15 },
 
-    version: { marginTop: 'auto', paddingVertical: spacing.xl, textAlign: 'center', fontSize: 12, color: colors.text.muted },
+    version: { marginTop: 'auto', paddingVertical: spacing.xl, textAlign: 'center', fontSize: 12, color: colors.text.muted, letterSpacing: -0.1 },
 });

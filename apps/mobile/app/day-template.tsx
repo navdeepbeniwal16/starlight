@@ -23,12 +23,13 @@ import { api } from "../lib/api";
 import { colors, radius, spacing, shadow, typography } from "../lib/theme";
 import type { BlockInput } from "../lib/api.types";
 import { formatTime } from "../lib/time";
-import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, buildTimeline, hasContainer } from "../lib/templateDraft";
+import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, buildTimeline, hasContainer, type TimelineRow } from "../lib/templateDraft";
 import { useTemplateStore } from "../stores/template.store";
 import { BlockListItem } from "../components/BlockListItem";
 import { BlockEditorModal } from "../components/BlockEditorModal";
 import { GapAffordance } from "../components/GapAffordance";
-import { WakeSleepBar } from "../components/WakeSleepBar";
+import { BoundaryTimeControl } from "../components/BoundaryTimeControl";
+import { TimelineThread } from "../components/timeline";
 import { PressableScale } from "../components/PressableScale";
 
 const ROW_LAYOUT = LinearTransition.springify().dampingRatio(1);
@@ -172,7 +173,7 @@ export default function DayTemplateScreen() {
     }));
 
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <View style={styles.backRow}>
                 <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.7} hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}>
                     <Ionicons name="chevron-back" size={20} color={colors.text.secondary} />
@@ -210,29 +211,8 @@ export default function DayTemplateScreen() {
                         scrollEventThrottle={16}
                     >
                         <Animated.View
-                            style={styles.wakeSleepSection}
-                            entering={entering ? FadeInDown.duration(300) : undefined}
-                        >
-                            <WakeSleepBar
-                                wakeTime={draft.wakeTime}
-                                sleepTime={draft.sleepTime}
-                                onChange={handleWakeSleep}
-                            />
-                            {!wakeBeforeSleep && (
-                                <Text style={styles.boundsError}>Your wake time must be before your sleep time.</Text>
-                            )}
-                            {wakeBeforeSleep && outOfBounds.length > 0 && (
-                                <Text style={styles.boundsError}>
-                                    {outOfBounds.length === 1 ? 'This block is' : 'These blocks are'} outside your{' '}
-                                    {formatTime(draft.wakeTime)}–{formatTime(draft.sleepTime)} window:{' '}
-                                    {outOfBounds.map((o) => o.block.name).join(', ')}. Edit to fit the new window before saving.
-                                </Text>
-                            )}
-                        </Animated.View>
-
-                        <Animated.View
                             style={styles.legend}
-                            entering={entering ? FadeInDown.duration(300).delay(40) : undefined}
+                            entering={entering ? FadeInDown.duration(300) : undefined}
                         >
                             <View style={styles.legendItem}>
                                 <View style={[styles.legendSwatch, styles.legendSwatchContainer]} />
@@ -244,41 +224,39 @@ export default function DayTemplateScreen() {
                             </View>
                         </Animated.View>
 
-                        <View style={styles.blockList}>
-                            {noContainer && (
-                                <Text style={styles.boundsError}>
-                                    Keep at least one Container block so Starlight has time to schedule tasks. Add one before saving.
-                                </Text>
-                            )}
+                        {(!wakeBeforeSleep || outOfBounds.length > 0 || noContainer) && (
+                            <View style={styles.validation}>
+                                {!wakeBeforeSleep && (
+                                    <Text style={styles.boundsError}>Your wake time must be before your sleep time.</Text>
+                                )}
+                                {wakeBeforeSleep && outOfBounds.length > 0 && (
+                                    <Text style={styles.boundsError}>
+                                        {outOfBounds.length === 1 ? 'This block is' : 'These blocks are'} outside your{' '}
+                                        {formatTime(draft.wakeTime)}–{formatTime(draft.sleepTime)} window:{' '}
+                                        {outOfBounds.map((o) => o.block.name).join(', ')}. Edit to fit the new window before saving.
+                                    </Text>
+                                )}
+                                {noContainer && (
+                                    <Text style={styles.boundsError}>
+                                        Keep at least one Container block so Starlight has time to schedule tasks. Add one before saving.
+                                    </Text>
+                                )}
+                            </View>
+                        )}
 
-                            {rows.map((row, i) =>
-                                row.kind === 'block' ? (
-                                    <BlockRow
-                                        key={blockKeys[row.index]}
-                                        signal={flashFor.key === `block-${row.startTime}` ? flashFor.nonce : 0}
-                                        entering={entering ? FadeInDown.duration(300).delay((i + 1) * 40) : undefined}
-                                    >
-                                        <BlockListItem
-                                            block={row.block}
-                                            onPress={() => setEditor({ mode: 'edit', index: row.index })}
-                                            invalid={outOfBoundsIndexes.has(row.index)}
-                                        />
-                                    </BlockRow>
-                                ) : (
-                                    <Animated.View
-                                        key={`gap-${row.startTime}`}
-                                        layout={ROW_LAYOUT}
-                                        entering={entering ? FadeInDown.duration(300).delay((i + 1) * 40) : FadeIn.duration(160)}
-                                        exiting={FadeOut.duration(160)}
-                                    >
-                                        <GapAffordance
-                                            gap={row.gap}
-                                            onPress={() => setEditor({ mode: 'add', startTime: row.gap.startTime, endTime: row.gap.endTime })}
-                                        />
-                                    </Animated.View>
-                                )
-                            )}
-                        </View>
+                        <TemplateTimeline
+                            rows={rows}
+                            wakeTime={draft.wakeTime}
+                            sleepTime={draft.sleepTime}
+                            blockKeys={blockKeys}
+                            entering={entering}
+                            flashFor={flashFor}
+                            outOfBoundsIndexes={outOfBoundsIndexes}
+                            onWakeChange={(w) => handleWakeSleep(w, draft.sleepTime)}
+                            onSleepChange={(s) => handleWakeSleep(draft.wakeTime, s)}
+                            onEditBlock={(index) => setEditor({ mode: 'edit', index })}
+                            onAddInGap={(startTime, endTime) => setEditor({ mode: 'add', startTime, endTime })}
+                        />
                     </Animated.ScrollView>
 
                     {dirty && (
@@ -337,6 +315,80 @@ export default function DayTemplateScreen() {
     );
 }
 
+function TemplateTimeline({
+    rows,
+    wakeTime,
+    sleepTime,
+    blockKeys,
+    entering,
+    flashFor,
+    outOfBoundsIndexes,
+    onWakeChange,
+    onSleepChange,
+    onEditBlock,
+    onAddInGap,
+}: {
+    rows: TimelineRow[];
+    wakeTime: string;
+    sleepTime: string;
+    blockKeys: string[];
+    entering: boolean;
+    flashFor: { key: string; nonce: number };
+    outOfBoundsIndexes: Set<number>;
+    onWakeChange: (time: string) => void;
+    onSleepChange: (time: string) => void;
+    onEditBlock: (index: number) => void;
+    onAddInGap: (startTime: string, endTime: string) => void;
+}) {
+    const children: ReactNode[] = [
+        <Animated.View key="wake" entering={entering ? FadeInDown.duration(300) : undefined}>
+            <BoundaryTimeControl label="Wake" time={wakeTime} onChange={onWakeChange} />
+        </Animated.View>,
+    ];
+
+    rows.forEach((row, i) => {
+        const delay = (i + 1) * 40;
+        const key = row.kind === 'block' ? blockKeys[row.index] : `gap-${row.startTime}`;
+        children.push(<TimelineThread key={`thread-${key}`} />);
+
+        if (row.kind === 'block') {
+            children.push(
+                <BlockRow
+                    key={key}
+                    signal={flashFor.key === `block-${row.startTime}` ? flashFor.nonce : 0}
+                    entering={entering ? FadeInDown.duration(300).delay(delay) : undefined}
+                >
+                    <BlockListItem
+                        block={row.block}
+                        onPress={() => onEditBlock(row.index)}
+                        invalid={outOfBoundsIndexes.has(row.index)}
+                    />
+                </BlockRow>
+            );
+        } else {
+            children.push(
+                <Animated.View
+                    key={key}
+                    layout={ROW_LAYOUT}
+                    entering={entering ? FadeInDown.duration(300).delay(delay) : FadeIn.duration(160)}
+                    exiting={FadeOut.duration(160)}
+                >
+                    <GapAffordance gap={row.gap} onPress={() => onAddInGap(row.gap.startTime, row.gap.endTime)} />
+                </Animated.View>
+            );
+        }
+    });
+
+    children.push(<TimelineThread key="thread-sleep" />);
+    children.push(
+        <Animated.View key="sleep" entering={entering ? FadeInDown.duration(300).delay((rows.length + 1) * 40) : undefined}>
+            <BoundaryTimeControl label="Sleep" time={sleepTime} onChange={onSleepChange} />
+        </Animated.View>
+    );
+
+    return <View>{children}</View>;
+}
+
 // Wraps a block row with the timeline motion: neighbors reflow via `layout` when a
 // block is added or deleted, a deletion fades out, and an accent overlay flashes
 // when `signal` becomes a new positive value, confirming an add or edit landed.
@@ -387,21 +439,14 @@ const styles = StyleSheet.create({
     scroll: { flex: 1 },
     content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
 
-    wakeSleepSection: { gap: 10, paddingBottom: spacing.xs },
-
-    legend: { flexDirection: 'row', gap: spacing.lg, paddingHorizontal: spacing.xs, paddingTop: spacing.xs },
+    legend: { flexDirection: 'row', gap: spacing.lg, paddingHorizontal: spacing.xs },
     legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-    legendSwatch: { width: 12, height: 12, borderRadius: 3, borderWidth: 1, borderColor: colors.border.strong },
-    legendSwatchContainer: { backgroundColor: colors.surface.raised, borderStyle: 'dashed' },
-    legendSwatchAnchor: { backgroundColor: colors.surface.sunken, borderColor: colors.border.warm, borderStyle: 'solid' },
+    legendSwatch: { width: 12, height: 12, borderRadius: 3, backgroundColor: colors.surface.block },
+    legendSwatchContainer: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.16)', borderStyle: 'dashed' },
+    legendSwatchAnchor: { borderWidth: 1, borderColor: colors.border.hairline },
     legendText: { fontSize: 12, color: colors.text.secondary, letterSpacing: -0.1 },
 
-    blockList: {
-        gap: spacing.md,
-        padding: spacing.sm,
-        borderRadius: radius.xxl,
-        backgroundColor: colors.surface.panel,
-    },
+    validation: { gap: spacing.sm },
     boundsError: { fontSize: 13, color: colors.danger.default, lineHeight: 19, letterSpacing: -0.1 },
 
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: spacing.lg },

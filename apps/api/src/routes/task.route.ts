@@ -6,7 +6,20 @@ import { todayDateString, parseTimezoneOffset } from "../lib/clientDate";
 
 const router = Router();
 
+
 router.get("/", authenticate, async (req: Request, res: Response): Promise<void> => {
+    res.set("Cache-Control", "no-store, private");
+
+    const cursor = typeof req.query.cursor === "string" ? req.query.cursor : undefined;
+    const limitParam = Number(req.query.limit);
+    const limit = Number.isFinite(limitParam) ? limitParam : undefined;
+
+    const page = await getAllTasks(req.user!.sub, { cursor, limit });
+    res.status(200).json({ success: true, data: page });
+});
+
+// Must precede GET "/:id" — Express matches in order, so "/:id" would otherwise capture "backlog".
+router.get("/backlog", authenticate, async (req: Request, res: Response): Promise<void> => {
     res.set("Cache-Control", "no-store, private");
 
     const utcOffsetMins = parseTimezoneOffset(req);
@@ -14,14 +27,6 @@ router.get("/", authenticate, async (req: Request, res: Response): Promise<void>
 
     const buckets = await getBacklog(req.user!.sub, date, utcOffsetMins);
     res.status(200).json({ success: true, data: buckets });
-});
-
-// Must precede GET "/:id" — Express matches in order, so "/:id" would otherwise capture "all".
-router.get("/all", authenticate, async (req: Request, res: Response): Promise<void> => {
-    res.set("Cache-Control", "no-store, private");
-
-    const tasks = await getAllTasks(req.user!.sub);
-    res.status(200).json({ success: true, data: tasks });
 });
 
 router.post("/", authenticate, async (req: Request, res: Response): Promise<void> => {
