@@ -12,7 +12,7 @@ import { BlockEditorModal } from "../../components/BlockEditorModal";
 const DEFAULT_BLOCKS: BlockInput[] = [
     { type: 'CONTAINER', name: 'Deep Work', startTime: '09:00', endTime: '12:00', energyLevel: 'HIGH' },
     { type: 'ANCHOR', name: 'Lunch', startTime: '12:00', endTime: '13:00' },
-    { type: 'NO_TASK', name: 'Evening Wind Down', startTime: '20:00', endTime: '22:00' },
+    { type: 'ANCHOR', name: 'Evening Wind Down', startTime: '20:00', endTime: '22:00' },
 ];
 
 export default function BlocksScreen() {

@@ -154,7 +154,7 @@ async function getSchedulableTasks(userId: string, planDate: string): Promise<Ra
 // "HH:mm" strings are zero-padded, so a lexical compare is chronological.
 type EligibleBlock = {
     id: string;
-    type: 'CONTAINER' | 'ANCHOR' | 'NO_TASK';
+    type: 'CONTAINER' | 'ANCHOR';
     name: string;
     startTime: string;
     endTime: string;

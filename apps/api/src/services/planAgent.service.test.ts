@@ -58,7 +58,6 @@ describe("buildAgentInput", () => {
             [
                 block({ id: "c1", type: "CONTAINER" }),
                 block({ id: "a1", type: "ANCHOR" }),
-                block({ id: "n1", type: "NO_TASK" }),
             ],
             [],
             NOW,

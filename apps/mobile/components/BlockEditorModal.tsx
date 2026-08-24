@@ -227,7 +227,7 @@ export function BlockEditorModal({
                                     <View style={styles.typeLegend}>
                                         {BLOCK_TYPES.map((t) => (
                                             <View key={t} style={styles.legendItem}>
-                                                <View style={[styles.legendIcon, t === 'CONTAINER' && styles.legendIconContainer, t === 'ANCHOR' && styles.legendIconAnchor, t === 'NO_TASK' && styles.legendIconNoTask]} />
+                                                <View style={[styles.legendIcon, t === 'CONTAINER' && styles.legendIconContainer, t === 'ANCHOR' && styles.legendIconAnchor]} />
                                                 <View>
                                                     <Text style={styles.legendTitle}>{BLOCK_TYPE_LABELS[t]}</Text>
                                                     <Text style={styles.legendDesc}>{BLOCK_TYPE_DESCRIPTIONS[t]}</Text>
@@ -469,7 +469,6 @@ const styles = StyleSheet.create({
     legendIcon: { width: 12, height: 12, borderRadius: 3, marginTop: 2 },
     legendIconContainer: { borderWidth: 1, borderColor: colors.border.strong, borderStyle: 'dashed' },
     legendIconAnchor: { backgroundColor: 'rgba(232,228,221,0.85)' },
-    legendIconNoTask: { backgroundColor: colors.surface.sunken, borderWidth: 1, borderColor: colors.border.strong, borderStyle: 'dashed' },
     legendTitle: { fontSize: 13, fontWeight: '500', color: colors.text.primary },
     legendDesc: { fontSize: 11, color: 'rgba(122,115,106,0.8)', marginTop: 1 },
 

@@ -27,7 +27,7 @@ export type MeResponse = ApiResult<{
     lastName: string
 }>;
 
-export type BlockType = 'CONTAINER' | 'ANCHOR' | 'NO_TASK';
+export type BlockType = 'CONTAINER' | 'ANCHOR';
 export type EnergyLevel = 'HIGH' | 'MEDIUM' | 'LOW';
 
 export type BlockInput = {
