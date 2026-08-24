@@ -222,19 +222,6 @@ export function BlockEditorModal({
                                         ))}
                                     </View>
                                     <Text style={styles.typeDescription}>{BLOCK_TYPE_DESCRIPTIONS[type]}</Text>
-
-                                    {/* Type legend */}
-                                    <View style={styles.typeLegend}>
-                                        {BLOCK_TYPES.map((t) => (
-                                            <View key={t} style={styles.legendItem}>
-                                                <View style={[styles.legendIcon, t === 'CONTAINER' && styles.legendIconContainer, t === 'ANCHOR' && styles.legendIconAnchor]} />
-                                                <View>
-                                                    <Text style={styles.legendTitle}>{BLOCK_TYPE_LABELS[t]}</Text>
-                                                    <Text style={styles.legendDesc}>{BLOCK_TYPE_DESCRIPTIONS[t]}</Text>
-                                                </View>
-                                            </View>
-                                        ))}
-                                    </View>
                                 </View>
 
                                 <View style={styles.modalDividerLight} />
@@ -283,10 +270,10 @@ export function BlockEditorModal({
                                         </View>
                                     </View>
 
-                                    {/* Available times */}
+                                    {/* Free slots that quick-fill the time fields above */}
                                     {availableRanges.length > 0 && (
                                         <View style={styles.availableSection}>
-                                            <Text style={styles.modalLabel}>Available times</Text>
+                                            <Text style={styles.availableHint}>Tap a free slot to fill</Text>
                                             <View style={styles.chipStrip}>
                                                 <Animated.View
                                                     style={[styles.chipGutter, leftEdgeStyle]}
@@ -326,7 +313,7 @@ export function BlockEditorModal({
                                                                 }}
                                                                 activeOpacity={0.8}
                                                             >
-                                                                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                                                                <Text style={styles.chipText}>
                                                                     {formatRangeLabel(range.startTime, range.endTime)}
                                                                 </Text>
                                                             </TouchableOpacity>
@@ -464,14 +451,6 @@ const styles = StyleSheet.create({
 
     typeDescription: { fontSize: 13, color: 'rgba(122,115,106,0.75)' },
 
-    typeLegend: { gap: 16, marginTop: 4 },
-    legendItem: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
-    legendIcon: { width: 12, height: 12, borderRadius: 3, marginTop: 2 },
-    legendIconContainer: { borderWidth: 1, borderColor: colors.border.strong, borderStyle: 'dashed' },
-    legendIconAnchor: { backgroundColor: 'rgba(232,228,221,0.85)' },
-    legendTitle: { fontSize: 13, fontWeight: '500', color: colors.text.primary },
-    legendDesc: { fontSize: 11, color: 'rgba(122,115,106,0.8)', marginTop: 1 },
-
     textInput: { height: 52, backgroundColor: colors.surface.raised, borderWidth: 1, borderColor: colors.border.hairline, borderRadius: radius.md, paddingHorizontal: 16, fontSize: 15, color: colors.text.primary },
 
     timeRow: { flexDirection: 'row', gap: spacing.md },
@@ -482,16 +461,16 @@ const styles = StyleSheet.create({
     timeInputPeriod: { fontSize: 11, fontWeight: '500', color: colors.accent.default },
     timeInputPlaceholder: { fontSize: 15, color: 'rgba(122,115,106,0.35)' },
 
-    availableSection: { gap: spacing.md, marginTop: 16 },
+    availableSection: { gap: spacing.sm, marginTop: spacing.md },
+    availableHint: { fontSize: 12, color: colors.text.muted },
     chipStrip: { flexDirection: 'row', alignItems: 'center' },
     chipScroll: { flex: 1 },
     chipRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center', paddingHorizontal: 2 },
     chipGutter: { width: 30, alignSelf: 'stretch' },
     chipChevron: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-    chip: { height: 36, borderRadius: radius.sm, backgroundColor: colors.surface.sunken, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 14 },
-    chipActive: { backgroundColor: colors.accent.tint, borderWidth: 1.5, borderColor: colors.accent.default },
-    chipText: { fontSize: 13, fontWeight: '500', color: colors.text.secondary, fontVariant: ['tabular-nums'] },
-    chipTextActive: { color: colors.accent.default },
+    chip: { height: 30, borderRadius: radius.sm, backgroundColor: colors.success.tint, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 11 },
+    chipActive: { borderWidth: 1.5, borderColor: colors.success.default },
+    chipText: { fontSize: 12, fontWeight: '500', color: colors.success.strong, fontVariant: ['tabular-nums'] },
 
     energySubtitle: { fontSize: 12, color: 'rgba(122,115,106,0.6)', marginTop: -4 },
 

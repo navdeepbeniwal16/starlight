@@ -11,8 +11,8 @@ export const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
 };
 
 export const BLOCK_TYPE_DESCRIPTIONS: Record<BlockType, string> = {
-    CONTAINER: 'Time for tasks you want Starlight to schedule',
-    ANCHOR: 'Fixed activities like meals or gym',
+    CONTAINER: 'Time slots for Starlight to schedule your tasks into.',
+    ANCHOR: 'A fixed daily event e.g lunch, dinner or the gym.',
 };
 
 export const ENERGY_LABELS: Record<EnergyLevel, string> = {
