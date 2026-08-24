@@ -440,7 +440,8 @@ export default function BacklogScreen() {
             {showFab && (
                 <View style={styles.fabWrap}>
                     <ScaleOnPress onPress={() => setShowCreateModal(true)} style={styles.fab}>
-                        <Ionicons name="add" size={24} color="#2a2621" />
+                        <Ionicons name="add" size={18} color="#2a2621" />
+                        <Text style={styles.fabText}>Task</Text>
                     </ScaleOnPress>
                 </View>
             )}
@@ -587,16 +588,19 @@ const styles = StyleSheet.create({
         right: 16,
     },
     fab: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 3,
+        height: 40,
+        paddingHorizontal: 14,
+        borderRadius: 20,
         backgroundColor: '#ffffff',
         justifyContent: 'center',
-        alignItems: 'center',
         shadowColor: '#2a2621',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.12,
         shadowRadius: 10,
         elevation: 4,
     },
+    fabText: { fontSize: 14, fontWeight: '500', color: '#2a2621', letterSpacing: -0.2 },
 });

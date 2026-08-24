@@ -591,7 +591,8 @@ export default function TodayScreen() {
             {(state.status === 'empty' || state.status === 'loaded') && (
                 <View style={styles.fabWrap} pointerEvents="box-none">
                     <PressableScale style={styles.fab} onPress={handleAddTask}>
-                        <Ionicons name="add" size={24} color="#2a2621" />
+                        <Ionicons name="add" size={18} color="#2a2621" />
+                        <Text style={styles.fabText}>Task</Text>
                     </PressableScale>
                 </View>
             )}
@@ -941,16 +942,19 @@ const styles = StyleSheet.create({
         right: 16,
     },
     fab: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 3,
+        height: 40,
+        paddingHorizontal: 14,
+        borderRadius: 20,
         backgroundColor: '#ffffff',
         justifyContent: 'center',
-        alignItems: 'center',
         shadowColor: '#2a2621',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.12,
         shadowRadius: 8,
         elevation: 4,
     },
+    fabText: { fontSize: 14, fontWeight: '500', color: '#2a2621', letterSpacing: -0.2 },
 });
