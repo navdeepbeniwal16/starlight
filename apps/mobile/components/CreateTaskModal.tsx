@@ -6,6 +6,7 @@ import {
     TextInput,
     TouchableOpacity,
     StyleSheet,
+    Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardProvider, KeyboardToolbar, KeyboardAwareScrollView, type KeyboardAwareScrollViewRef } from "react-native-keyboard-controller";
@@ -30,19 +31,19 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
 
     // Estimate is required for scheduling, so surface it expanded from the start.
     const [activeField, setActiveField] = useState<FieldKey | null>('estimate');
-    const [title, setTitle]             = useState('');
-    const [notes, setNotes]             = useState('');
+    const [title, setTitle] = useState('');
+    const [notes, setNotes] = useState('');
     const [estimatedMins, setEstimatedMins] = useState<number | null>(null);
-    const [effort, setEffort]           = useState<EnergyLevel | null>(null);
+    const [effort, setEffort] = useState<EnergyLevel | null>(null);
     const [deadlineDay, setDeadlineDay] = useState<Date | null>(null);
     const [deadlineTime, setDeadlineTime] = useState<Date>(defaultTime);
-    const [tempDay, setTempDay]         = useState<Date>(() => new Date());
+    const [tempDay, setTempDay] = useState<Date>(() => new Date());
     const [showTimePicker, setShowTimePicker] = useState(false);
-    const [progress, setProgress]       = useState(0);
-    const [submitting, setSubmitting]     = useState(false);
-    const [titleError, setTitleError]     = useState(false);
+    const [progress, setProgress] = useState(0);
+    const [submitting, setSubmitting] = useState(false);
+    const [titleError, setTitleError] = useState(false);
     const [estimateError, setEstimateError] = useState(false);
-    const [submitError, setSubmitError]   = useState<string | null>(null);
+    const [submitError, setSubmitError] = useState<string | null>(null);
 
     function resetForm() {
         setActiveField('estimate'); setTitle(''); setNotes('');
@@ -82,7 +83,7 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
 
         const result = await api.createTask({
             title: title.trim(), estimatedMins,
-            ...(effort   && { effort }),
+            ...(effort && { effort }),
             ...(deadline && { deadline }),
             progress,
             ...(notes.trim() && { notes: notes.trim() }),
@@ -101,162 +102,163 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
     };
 
     return (
-        <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
+        <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={handleClose}>
             <KeyboardProvider>
-                <View style={[s.screen, { paddingTop: insets.top }]}>
+                {/* iOS page sheet clears the status bar itself; the window-level top inset (~59) would double-pad it. Android has no sheet, so keep it. */}
+                <View style={[s.screen, { paddingTop: Platform.OS === 'ios' ? 0 : insets.top }]}>
 
-                <View style={s.header}>
-                    <Text style={s.headerTitle}>New Task</Text>
-                    <TouchableOpacity style={s.closeBtn} onPress={handleClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                        <Ionicons name="close" size={17} color="#2a2621" />
-                    </TouchableOpacity>
-                </View>
+                    <View style={s.header}>
+                        <Text style={s.headerTitle}>New Task</Text>
+                        <TouchableOpacity style={s.closeBtn} onPress={handleClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                            <Ionicons name="close" size={22} color="#2a2621" />
+                        </TouchableOpacity>
+                    </View>
 
-                <KeyboardAwareScrollView
-                    ref={scrollViewRef}
-                    style={s.scrollFlex}
-                    contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + 32 }]}
-                    showsVerticalScrollIndicator={false}
-                    keyboardShouldPersistTaps="handled"
-                    bottomOffset={16}
-                    mode="layout"
-                >
-                    <TextInput
-                        style={[s.titleInput, titleError && s.titleInputError]}
-                        placeholder="What needs to be done?"
-                        placeholderTextColor="rgba(122,115,106,0.3)"
-                        value={title}
-                        onChangeText={(t) => { setTitle(t); if (t.trim()) setTitleError(false); }}
-                        onFocus={revealFocusedInput}
-                        autoFocus multiline blurOnSubmit returnKeyType="done"
-                    />
-                    {titleError && <Text style={s.inlineError}>Title is required</Text>}
-
-                    <View style={s.card}>
-
-                        <FieldRow
-                            label="Estimate" subLabel="Required for scheduling"
-                            value={estimatedMins !== null ? getEstimateLabel(estimatedMins) : 'Not set'}
-                            isOpen={activeField === 'estimate'}
-                            onPress={() => toggleField('estimate')}
-                            hasError={estimateError}
+                    <KeyboardAwareScrollView
+                        ref={scrollViewRef}
+                        style={s.scrollFlex}
+                        contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + 32 }]}
+                        showsVerticalScrollIndicator={false}
+                        keyboardShouldPersistTaps="handled"
+                        bottomOffset={16}
+                        mode="layout"
+                    >
+                        <TextInput
+                            style={[s.titleInput, titleError && s.titleInputError]}
+                            placeholder="What needs to be done?"
+                            placeholderTextColor="rgba(122,115,106,0.3)"
+                            value={title}
+                            onChangeText={(t) => { setTitle(t); if (t.trim()) setTitleError(false); }}
+                            onFocus={revealFocusedInput}
+                            autoFocus multiline blurOnSubmit returnKeyType="done"
                         />
-                        {activeField === 'estimate' && (
-                            <View style={tf.pills}>
-                                {ESTIMATE_OPTIONS.map(o => (
-                                    <TouchableOpacity
-                                        key={o.value}
-                                        style={[tf.pill, estimatedMins === o.value && tf.pillOn]}
-                                        onPress={() => { setEstimatedMins(o.value); setEstimateError(false); setActiveField(null); }}
-                                    >
-                                        <Text style={[tf.pillTxt, estimatedMins === o.value && tf.pillTxtOn]}>{o.label}</Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-                        )}
+                        {titleError && <Text style={s.inlineError}>Title is required</Text>}
 
-                        <View style={s.sep} />
+                        <View style={s.card}>
 
-                        <FieldRow
-                            label="Effort" subLabel="Est. energy required"
-                            value={effort ? effort.charAt(0) + effort.slice(1).toLowerCase() : 'Not set'}
-                            isOpen={activeField === 'effort'}
-                            onPress={() => toggleField('effort')}
-                        />
-                        {activeField === 'effort' && (
-                            <View style={tf.pills}>
-                                {(['HIGH','MEDIUM','LOW'] as EnergyLevel[]).map(e => (
-                                    <TouchableOpacity
-                                        key={e}
-                                        style={[tf.pill, effort === e && tf.pillOn]}
-                                        onPress={() => { setEffort(e); setActiveField(null); }}
-                                    >
-                                        <View style={[tf.dot, { backgroundColor: effortDotColor(e) }]} />
-                                        <Text style={[tf.pillTxt, effort === e && tf.pillTxtOn]}>
-                                            {e.charAt(0) + e.slice(1).toLowerCase()}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                                {effort !== null && (
-                                    <TouchableOpacity style={tf.pill} onPress={() => { setEffort(null); setActiveField(null); }}>
-                                        <Text style={tf.pillTxt}>Clear</Text>
-                                    </TouchableOpacity>
-                                )}
-                            </View>
-                        )}
-
-                        <View style={s.sep} />
-
-                        <FieldRow
-                            label="Deadline"
-                            value={deadlineDay ? formatDeadlineValue(deadlineDay, deadlineTime) : 'Not set'}
-                            isOpen={activeField === 'deadline'}
-                            onPress={() => toggleField('deadline')}
-                        />
-                        {activeField === 'deadline' && (
-                            <DeadlineExpanded
-                                tempDay={tempDay}
-                                onDayChange={setTempDay}
-                                deadlineTime={deadlineTime}
-                                onTimeChange={setDeadlineTime}
-                                showTimePicker={showTimePicker}
-                                onToggleTimePicker={() => setShowTimePicker(v => !v)}
-                                onConfirm={() => { setDeadlineDay(tempDay); setActiveField(null); }}
-                                onClear={() => { setDeadlineDay(null); setActiveField(null); }}
-                                hasDeadline={deadlineDay !== null}
+                            <FieldRow
+                                label="Estimate" subLabel="Required for scheduling"
+                                value={estimatedMins !== null ? getEstimateLabel(estimatedMins) : 'Not set'}
+                                isOpen={activeField === 'estimate'}
+                                onPress={() => toggleField('estimate')}
+                                hasError={estimateError}
                             />
-                        )}
-
-                        <View style={s.sep} />
-
-                        <FieldRow
-                            label="Progress" value={`${progress}%`}
-                            isOpen={activeField === 'progress'}
-                            onPress={() => toggleField('progress')}
-                        />
-                        {activeField === 'progress' && (
-                            <View style={tf.progressSection}>
-                                <ProgressSlider value={progress} onChange={setProgress} />
-                                <View style={tf.progressPresets}>
-                                    {PROGRESS_PRESETS.map(val => (
+                            {activeField === 'estimate' && (
+                                <View style={tf.pills}>
+                                    {ESTIMATE_OPTIONS.map(o => (
                                         <TouchableOpacity
-                                            key={val}
-                                            style={[tf.pill, progress === val && tf.pillOn]}
-                                            onPress={() => setProgress(val)}
+                                            key={o.value}
+                                            style={[tf.pill, estimatedMins === o.value && tf.pillOn]}
+                                            onPress={() => { setEstimatedMins(o.value); setEstimateError(false); setActiveField(null); }}
                                         >
-                                            <Text style={[tf.pillTxt, progress === val && tf.pillTxtOn]}>{val}%</Text>
+                                            <Text style={[tf.pillTxt, estimatedMins === o.value && tf.pillTxtOn]}>{o.label}</Text>
                                         </TouchableOpacity>
                                     ))}
                                 </View>
-                            </View>
-                        )}
+                            )}
 
-                    </View>
+                            <View style={s.sep} />
 
-                    <View style={s.notesCard}>
-                        <Text style={s.notesLabel}>NOTES</Text>
-                        <TextInput
-                            style={s.notesInput}
-                            placeholder="Add context, links, or anything relevant..."
-                            placeholderTextColor="rgba(122,115,106,0.3)"
-                            value={notes}
-                            onChangeText={setNotes}
-                            onFocus={revealFocusedInput}
-                            multiline textAlignVertical="top"
-                        />
-                    </View>
+                            <FieldRow
+                                label="Effort" subLabel="Est. energy required"
+                                value={effort ? effort.charAt(0) + effort.slice(1).toLowerCase() : 'Not set'}
+                                isOpen={activeField === 'effort'}
+                                onPress={() => toggleField('effort')}
+                            />
+                            {activeField === 'effort' && (
+                                <View style={tf.pills}>
+                                    {(['HIGH', 'MEDIUM', 'LOW'] as EnergyLevel[]).map(e => (
+                                        <TouchableOpacity
+                                            key={e}
+                                            style={[tf.pill, effort === e && tf.pillOn]}
+                                            onPress={() => { setEffort(e); setActiveField(null); }}
+                                        >
+                                            <View style={[tf.dot, { backgroundColor: effortDotColor(e) }]} />
+                                            <Text style={[tf.pillTxt, effort === e && tf.pillTxtOn]}>
+                                                {e.charAt(0) + e.slice(1).toLowerCase()}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                    {effort !== null && (
+                                        <TouchableOpacity style={tf.pill} onPress={() => { setEffort(null); setActiveField(null); }}>
+                                            <Text style={tf.pillTxt}>Clear</Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+                            )}
 
-                    {submitError && <Text style={s.submitError}>{submitError}</Text>}
+                            <View style={s.sep} />
 
-                    <TouchableOpacity
-                        style={[s.createBtn, !canSubmit && s.createBtnSubmitting]}
-                        onPress={handleSubmit}
-                        activeOpacity={0.8}
-                    >
-                        <Text style={s.createBtnTxt}>{submitting ? 'Creating...' : 'Create task'}</Text>
-                    </TouchableOpacity>
+                            <FieldRow
+                                label="Deadline"
+                                value={deadlineDay ? formatDeadlineValue(deadlineDay, deadlineTime) : 'Not set'}
+                                isOpen={activeField === 'deadline'}
+                                onPress={() => toggleField('deadline')}
+                            />
+                            {activeField === 'deadline' && (
+                                <DeadlineExpanded
+                                    tempDay={tempDay}
+                                    onDayChange={setTempDay}
+                                    deadlineTime={deadlineTime}
+                                    onTimeChange={setDeadlineTime}
+                                    showTimePicker={showTimePicker}
+                                    onToggleTimePicker={() => setShowTimePicker(v => !v)}
+                                    onConfirm={() => { setDeadlineDay(tempDay); setActiveField(null); }}
+                                    onClear={() => { setDeadlineDay(null); setActiveField(null); }}
+                                    hasDeadline={deadlineDay !== null}
+                                />
+                            )}
 
-                </KeyboardAwareScrollView>
+                            <View style={s.sep} />
+
+                            <FieldRow
+                                label="Progress" value={`${progress}%`}
+                                isOpen={activeField === 'progress'}
+                                onPress={() => toggleField('progress')}
+                            />
+                            {activeField === 'progress' && (
+                                <View style={tf.progressSection}>
+                                    <ProgressSlider value={progress} onChange={setProgress} />
+                                    <View style={tf.progressPresets}>
+                                        {PROGRESS_PRESETS.map(val => (
+                                            <TouchableOpacity
+                                                key={val}
+                                                style={[tf.pill, progress === val && tf.pillOn]}
+                                                onPress={() => setProgress(val)}
+                                            >
+                                                <Text style={[tf.pillTxt, progress === val && tf.pillTxtOn]}>{val}%</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </View>
+                            )}
+
+                        </View>
+
+                        <View style={s.notesCard}>
+                            <Text style={s.notesLabel}>Notes</Text>
+                            <TextInput
+                                style={s.notesInput}
+                                placeholder="Add description, context or anything relevant..."
+                                placeholderTextColor="rgba(122,115,106,0.3)"
+                                value={notes}
+                                onChangeText={setNotes}
+                                onFocus={revealFocusedInput}
+                                multiline textAlignVertical="top"
+                            />
+                        </View>
+
+                        {submitError && <Text style={s.submitError}>{submitError}</Text>}
+
+                        <TouchableOpacity
+                            style={[s.createBtn, !canSubmit && s.createBtnSubmitting]}
+                            onPress={handleSubmit}
+                            activeOpacity={0.8}
+                        >
+                            <Text style={s.createBtnTxt}>{submitting ? 'Creating...' : 'Create task'}</Text>
+                        </TouchableOpacity>
+
+                    </KeyboardAwareScrollView>
                 </View>
                 <KeyboardToolbar />
             </KeyboardProvider>
@@ -271,10 +273,10 @@ const s = StyleSheet.create({
 
     header: {
         flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12,
+        paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16,
         borderBottomWidth: 1, borderBottomColor: 'rgba(42,38,33,0.06)',
     },
-    headerTitle: { ...BASE_TXT, fontSize: 18, fontWeight: '600', letterSpacing: -0.3 },
+    headerTitle: { ...BASE_TXT, fontSize: 16, fontWeight: '600', letterSpacing: -0.3 },
     closeBtn: {
         width: 30, height: 30,
         justifyContent: 'center', alignItems: 'center',
@@ -302,7 +304,7 @@ const s = StyleSheet.create({
         borderColor: 'rgba(42,38,33,0.10)', borderRadius: 16,
         paddingHorizontal: 16, paddingVertical: 14, marginBottom: 14,
     },
-    notesLabel: { fontSize: 11, color: 'rgba(122,115,106,0.5)', letterSpacing: 0.5, marginBottom: 8 },
+    notesLabel: { fontSize: 14, fontWeight: '500', color: '#7a736a', letterSpacing: -0.15, marginBottom: 8 },
     notesInput: { ...BASE_TXT, minHeight: 72, lineHeight: 20, padding: 0 },
 
     submitError: { fontSize: 12, color: 'rgba(200,80,80,0.8)', textAlign: 'center', marginBottom: 8 },

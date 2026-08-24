@@ -12,6 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useNavigation } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
+import { colors, radius } from "../../lib/theme";
 import type { TaskDetail, EnergyLevel, UpdateTaskInput } from "../../lib/api.types";
 import { KeyboardScreen } from "../../components/KeyboardScreen";
 import {
@@ -39,8 +40,7 @@ function deadlineToParts(iso: string): { day: Date; time: Date } {
 export default function TaskDetailScreen() {
     const router = useRouter();
     const navigation = useNavigation();
-    const { taskId, from } = useLocalSearchParams<{ taskId: string; from?: string }>();
-    const backLabel = from ?? 'Backlog';
+    const { taskId } = useLocalSearchParams<{ taskId: string }>();
 
     // Server state
     const [task, setTask] = useState<TaskDetail | null>(null);
@@ -48,22 +48,22 @@ export default function TaskDetailScreen() {
     const [fetchError, setFetchError] = useState<string | null>(null);
 
     // Editable local state
-    const [title, setTitle]               = useState('');
-    const [notes, setNotes]               = useState('');
+    const [title, setTitle] = useState('');
+    const [notes, setNotes] = useState('');
     const [estimatedMins, setEstimatedMins] = useState(15);
-    const [effort, setEffort]             = useState<EnergyLevel | null>(null);
-    const [deadlineDay, setDeadlineDay]   = useState<Date | null>(null);
+    const [effort, setEffort] = useState<EnergyLevel | null>(null);
+    const [deadlineDay, setDeadlineDay] = useState<Date | null>(null);
     const [deadlineTime, setDeadlineTime] = useState<Date>(defaultTime());
-    const [tempDay, setTempDay]           = useState<Date>(() => new Date());
+    const [tempDay, setTempDay] = useState<Date>(() => new Date());
     const [showTimePicker, setShowTimePicker] = useState(false);
-    const [progress, setProgress]         = useState(0);
+    const [progress, setProgress] = useState(0);
 
     // UI state
-    const [activeField, setActiveField]   = useState<FieldKey | null>(null);
-    const [saveStatus, setSaveStatus]     = useState<SaveStatus>('idle');
-    const [saveError, setSaveError]       = useState<string | null>(null);
-    const [titleError, setTitleError]     = useState(false);
-    const [deleting, setDeleting]         = useState(false);
+    const [activeField, setActiveField] = useState<FieldKey | null>(null);
+    const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [titleError, setTitleError] = useState(false);
+    const [deleting, setDeleting] = useState(false);
 
     // Debounce refs
     const titleDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -259,16 +259,16 @@ export default function TaskDetailScreen() {
     return (
         <SafeAreaView style={s.safeArea}>
 
-            <View style={s.backRow}>
-                <TouchableOpacity style={s.backButton} onPress={() => router.back()} activeOpacity={0.7}>
-                    <Ionicons name="chevron-back" size={20} color="#7a736a" />
-                    <Text style={s.backLabel}>{backLabel}</Text>
+            <View style={s.header}>
+                <Text style={s.headerTitle}>Edit Task</Text>
+                <TouchableOpacity style={s.closeBtn} onPress={() => router.back()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name="close" size={22} color={colors.text.primary} />
                 </TouchableOpacity>
             </View>
 
             {loading && (
                 <View style={s.centered}>
-                    <ActivityIndicator color="#d4a574" />
+                    <ActivityIndicator color={colors.accent.default} />
                 </View>
             )}
 
@@ -343,7 +343,7 @@ export default function TaskDetailScreen() {
                         />
                         {activeField === 'effort' && (
                             <View style={tf.pills}>
-                                {(['HIGH','MEDIUM','LOW'] as EnergyLevel[]).map(e => (
+                                {(['HIGH', 'MEDIUM', 'LOW'] as EnergyLevel[]).map(e => (
                                     <TouchableOpacity
                                         key={e}
                                         style={[tf.pill, effort === e && tf.pillOn]}
@@ -418,10 +418,10 @@ export default function TaskDetailScreen() {
 
                     {/* Notes */}
                     <View style={s.notesCard}>
-                        <Text style={s.notesLabel}>NOTES</Text>
+                        <Text style={s.notesLabel}>Notes</Text>
                         <TextInput
                             style={s.notesInput}
-                            placeholder="Add context, links, or anything relevant..."
+                            placeholder="Add description, context or anything relevant..."
                             placeholderTextColor="rgba(122,115,106,0.3)"
                             value={notes}
                             onChangeText={handleNotesChange}
@@ -429,15 +429,13 @@ export default function TaskDetailScreen() {
                         />
                     </View>
 
-                    {/* Done / Delete */}
+                    {/* Delete */}
                     <TouchableOpacity
                         style={s.deleteButton}
                         onPress={confirmDelete}
-                        activeOpacity={0.5}
+                        activeOpacity={0.8}
                         disabled={deleting}
-                        hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
                     >
-                        <Ionicons name="trash-outline" size={15} color="rgba(212,24,61,0.6)" />
                         <Text style={s.deleteLabel}>Delete task</Text>
                     </TouchableOpacity>
 
@@ -447,8 +445,8 @@ export default function TaskDetailScreen() {
             {!loading && !fetchError && task && (
                 <View style={s.saveStatusRow}>
                     {saveStatus === 'saving' && <Text style={s.savingText}>Saving...</Text>}
-                    {saveStatus === 'saved'  && <Text style={s.savedText}>Saved</Text>}
-                    {saveStatus === 'error'  && <Text style={s.saveErrorText}>{saveError}</Text>}
+                    {saveStatus === 'saved' && <Text style={s.savedText}>Saved</Text>}
+                    {saveStatus === 'error' && <Text style={s.saveErrorText}>{saveError}</Text>}
                 </View>
             )}
         </SafeAreaView>
@@ -457,29 +455,30 @@ export default function TaskDetailScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const BASE_TXT: { fontSize: number; color: string } = { fontSize: 14, color: '#2a2621' };
+const BASE_TXT: { fontSize: number; color: string } = { fontSize: 14, color: colors.text.primary };
 
 const s = StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: '#fdfcfa' },
-
-    backRow: { paddingHorizontal: 12, paddingTop: 20, paddingBottom: 2 },
-    backButton: {
-        flexDirection: 'row', alignItems: 'center', gap: 2,
-        alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 4,
-    },
-    backLabel: { fontSize: 15, color: '#7a736a' },
+    safeArea: { flex: 1, backgroundColor: colors.surface.page },
 
     scroll: { flex: 1 },
 
     saveStatusRow: { height: 32, justifyContent: 'center', alignItems: 'center' },
-    savingText: { fontSize: 12, color: '#d4a574' },
-    savedText:  { fontSize: 12, color: 'rgba(122,115,106,0.5)' },
+    savingText: { fontSize: 12, color: colors.accent.default },
+    savedText: { fontSize: 12, color: colors.text.muted },
     saveErrorText: { fontSize: 12, color: 'rgba(200,80,80,0.8)' },
 
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    fetchErrorText: { fontSize: 14, color: '#7a736a', textAlign: 'center' },
+    fetchErrorText: { fontSize: 14, color: colors.text.secondary, textAlign: 'center' },
 
-    content: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40, gap: 12 },
+    header: {
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16,
+        borderBottomWidth: 1, borderBottomColor: 'rgba(42,38,33,0.06)',
+    },
+    headerTitle: { ...BASE_TXT, fontSize: 16, fontWeight: '600', letterSpacing: -0.3 },
+    closeBtn: { width: 30, height: 30, justifyContent: 'center', alignItems: 'center' },
+
+    content: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 40, gap: 12 },
 
     titleInput: {
         ...BASE_TXT, fontSize: 22, fontWeight: '500',
@@ -493,34 +492,31 @@ const s = StyleSheet.create({
 
     statusBadge: {
         flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
-        paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, borderWidth: 1,
+        paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill, borderWidth: 1,
     },
-    statusBadgeActive: { backgroundColor: 'rgba(212,165,116,0.1)', borderColor: 'rgba(212,165,116,0.2)' },
-    statusBadgeDone:   { backgroundColor: 'rgba(92,82,72,0.10)', borderColor: 'rgba(92,82,72,0.20)' },
-    statusBadgeMuted:  { backgroundColor: 'rgba(232,228,221,0.4)', borderColor: 'rgba(42,38,33,0.06)'   },
-    statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#d4a574' },
+    statusBadgeActive: { backgroundColor: colors.accent.tint, borderColor: 'rgba(212,165,116,0.2)' },
+    statusBadgeDone: { backgroundColor: 'rgba(92,82,72,0.10)', borderColor: 'rgba(92,82,72,0.20)' },
+    statusBadgeMuted: { backgroundColor: 'rgba(232,228,221,0.4)', borderColor: 'rgba(42,38,33,0.06)' },
+    statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent.default },
     statusText: { fontSize: 12, fontWeight: '500' },
-    statusTextActive: { color: '#d4a574' },
-    statusTextDone:   { color: '#5c5248' },
-    statusTextMuted:  { color: 'rgba(122,115,106,0.6)' },
+    statusTextActive: { color: colors.accent.strong },
+    statusTextDone: { color: '#5c5248' },
+    statusTextMuted: { color: colors.text.muted },
 
     card: {
-        backgroundColor: '#fffef9', borderWidth: 1,
-        borderColor: 'rgba(42,38,33,0.10)', borderRadius: 16, overflow: 'hidden',
+        backgroundColor: colors.surface.raised, borderWidth: 1,
+        borderColor: colors.border.hairline, borderRadius: radius.lg, overflow: 'hidden',
     },
     sep: { height: 1, backgroundColor: 'rgba(42,38,33,0.06)' },
 
     notesCard: {
-        backgroundColor: '#fffef9', borderWidth: 1,
-        borderColor: 'rgba(42,38,33,0.10)', borderRadius: 16,
+        backgroundColor: colors.surface.raised, borderWidth: 1,
+        borderColor: colors.border.hairline, borderRadius: radius.lg,
         paddingHorizontal: 16, paddingVertical: 14,
     },
-    notesLabel: { fontSize: 11, color: 'rgba(122,115,106,0.5)', letterSpacing: 0.5, marginBottom: 8 },
+    notesLabel: { fontSize: 14, fontWeight: '500', color: colors.text.secondary, letterSpacing: -0.15, marginBottom: 8 },
     notesInput: { ...BASE_TXT, minHeight: 72, lineHeight: 20, padding: 0 },
 
-    deleteButton: {
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-        gap: 6, alignSelf: 'center', marginVertical: 12,
-    },
-    deleteLabel: { fontSize: 14, color: 'rgba(212,24,61,0.6)' },
+    deleteButton: { height: 48, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
+    deleteLabel: { fontSize: 15, fontWeight: '500', color: colors.danger.default, letterSpacing: -0.23 },
 });
