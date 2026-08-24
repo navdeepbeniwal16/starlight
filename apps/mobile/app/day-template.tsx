@@ -151,6 +151,17 @@ export default function DayTemplateScreen() {
         }
     }
 
+    function handleCancel() {
+        Alert.alert(
+            'Discard changes?',
+            'You have unsaved edits to your day template.',
+            [
+                { text: 'Keep editing', style: 'cancel' },
+                { text: 'Discard', style: 'destructive', onPress: reset },
+            ],
+        );
+    }
+
     const rows = useMemo(() => buildTimeline(draft), [draft]);
 
     // Skip the bounds check while wake and sleep are inverted; the window is meaningless then.
@@ -272,9 +283,17 @@ export default function DayTemplateScreen() {
                                 disabled={!canSave}
                             >
                                 {saving
-                                    ? <ActivityIndicator color={colors.text.onAccent} />
+                                    ? <ActivityIndicator color={colors.surface.page} />
                                     : <Text style={styles.saveButtonText}>Save</Text>}
                             </PressableScale>
+                            <TouchableOpacity
+                                style={styles.cancelButton}
+                                onPress={handleCancel}
+                                disabled={saving}
+                                activeOpacity={0.8}
+                            >
+                                <Text style={styles.cancelButtonText}>Cancel</Text>
+                            </TouchableOpacity>
                         </Animated.View>
                     )}
                 </Animated.View>
@@ -467,9 +486,11 @@ const styles = StyleSheet.create({
         ...shadow.footer,
     },
     saveErrorText: { fontSize: 13, color: colors.danger.default, textAlign: 'center' },
-    saveButton: { height: 52, backgroundColor: colors.accent.default, borderRadius: radius.lg, justifyContent: 'center', alignItems: 'center' },
-    saveButtonDisabled: { backgroundColor: 'rgba(212,165,116,0.35)' },
-    saveButtonText: { fontSize: 16, fontWeight: '500', color: colors.text.onAccent, letterSpacing: -0.31 },
+    saveButton: { height: 48, backgroundColor: colors.text.primary, borderRadius: radius.md, justifyContent: 'center', alignItems: 'center' },
+    saveButtonDisabled: { opacity: 0.35 },
+    saveButtonText: { fontSize: 15, fontWeight: '500', color: colors.surface.page, letterSpacing: -0.1 },
+    cancelButton: { height: 48, borderRadius: radius.lg, justifyContent: 'center', alignItems: 'center' },
+    cancelButtonText: { fontSize: 15, fontWeight: '500', color: colors.text.secondary, letterSpacing: -0.23 },
 
     flashOverlay: {
         ...StyleSheet.absoluteFillObject,
