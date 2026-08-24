@@ -47,7 +47,6 @@ model Block {
 enum BlockType {
   CONTAINER
   ANCHOR
-  NO_TASK
 }
 
 enum EnergyLevel {

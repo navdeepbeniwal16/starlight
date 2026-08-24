@@ -25,14 +25,12 @@ import type { BacklogBuckets, BacklogTask, ScheduledTask, TaskDetail } from "../
 import { applyCreated, applyProgress, applyToggle, createSequencer, groupForReconcile, patchTask, restoreTask, withoutTask } from "../../lib/backlogState";
 import { usePlanningStore } from "../../stores/planning.store";
 import CreateTaskModal from "../../components/CreateTaskModal";
-import { ProgressSlider } from "../../components/TaskFields";
+import CircularProgress from "../../components/CircularProgress";
 import ReanimatedSwipeable, { SwipeDirection, type SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
 }
-
-const QUICK_MARKS = [25, 50, 75];
 
 // pickUp stays open always — it's the one group asking for a decision.
 type GroupKey = 'pickUp' | 'everythingElse' | 'doneToday';
@@ -151,20 +149,17 @@ function taskMeta(task: BacklogTask): string | null {
     return task.deadline ? formatDeadline(task.deadline) : null;
 }
 
-function TaskCard({ task, expanded, onToggleExpand, onToggleDone, onSetProgress, onOpen }: {
+function TaskCard({ task, onToggleDone, onPressIn, onOpen }: {
     task: BacklogTask;
-    expanded: boolean;
-    onToggleExpand: () => void;
     onToggleDone: (updated: TaskDetail) => void;
-    onSetProgress: (value: number) => void;
+    onPressIn: () => void;
     onOpen: () => void;
 }) {
-    const progress = task.progress ?? 0;
     const isDone = task.status === 'DONE';
     const meta = taskMeta(task);
     return (
-        <View style={[s.taskCard, expanded && s.taskCardExpanded]}>
-            <TouchableOpacity style={s.taskRow} activeOpacity={0.7} onPress={onToggleExpand}>
+        <View style={s.taskCard}>
+            <TouchableOpacity style={s.taskRow} activeOpacity={0.7} onPressIn={onPressIn} onPress={onOpen}>
                 <DoneToggle task={task} onToggle={onToggleDone} />
                 <View style={s.taskContent}>
                     <Text style={[s.taskTitle, isDone && s.taskTitleDone]} numberOfLines={2}>{task.title}</Text>
@@ -173,34 +168,8 @@ function TaskCard({ task, expanded, onToggleExpand, onToggleDone, onSetProgress,
                         {meta && <Text style={s.metaText}>{meta}</Text>}
                     </View>
                 </View>
-                <Ionicons
-                    name={expanded ? 'chevron-up' : 'chevron-down'}
-                    size={16}
-                    color="rgba(122,115,106,0.45)"
-                />
+                <CircularProgress progress={task.progress ?? 0} />
             </TouchableOpacity>
-
-            {expanded && (
-                <View style={s.expandPanel}>
-                    <ProgressSlider value={progress} onChange={() => {}} onRelease={onSetProgress} />
-                    <View style={s.quickMarks}>
-                        {QUICK_MARKS.map(mark => (
-                            <TouchableOpacity
-                                key={mark}
-                                style={[s.markPill, progress === mark && s.markPillOn]}
-                                activeOpacity={0.7}
-                                onPress={() => onSetProgress(mark)}
-                            >
-                                <Text style={[s.markPillText, progress === mark && s.markPillTextOn]}>{mark}%</Text>
-                            </TouchableOpacity>
-                        ))}
-                        <TouchableOpacity style={s.openTask} activeOpacity={0.7} onPress={onOpen}>
-                            <Text style={s.openTaskText}>Open task</Text>
-                            <Ionicons name="chevron-forward" size={13} color="#7a736a" />
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            )}
         </View>
     );
 }
@@ -221,14 +190,11 @@ function renderDeleteAction() {
     );
 }
 
-// Swipe is just an alternate trigger for the same optimistic paths as the inline
-// controls: right reveals done (progress 100), left reveals delete. Disabled while
-// expanded so the gesture can't fight the panel's horizontal slider.
-function SwipeableTaskCard({ task, expanded, onMarkDone, onDelete, children }: {
+function SwipeableTaskCard({ task, onMarkDone, onDelete, onSwipeStart, children }: {
     task: BacklogTask;
-    expanded: boolean;
     onMarkDone: () => void;
     onDelete: () => void;
+    onSwipeStart: () => void;
     children: ReactNode;
 }) {
     const ref = useRef<SwipeableMethods | null>(null);
@@ -245,7 +211,6 @@ function SwipeableTaskCard({ task, expanded, onMarkDone, onDelete, children }: {
     return (
         <ReanimatedSwipeable
             ref={ref}
-            enabled={!expanded}
             friction={2}
             overshootLeft={false}
             overshootRight={false}
@@ -255,10 +220,39 @@ function SwipeableTaskCard({ task, expanded, onMarkDone, onDelete, children }: {
             dragOffsetFromRightEdge={24}
             renderLeftActions={isDone ? undefined : renderDoneAction}
             renderRightActions={renderDeleteAction}
+            onSwipeableOpenStartDrag={onSwipeStart}
             onSwipeableOpen={handleOpen}
         >
             {children}
         </ReanimatedSwipeable>
+    );
+}
+
+// A partial swipe snaps back but still lands the row's onPress, which would open
+// the task. Track whether the pan actually engaged so a swipe — completed or
+// not — can't masquerade as a tap; onPressIn clears it at the start of each touch.
+function ReviewTaskItem({ task, onToggleDone, onMarkDone, onDelete, onOpen }: {
+    task: BacklogTask;
+    onToggleDone: (updated: TaskDetail) => void;
+    onMarkDone: () => void;
+    onDelete: () => void;
+    onOpen: () => void;
+}) {
+    const swiped = useRef(false);
+    return (
+        <SwipeableTaskCard
+            task={task}
+            onMarkDone={onMarkDone}
+            onDelete={onDelete}
+            onSwipeStart={() => { swiped.current = true; }}
+        >
+            <TaskCard
+                task={task}
+                onToggleDone={onToggleDone}
+                onPressIn={() => { swiped.current = false; }}
+                onOpen={() => { if (!swiped.current) onOpen(); }}
+            />
+        </SwipeableTaskCard>
     );
 }
 
@@ -306,7 +300,6 @@ export default function PlanningReviewScreen() {
     const [showCreateModal, setShowCreateModal] = useState(false);
 
     const [openOverrides, setOpenOverrides] = useState<Partial<Record<GroupKey, boolean>>>({});
-    const [expandedId, setExpandedId] = useState<string | null>(null);
 
     // Agent plan generation: full-screen while the agent runs, retry on error.
     const [generating, setGenerating] = useState(false);
@@ -381,18 +374,12 @@ export default function PlanningReviewScreen() {
         if (done) loadBuckets(false);
     }, [loadBuckets, seq]);
 
-    function toggleExpand(taskId: string) {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-        setExpandedId(prev => prev === taskId ? null : taskId);
-    }
-
     const handleDelete = useCallback(async (task: BacklogTask) => {
         const snapshot = buckets;
         if (!snapshot) return;
         // Burn a token so a refetch already in flight can't resurrect the removed task.
         seq.next();
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-        setExpandedId(current => current === task.id ? null : current);
         setBuckets(prev => prev ? withoutTask(prev, task.id) : prev);
         const result = await api.deleteTask(task.id);
         if (!result.ok) {
@@ -486,21 +473,13 @@ export default function PlanningReviewScreen() {
                                         <View style={s.cardGroup}>
                                             {tasks.map(task => (
                                                 <EnterView key={task.id} index={animIndex++}>
-                                                    <SwipeableTaskCard
+                                                    <ReviewTaskItem
                                                         task={task}
-                                                        expanded={expandedId === task.id}
+                                                        onToggleDone={(updated) => handleToggleDone(task, updated)}
                                                         onMarkDone={() => commitProgress(task, 100)}
                                                         onDelete={() => handleDelete(task)}
-                                                    >
-                                                        <TaskCard
-                                                            task={task}
-                                                            expanded={expandedId === task.id}
-                                                            onToggleExpand={() => toggleExpand(task.id)}
-                                                            onToggleDone={(updated) => handleToggleDone(task, updated)}
-                                                            onSetProgress={(value) => commitProgress(task, value)}
-                                                            onOpen={() => router.push(`/task/${task.id}?from=Review`)}
-                                                        />
-                                                    </SwipeableTaskCard>
+                                                        onOpen={() => router.push(`/task/${task.id}?from=Review`)}
+                                                    />
                                                 </EnterView>
                                             ))}
                                         </View>
@@ -694,9 +673,6 @@ const s = StyleSheet.create({
         borderRadius: 14,
         overflow: 'hidden',
     },
-    taskCardExpanded: {
-        borderColor: 'rgba(42,38,33,0.20)',
-    },
     swipeAction: {
         width: 76,
         justifyContent: 'center',
@@ -715,37 +691,6 @@ const s = StyleSheet.create({
     taskContent: {
         flex: 1,
     },
-    expandPanel: {
-        paddingHorizontal: 13,
-        paddingBottom: 13,
-        paddingTop: 4,
-        gap: 10,
-        borderTopWidth: 1,
-        borderTopColor: 'rgba(42,38,33,0.06)',
-    },
-    quickMarks: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        gap: 8,
-    },
-    markPill: {
-        borderRadius: 999,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        backgroundColor: 'rgba(42,38,33,0.06)',
-    },
-    markPillOn: { backgroundColor: '#2a2621' },
-    markPillText: { fontSize: 13, fontWeight: '500', color: '#2a2621' },
-    markPillTextOn: { color: '#fdfcfa' },
-    openTask: {
-        marginLeft: 'auto',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 2,
-        paddingVertical: 6,
-    },
-    openTaskText: { fontSize: 13, fontWeight: '500', color: '#7a736a' },
     taskTitle: {
         fontSize: 14,
         fontWeight: '500',

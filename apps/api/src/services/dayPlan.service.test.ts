@@ -30,7 +30,7 @@ function fakeAgent(result: AgentResult) {
 const noopAgent = () => fakeAgent({ assignments: [], unschedulable: [] });
 
 async function seedTemplate(blocks?: {
-    type: "CONTAINER" | "ANCHOR" | "NO_TASK";
+    type: "CONTAINER" | "ANCHOR";
     name: string;
     startTime: string;
     endTime: string;

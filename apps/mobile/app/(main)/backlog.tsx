@@ -19,7 +19,6 @@ import Animated, {
     withSequence,
     withTiming,
 } from "react-native-reanimated";
-import Svg, { Circle } from "react-native-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
@@ -29,6 +28,7 @@ import type { BacklogTask, BacklogBuckets, ScheduledTask, TaskDetail } from "../
 import { formatTime } from "../../lib/time";
 import { applyCreated, applyToggle, bucketOf, createSequencer } from "../../lib/backlogState";
 import CreateTaskModal from "../../components/CreateTaskModal";
+import CircularProgress from "../../components/CircularProgress";
 
 // Shared motion constants. The standard curve is interruptible and settles calmly.
 const EASE = Easing.bezier(0.2, 0, 0, 1);
@@ -135,39 +135,6 @@ function StatusBadge({ status }: { status: BacklogTask['status'] }) {
     return (
         <View style={[styles.badge, badgeStyle]}>
             <Text style={[styles.badgeText, textStyle]}>{label}</Text>
-        </View>
-    );
-}
-
-const RING_SIZE = 32;
-const RING_STROKE = 2.5;
-const RING_R = (RING_SIZE - RING_STROKE) / 2;
-const RING_CIRC = 2 * Math.PI * RING_R;
-
-function CircularProgress({ progress }: { progress: number }) {
-    const isDone = progress === 100;
-    const fillColor = isDone ? '#5c5248' : 'rgba(212,165,116,0.85)';
-    const offset = RING_CIRC * (1 - progress / 100);
-    return (
-        <View style={styles.ringWrap}>
-            <Svg width={RING_SIZE} height={RING_SIZE}>
-                <Circle
-                    cx={RING_SIZE / 2} cy={RING_SIZE / 2} r={RING_R}
-                    stroke="rgba(232,228,221,0.7)" strokeWidth={RING_STROKE} fill="none"
-                />
-                {progress > 0 && (
-                    <Circle
-                        cx={RING_SIZE / 2} cy={RING_SIZE / 2} r={RING_R}
-                        stroke={fillColor} strokeWidth={RING_STROKE} fill="none"
-                        strokeDasharray={RING_CIRC} strokeDashoffset={offset}
-                        strokeLinecap="round"
-                        transform={`rotate(-90 ${RING_SIZE / 2} ${RING_SIZE / 2})`}
-                    />
-                )}
-            </Svg>
-            <Text style={[styles.ringLabel, isDone && styles.ringLabelDone]}>
-                {progress}%
-            </Text>
         </View>
     );
 }
@@ -440,7 +407,8 @@ export default function BacklogScreen() {
             {showFab && (
                 <View style={styles.fabWrap}>
                     <ScaleOnPress onPress={() => setShowCreateModal(true)} style={styles.fab}>
-                        <Ionicons name="add" size={24} color="#2a2621" />
+                        <Ionicons name="add" size={18} color="#2a2621" />
+                        <Text style={styles.fabText}>Task</Text>
                     </ScaleOnPress>
                 </View>
             )}
@@ -569,34 +537,25 @@ const styles = StyleSheet.create({
         fontVariant: ['tabular-nums'],
     },
 
-    ringWrap: {
-        width: RING_SIZE, height: RING_SIZE,
-        justifyContent: 'center', alignItems: 'center',
-    },
-    ringLabel: {
-        position: 'absolute',
-        fontSize: 7, fontWeight: '600',
-        color: 'rgba(122,115,106,0.5)',
-        fontVariant: ['tabular-nums'],
-    },
-    ringLabelDone: { color: '#5c5248' },
-
     fabWrap: {
         position: 'absolute',
         bottom: 16,
         right: 16,
     },
     fab: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 3,
+        height: 40,
+        paddingHorizontal: 14,
+        borderRadius: 20,
         backgroundColor: '#ffffff',
         justifyContent: 'center',
-        alignItems: 'center',
         shadowColor: '#2a2621',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.12,
         shadowRadius: 10,
         elevation: 4,
     },
+    fabText: { fontSize: 14, fontWeight: '500', color: '#2a2621', letterSpacing: -0.2 },
 });

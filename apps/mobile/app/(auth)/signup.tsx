@@ -1,9 +1,10 @@
 import { useRouter } from 'expo-router';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { useAuthStore } from '../../stores/auth.store';
 import { useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import { KeyboardScreen } from '../../components/KeyboardScreen';
+import { colors, radius, spacing } from '../../lib/theme';
 
 export default function SignupScreen() {
     const router = useRouter();
@@ -59,9 +60,12 @@ export default function SignupScreen() {
 
     return (
         <KeyboardScreen style={styles.screen} contentContainerStyle={styles.container}>
-            <View style={styles.logoContainer}>
-                <Text style={styles.appName}>Starlight</Text>
-                <Text style={styles.tagline}>Your day, handled.</Text>
+            <View style={styles.header}>
+                <Image source={require('../../assets/splash-icon.png')} style={styles.logo} resizeMode="contain" />
+                <View style={styles.wordmark}>
+                    <Text style={styles.appName}>Starlight</Text>
+                    <Text style={styles.tagline}>Live each day with intention</Text>
+                </View>
             </View>
 
             <View style={styles.form}>
@@ -72,7 +76,7 @@ export default function SignupScreen() {
                         onChangeText={setFullName}
                         style={styles.input}
                         placeholder="John Doe"
-                        placeholderTextColor="rgba(122,115,106,0.5)"
+                        placeholderTextColor={colors.text.muted}
                         returnKeyType="next"
                         onSubmitEditing={() => emailRef.current?.focus()}
                         blurOnSubmit={false}
@@ -87,7 +91,7 @@ export default function SignupScreen() {
                         onChangeText={setEmail}
                         style={styles.input}
                         placeholder="you@example.com"
-                        placeholderTextColor="rgba(122,115,106,0.5)"
+                        placeholderTextColor={colors.text.muted}
                         keyboardType="email-address"
                         autoCapitalize="none"
                         returnKeyType="next"
@@ -103,8 +107,8 @@ export default function SignupScreen() {
                         value={password}
                         onChangeText={setPassword}
                         style={styles.input}
-                        placeholder="••••••••"
-                        placeholderTextColor="rgba(122,115,106,0.5)"
+                        placeholder="Enter your password"
+                        placeholderTextColor={colors.text.muted}
                         secureTextEntry
                         returnKeyType="next"
                         onSubmitEditing={() => confirmRef.current?.focus()}
@@ -119,19 +123,23 @@ export default function SignupScreen() {
                         value={confirmPassword}
                         onChangeText={setConfirmPassword}
                         style={styles.input}
-                        placeholder="••••••••"
-                        placeholderTextColor="rgba(122,115,106,0.5)"
+                        placeholder="Re-enter your password"
+                        placeholderTextColor={colors.text.muted}
                         secureTextEntry
                         returnKeyType="done"
                         onSubmitEditing={handleSignup}
                     />
                 </View>
 
-                <TouchableOpacity style={styles.button} onPress={handleSignup} disabled={isLoading}>
-                    <Text style={styles.buttonText}>{isLoading ? 'Creating account...' : 'Create Account'}</Text>
-                </TouchableOpacity>
-
                 {error && <Text style={styles.errorText}>{error}</Text>}
+
+                <TouchableOpacity
+                    style={[styles.button, isLoading && styles.buttonDisabled]}
+                    onPress={handleSignup}
+                    disabled={isLoading}
+                >
+                    <Text style={styles.buttonText}>{isLoading ? 'Creating account…' : 'Create Account'}</Text>
+                </TouchableOpacity>
 
                 <View style={styles.loginRow}>
                     <Text style={styles.loginText}>Already have an account? </Text>
@@ -147,82 +155,99 @@ export default function SignupScreen() {
 const styles = StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: '#fdfcfa',
+        backgroundColor: colors.surface.page,
     },
     container: {
         flexGrow: 1,
         justifyContent: 'center',
         paddingHorizontal: 24,
-        gap: 48,
+        gap: 44,
     },
-    logoContainer: {
+    header: {
         alignItems: 'center',
-        gap: 12,
+        gap: spacing.xs,
+    },
+    logo: {
+        width: 96,
+        height: 96,
+    },
+    wordmark: {
+        alignItems: 'center',
+        gap: spacing.xs,
     },
     appName: {
-        fontSize: 24,
-        fontWeight: '500',
-        color: '#2a2621',
-        letterSpacing: 0.07,
+        fontFamily: 'Caprasimo_400Regular',
+        fontSize: 30,
+        color: colors.text.primary,
+        letterSpacing: -0.5,
     },
     tagline: {
         fontSize: 14,
-        color: '#7a736a',
+        color: colors.text.secondary,
         letterSpacing: -0.15,
+        textAlign: 'center',
+        lineHeight: 20,
+        paddingHorizontal: 24,
     },
     form: {
-        gap: 24,
+        gap: spacing.xl,
     },
     fieldContainer: {
-        gap: 8,
+        gap: spacing.sm,
     },
     label: {
         fontSize: 14,
         fontWeight: '500',
-        color: '#7a736a',
+        color: colors.text.secondary,
         letterSpacing: -0.15,
     },
     input: {
-        height: 50,
-        backgroundColor: '#fffef9',
+        // Padding-based height (not a fixed `height`) so plain and secureTextEntry
+        // fields center their text identically — iOS baselines them differently otherwise.
+        paddingVertical: 14,
+        backgroundColor: colors.surface.raised,
         borderWidth: 1,
-        borderColor: 'rgba(42,38,33,0.10)',
-        borderRadius: 16,
-        paddingHorizontal: 16,
-        fontSize: 16,
-        color: '#2a2621',
-        letterSpacing: -0.31,
+        borderColor: colors.border.hairline,
+        borderRadius: radius.md,
+        paddingHorizontal: 14,
+        fontSize: 15,
+        color: colors.text.primary,
+        letterSpacing: -0.15,
     },
     button: {
         height: 48,
-        backgroundColor: '#d4a574',
-        borderRadius: 16,
+        backgroundColor: colors.text.primary,
+        borderRadius: radius.md,
         justifyContent: 'center',
         alignItems: 'center',
     },
+    buttonDisabled: {
+        opacity: 0.6,
+    },
     buttonText: {
-        fontSize: 16,
-        fontWeight: '500',
-        color: '#2a2621',
-        letterSpacing: -0.31,
+        fontSize: 15,
+        fontWeight: '600',
+        color: colors.surface.page,
+        letterSpacing: -0.1,
     },
     loginRow: {
         flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
+        marginTop: spacing.xs,
     },
     loginText: {
         fontSize: 14,
-        color: '#7a736a',
+        color: colors.text.secondary,
     },
     loginLink: {
-        fontSize: 16,
-        fontWeight: '500',
-        color: '#2a2621',
+        fontSize: 14,
+        fontWeight: '600',
+        color: colors.text.primary,
     },
     errorText: {
-        color: 'red',
-        fontSize: 14,
+        color: colors.danger.default,
+        fontSize: 13,
         textAlign: 'center',
     },
 });

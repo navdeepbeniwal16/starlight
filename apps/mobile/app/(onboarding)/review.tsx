@@ -35,7 +35,6 @@ function GapIndicator({ startTime, endTime }: { startTime: string; endTime: stri
 
 function BlockCard({ block }: { block: BlockInput }) {
     const isContainer = block.type === 'CONTAINER';
-    const isAnchor = block.type === 'ANCHOR';
     const tasks = isContainer
         ? Array.from({ length: sampleTaskCount(block) }, (_, i) => `Sample Task ${i + 1}`)
         : [];
@@ -43,9 +42,7 @@ function BlockCard({ block }: { block: BlockInput }) {
     return (
         <View style={[
             styles.blockCard,
-            isContainer && styles.blockCardContainer,
-            isAnchor && styles.blockCardAnchor,
-            !isContainer && !isAnchor && styles.blockCardNoTask,
+            isContainer ? styles.blockCardContainer : styles.blockCardAnchor,
         ]}>
             <View style={styles.blockCardHeader}>
                 <View style={styles.blockCardHeaderLeft}>
@@ -275,12 +272,6 @@ const styles = StyleSheet.create({
     },
     blockCardAnchor: {
         backgroundColor: 'rgba(232,228,221,0.45)',
-    },
-    blockCardNoTask: {
-        backgroundColor: 'rgba(232,228,221,0.2)',
-        borderWidth: 1.5,
-        borderColor: 'rgba(42,38,33,0.12)',
-        borderStyle: 'dashed',
     },
     blockCardHeader: {
         flexDirection: 'row',

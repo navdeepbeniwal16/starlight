@@ -9,7 +9,7 @@ function validTemplate(): { wakeTime: string; sleepTime: string; blocks: BlockIn
         blocks: [
             { type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" },
             { type: "ANCHOR", name: "Lunch", startTime: "12:00", endTime: "13:00" },
-            { type: "NO_TASK", name: "Wind Down", startTime: "20:00", endTime: "22:00" },
+            { type: "ANCHOR", name: "Wind Down", startTime: "20:00", endTime: "22:00" },
         ],
     };
 }
@@ -111,7 +111,7 @@ describe("validateDayTemplate", () => {
 
         it("rejects a block outside the wake/sleep window", () => {
             const t = validTemplate();
-            t.blocks[2] = { type: "NO_TASK", name: "Too Late", startTime: "22:30", endTime: "23:30" };
+            t.blocks[2] = { type: "ANCHOR", name: "Too Late", startTime: "22:30", endTime: "23:30" };
             expect(() => validateDayTemplate({ ...t, sleepTime: "23:00" })).toThrow(/outside the wake\/sleep window/);
         });
     });

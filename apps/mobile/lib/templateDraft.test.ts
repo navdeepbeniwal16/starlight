@@ -7,7 +7,7 @@ function draft(): TemplateDraft {
         blocks: [
             { type: 'CONTAINER', name: 'Deep Work', startTime: '09:00', endTime: '12:00', energyLevel: 'HIGH' },
             { type: 'ANCHOR', name: 'Lunch', startTime: '12:00', endTime: '13:00' },
-            { type: 'NO_TASK', name: 'Wind Down', startTime: '20:00', endTime: '22:00' },
+            { type: 'ANCHOR', name: 'Wind Down', startTime: '20:00', endTime: '22:00' },
         ],
     };
 }
@@ -256,7 +256,7 @@ describe("computeGaps", () => {
                 sleepTime: '14:00',
                 blocks: [
                     // Given out of order: C, A, B.
-                    { type: 'NO_TASK', name: 'C', startTime: '13:00', endTime: '14:00' },
+                    { type: 'ANCHOR', name: 'C', startTime: '13:00', endTime: '14:00' },
                     { type: 'CONTAINER', name: 'A', startTime: '08:00', endTime: '09:00', energyLevel: 'HIGH' },
                     { type: 'ANCHOR', name: 'B', startTime: '11:00', endTime: '12:00' },
                 ],

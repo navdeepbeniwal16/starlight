@@ -40,7 +40,7 @@ function validTemplate(): { wakeTime: string; sleepTime: string; blocks: BlockIn
         blocks: [
             { type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" },
             { type: "ANCHOR", name: "Lunch", startTime: "12:00", endTime: "13:00" },
-            { type: "NO_TASK", name: "Wind Down", startTime: "20:00", endTime: "22:00" },
+            { type: "ANCHOR", name: "Wind Down", startTime: "20:00", endTime: "22:00" },
         ],
     };
 }

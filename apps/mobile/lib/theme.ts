@@ -39,6 +39,11 @@ export const colors = {
         tint: 'rgba(192,57,43,0.06)',
         border: 'rgba(192,57,43,0.55)',
     },
+    success: {
+        default: '#5e8c6a',
+        tint: 'rgba(94,140,106,0.14)',
+        strong: '#4a7458',
+    },
     scrim: 'rgba(0,0,0,0.3)',
 } as const;
 

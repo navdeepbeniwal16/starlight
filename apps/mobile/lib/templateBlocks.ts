@@ -2,19 +2,17 @@ import { BlockInput, BlockType, EnergyLevel } from "./api.types";
 import { toMins, formatTime } from "./time";
 
 // Shared presentation constants for day-template block editing.
-export const BLOCK_TYPES: BlockType[] = ['CONTAINER', 'ANCHOR', 'NO_TASK'];
+export const BLOCK_TYPES: BlockType[] = ['CONTAINER', 'ANCHOR'];
 export const ENERGY_LEVELS: EnergyLevel[] = ['HIGH', 'MEDIUM', 'LOW'];
 
 export const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
     CONTAINER: 'Container',
     ANCHOR: 'Anchor',
-    NO_TASK: 'No-Task',
 };
 
 export const BLOCK_TYPE_DESCRIPTIONS: Record<BlockType, string> = {
-    CONTAINER: 'Time for tasks you want Starlight to schedule',
-    ANCHOR: 'Fixed activities like meals or gym',
-    NO_TASK: "Free time — the agent won't plan anything here",
+    CONTAINER: 'Time slots for Starlight to schedule your tasks into.',
+    ANCHOR: 'A fixed daily event e.g lunch, dinner or the gym.',
 };
 
 export const ENERGY_LABELS: Record<EnergyLevel, string> = {

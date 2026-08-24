@@ -5,6 +5,7 @@ import {
     NativeSyntheticEvent, NativeScrollEvent,
 } from "react-native";
 import { KeyboardProvider, KeyboardToolbar, KeyboardAwareScrollView, type KeyboardAwareScrollViewRef } from "react-native-keyboard-controller";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import Animated, { useAnimatedStyle, withTiming } from "react-native-reanimated";
 import { Feather } from "@expo/vector-icons";
@@ -15,12 +16,16 @@ import {
     validateBlockDraft, blockDraftErrorMessage, toBlockInput,
 } from "../lib/templateBlocks";
 import { computeGaps, MIN_GAP_MINUTES } from "../lib/templateDraft";
-import { colors, radius, spacing } from "../lib/theme";
+import { colors, radius, spacing, shadow } from "../lib/theme";
+import { tf, effortDotColor } from "./TaskFields";
 
 type PickerTarget = 'start' | 'end' | null;
 
 // Overflow (px) below this is just row padding / rounding, not a real arrow.
 const CHIP_EDGE_SLOP = 6;
+
+// Arrows stay on-screen even when that direction can't scroll, dimmed to read as disabled.
+const DISABLED_ARROW_OPACITY = 0.3;
 
 // Formats a free range like "9:00 – 10:30 AM", showing a shared period once.
 function formatRangeLabel(startTime: string, endTime: string): string {
@@ -62,6 +67,7 @@ export function BlockEditorModal({
     saveLabel?: string;
 }) {
     const isEditMode = editIndex !== undefined;
+    const insets = useSafeAreaInsets();
 
     // Memoized off the inputs below so any change to states which don't touch them — can't make the chip set flicker or recompute.
     const availableRanges = useMemo(() => {
@@ -107,8 +113,8 @@ export function BlockEditorModal({
         chipScrollRef.current?.scrollTo({ x: next, animated: true });
     };
 
-    const leftEdgeStyle = useAnimatedStyle(() => ({ opacity: withTiming(canScrollChipsLeft ? 1 : 0, { duration: 160 }) }));
-    const rightEdgeStyle = useAnimatedStyle(() => ({ opacity: withTiming(canScrollChipsRight ? 1 : 0, { duration: 160 }) }));
+    const leftEdgeStyle = useAnimatedStyle(() => ({ opacity: withTiming(canScrollChipsLeft ? 1 : DISABLED_ARROW_OPACITY, { duration: 160 }) }));
+    const rightEdgeStyle = useAnimatedStyle(() => ({ opacity: withTiming(canScrollChipsRight ? 1 : DISABLED_ARROW_OPACITY, { duration: 160 }) }));
 
     const [type, setType] = useState<BlockType>('CONTAINER');
     const [name, setName] = useState('');
@@ -200,7 +206,7 @@ export function BlockEditorModal({
                                 <View style={styles.modalHeader}>
                                     <Text style={styles.modalTitle}>{isEditMode ? 'Edit block' : 'Add a block'}</Text>
                                     <TouchableOpacity onPress={handleClose} hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }} style={styles.modalCloseButton}>
-                                        <Text style={styles.modalClose}>×</Text>
+                                        <Feather name="x" size={20} color={colors.text.primary} />
                                     </TouchableOpacity>
                                 </View>
                                 <View style={styles.modalDivider} />
@@ -208,33 +214,21 @@ export function BlockEditorModal({
                                 {/* Block type */}
                                 <View style={styles.modalSection}>
                                     <Text style={styles.modalLabel}>Block type</Text>
-                                    <View style={styles.pillRow}>
+                                    <View style={styles.pillWrap}>
                                         {BLOCK_TYPES.map((t) => (
                                             <TouchableOpacity
                                                 key={t}
-                                                style={[styles.pill, type === t && styles.pillActive]}
+                                                style={[tf.pill, styles.blockTypePill, type === t && styles.blockTypePillOn]}
                                                 onPress={() => setType(t)}
                                             >
-                                                <Text style={[styles.pillText, type === t && styles.pillTextActive]}>
+                                                <View style={[styles.blockSwatch, t === 'CONTAINER' ? styles.blockSwatchContainer : styles.blockSwatchAnchor]} />
+                                                <Text style={[tf.pillTxt, type === t && styles.blockTypePillTxtOn]}>
                                                     {BLOCK_TYPE_LABELS[t]}
                                                 </Text>
                                             </TouchableOpacity>
                                         ))}
                                     </View>
                                     <Text style={styles.typeDescription}>{BLOCK_TYPE_DESCRIPTIONS[type]}</Text>
-
-                                    {/* Type legend */}
-                                    <View style={styles.typeLegend}>
-                                        {BLOCK_TYPES.map((t) => (
-                                            <View key={t} style={styles.legendItem}>
-                                                <View style={[styles.legendIcon, t === 'CONTAINER' && styles.legendIconContainer, t === 'ANCHOR' && styles.legendIconAnchor, t === 'NO_TASK' && styles.legendIconNoTask]} />
-                                                <View>
-                                                    <Text style={styles.legendTitle}>{BLOCK_TYPE_LABELS[t]}</Text>
-                                                    <Text style={styles.legendDesc}>{BLOCK_TYPE_DESCRIPTIONS[t]}</Text>
-                                                </View>
-                                            </View>
-                                        ))}
-                                    </View>
                                 </View>
 
                                 <View style={styles.modalDividerLight} />
@@ -253,7 +247,7 @@ export function BlockEditorModal({
                                 </View>
 
                                 {/* Start / End time */}
-                                <View style={styles.modalSection}>
+                                <View style={[styles.modalSection, styles.timeSection]}>
                                     <View style={styles.timeRow}>
                                         <View style={styles.timeField}>
                                             <Text style={styles.modalLabel}>Start time</Text>
@@ -283,10 +277,10 @@ export function BlockEditorModal({
                                         </View>
                                     </View>
 
-                                    {/* Available times */}
+                                    {/* Free slots that quick-fill the time fields above */}
                                     {availableRanges.length > 0 && (
                                         <View style={styles.availableSection}>
-                                            <Text style={styles.modalLabel}>Available times</Text>
+                                            <Text style={styles.availableHint}>Tap a free slot to fill</Text>
                                             <View style={styles.chipStrip}>
                                                 <Animated.View
                                                     style={[styles.chipGutter, leftEdgeStyle]}
@@ -359,14 +353,15 @@ export function BlockEditorModal({
                                     <View style={styles.modalSection}>
                                         <Text style={styles.modalLabel}>Energy level</Text>
                                         <Text style={styles.energySubtitle}>Starlight uses this to match tasks to your capacity.</Text>
-                                        <View style={styles.pillRow}>
+                                        <View style={styles.pillWrap}>
                                             {ENERGY_LEVELS.map((e) => (
                                                 <TouchableOpacity
                                                     key={e}
-                                                    style={[styles.pill, energyLevel === e && styles.pillActive]}
+                                                    style={[tf.pill, energyLevel === e && tf.pillOn]}
                                                     onPress={() => setEnergyLevel(e)}
                                                 >
-                                                    <Text style={[styles.pillText, energyLevel === e && styles.pillTextActive]}>
+                                                    <View style={[tf.dot, { backgroundColor: effortDotColor(e) }]} />
+                                                    <Text style={[tf.pillTxt, energyLevel === e && tf.pillTxtOn]}>
                                                         {ENERGY_LABELS[e]}
                                                     </Text>
                                                 </TouchableOpacity>
@@ -375,12 +370,14 @@ export function BlockEditorModal({
                                     </View>
                                 )}
 
+                            </KeyboardAwareScrollView>
+
+                            {/* Pinned footer: keeps the actions in a fixed spot instead of shifting with the Energy section, which only shows for containers. */}
+                            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
+                                {error && <Text style={styles.errorText}>{error}</Text>}
                                 <TouchableOpacity style={styles.addButton} onPress={handleSubmit} activeOpacity={0.8}>
                                     <Text style={styles.addButtonText}>{isEditMode ? saveLabel : 'Add Block'}</Text>
                                 </TouchableOpacity>
-
-                                {error && <Text style={styles.errorText}>{error}</Text>}
-
                                 {isEditMode && onDelete && (
                                     <TouchableOpacity
                                         style={styles.deleteButton}
@@ -393,9 +390,7 @@ export function BlockEditorModal({
                                         <Text style={styles.deleteButtonText}>Delete block</Text>
                                     </TouchableOpacity>
                                 )}
-
-                                <View style={{ height: 32 }} />
-                            </KeyboardAwareScrollView>
+                            </View>
 
                             {/* Time picker — iOS nested modal */}
                             {Platform.OS === 'ios' && pickerTarget && (
@@ -441,64 +436,63 @@ export function BlockEditorModal({
 }
 
 const styles = StyleSheet.create({
-    errorText: { fontSize: 13, color: colors.danger.default, textAlign: 'center', marginTop: 10, marginHorizontal: 24 },
+    errorText: { fontSize: 13, color: colors.danger.default, textAlign: 'center', marginBottom: spacing.sm },
 
     modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.scrim },
     modalSheet: { backgroundColor: colors.surface.page, borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl, height: '94%' },
     scroll: { flex: 1 },
     dragIndicator: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border.strong, alignSelf: 'center', marginTop: 10, marginBottom: 2 },
     modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingTop: 20, paddingBottom: 16 },
-    modalTitle: { fontSize: 18, fontWeight: '500', color: colors.text.primary },
+    modalTitle: { fontSize: 18, fontWeight: '600', color: colors.text.primary, letterSpacing: -0.3 },
     modalCloseButton: { position: 'absolute', right: 24 },
-    modalClose: { fontSize: 22, color: colors.text.secondary },
     modalDivider: { height: 1, backgroundColor: colors.border.hairline },
     modalDividerLight: { height: 1, backgroundColor: colors.border.hairline, marginHorizontal: 24 },
-    modalSection: { paddingHorizontal: 24, paddingVertical: 20, gap: spacing.md },
+    modalSection: { paddingHorizontal: 24, paddingVertical: 16, gap: spacing.md },
+    // Less top padding groups the time fields with Block name above, rather than reading as a divided section.
+    timeSection: { paddingTop: spacing.xs },
     modalLabel: { fontSize: 14, fontWeight: '500', color: colors.text.secondary, letterSpacing: -0.15 },
 
-    pillRow: { flexDirection: 'row', gap: spacing.sm },
-    pill: { flex: 1, height: 40, borderRadius: radius.sm, backgroundColor: colors.surface.sunken, justifyContent: 'center', alignItems: 'center' },
-    pillActive: { backgroundColor: colors.accent.tint, borderWidth: 1.5, borderColor: colors.accent.default },
-    pillText: { fontSize: 13, fontWeight: '500', color: colors.text.secondary },
-    pillTextActive: { color: colors.accent.default },
+    pillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+    // Transparent border on every block-type pill so selecting one doesn't shift the row by the active border's width.
+    blockTypePill: { borderWidth: 1.5, borderColor: 'transparent' },
+    blockTypePillOn: { backgroundColor: colors.accent.tint, borderColor: colors.accent.default },
+    blockTypePillTxtOn: { color: colors.accent.strong },
+
+    // Swatches mirror the day-template legend so the toggle previews how each block type reads on the timeline.
+    blockSwatch: { width: 12, height: 12, borderRadius: 3, backgroundColor: colors.surface.block },
+    blockSwatchContainer: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.16)', borderStyle: 'dashed' },
+    blockSwatchAnchor: { borderWidth: 1, borderColor: colors.border.hairline },
 
     typeDescription: { fontSize: 13, color: 'rgba(122,115,106,0.75)' },
 
-    typeLegend: { gap: 16, marginTop: 4 },
-    legendItem: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
-    legendIcon: { width: 12, height: 12, borderRadius: 3, marginTop: 2 },
-    legendIconContainer: { borderWidth: 1, borderColor: colors.border.strong, borderStyle: 'dashed' },
-    legendIconAnchor: { backgroundColor: 'rgba(232,228,221,0.85)' },
-    legendIconNoTask: { backgroundColor: colors.surface.sunken, borderWidth: 1, borderColor: colors.border.strong, borderStyle: 'dashed' },
-    legendTitle: { fontSize: 13, fontWeight: '500', color: colors.text.primary },
-    legendDesc: { fontSize: 11, color: 'rgba(122,115,106,0.8)', marginTop: 1 },
-
-    textInput: { height: 52, backgroundColor: colors.surface.raised, borderWidth: 1, borderColor: colors.border.hairline, borderRadius: radius.md, paddingHorizontal: 16, fontSize: 15, color: colors.text.primary },
+    textInput: { height: 46, backgroundColor: colors.surface.raised, borderWidth: 1, borderColor: colors.border.hairline, borderRadius: radius.md, paddingHorizontal: 14, fontSize: 15, color: colors.text.primary },
 
     timeRow: { flexDirection: 'row', gap: spacing.md },
     timeField: { flex: 1, gap: spacing.md },
-    timeInput: { height: 52, backgroundColor: colors.surface.raised, borderWidth: 1, borderColor: colors.border.hairline, borderRadius: radius.md, justifyContent: 'center', paddingHorizontal: 16 },
+    timeInput: { height: 46, backgroundColor: colors.surface.raised, borderWidth: 1, borderColor: colors.border.hairline, borderRadius: radius.md, justifyContent: 'center', paddingHorizontal: 14 },
     timeInputValueRow: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.xs },
     timeInputValue: { fontSize: 15, fontWeight: '500', color: colors.text.primary, fontVariant: ['tabular-nums'] },
     timeInputPeriod: { fontSize: 11, fontWeight: '500', color: colors.accent.default },
     timeInputPlaceholder: { fontSize: 15, color: 'rgba(122,115,106,0.35)' },
 
-    availableSection: { gap: spacing.md, marginTop: 16 },
+    availableSection: { gap: spacing.sm, marginTop: spacing.xs },
+    availableHint: { fontSize: 12, color: colors.text.muted },
     chipStrip: { flexDirection: 'row', alignItems: 'center' },
     chipScroll: { flex: 1 },
     chipRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center', paddingHorizontal: 2 },
     chipGutter: { width: 30, alignSelf: 'stretch' },
     chipChevron: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-    chip: { height: 36, borderRadius: radius.sm, backgroundColor: colors.surface.sunken, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 14 },
-    chipActive: { backgroundColor: colors.accent.tint, borderWidth: 1.5, borderColor: colors.accent.default },
-    chipText: { fontSize: 13, fontWeight: '500', color: colors.text.secondary, fontVariant: ['tabular-nums'] },
-    chipTextActive: { color: colors.accent.default },
+    chip: { height: 30, borderRadius: radius.pill, backgroundColor: colors.surface.sunken, borderWidth: 1, borderColor: 'transparent', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 12 },
+    chipActive: { backgroundColor: colors.accent.tint, borderColor: colors.accent.default },
+    chipText: { fontSize: 12, fontWeight: '500', color: colors.text.secondary, fontVariant: ['tabular-nums'] },
+    chipTextActive: { color: colors.accent.strong },
 
     energySubtitle: { fontSize: 12, color: 'rgba(122,115,106,0.6)', marginTop: -4 },
 
-    addButton: { marginHorizontal: 24, height: 52, backgroundColor: colors.accent.default, borderRadius: radius.lg, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
-    addButtonText: { fontSize: 16, fontWeight: '500', color: colors.text.onAccent, letterSpacing: -0.31 },
-    deleteButton: { marginHorizontal: 24, height: 48, borderRadius: radius.lg, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
+    footer: { paddingHorizontal: 24, paddingTop: spacing.md, backgroundColor: colors.surface.page, ...shadow.footer },
+    addButton: { height: 48, backgroundColor: colors.text.primary, borderRadius: radius.md, justifyContent: 'center', alignItems: 'center' },
+    addButtonText: { fontSize: 15, fontWeight: '500', color: colors.surface.page, letterSpacing: -0.1 },
+    deleteButton: { height: 48, borderRadius: radius.lg, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
     deleteButtonText: { fontSize: 15, fontWeight: '500', color: colors.danger.default, letterSpacing: -0.23 },
 
     pickerOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.scrim },
