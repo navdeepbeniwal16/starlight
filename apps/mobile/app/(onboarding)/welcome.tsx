@@ -1,35 +1,33 @@
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { ProgressBar } from "../../components/ProgressBar";
+import { colors, radius, spacing } from "../../lib/theme";
+import { PressableScale } from "../../components/PressableScale";
 
+// No progress eyebrow — the onboarding cover reads as a cover, not a working step.
 export default function WelcomeScreen() {
     const router = useRouter();
 
     return (
         <SafeAreaView style={styles.safeArea}>
             <View style={styles.container}>
-                <ProgressBar currentStep={1} />
                 <View style={styles.content}>
-                    {/* Logo */}
                     <View style={styles.logoRow}>
-                        <Text style={styles.logoIcon}>✦</Text>
+                        <Image source={require('../../assets/splash-icon.png')} style={styles.logo} resizeMode="contain" />
                         <Text style={styles.logoText}>Starlight</Text>
                     </View>
-                    <Text style={styles.tagline}>Your day, handled.</Text>
 
-                    {/* Intro */}
-                    <View style={styles.introBlock}>
-                        <Text style={styles.heading}>Your own planning assistant</Text>
+                    <View style={styles.promiseBlock}>
+                        <Text style={styles.heading}>Tell us how your days go, and Starlight will plan one for you.</Text>
                         <Text style={styles.body}>
-                            Set up how your days usually look, and let Starlight slot your tasks in. It works around your life, not the other way around.
+                            Sketch a typical day, add a task or two, and watch Starlight fit it in. Takes about a minute.
                         </Text>
                     </View>
                 </View>
 
-                <TouchableOpacity style={styles.button} onPress={() => router.push('/(onboarding)/wake-sleep')} activeOpacity={0.8}>
-                    <Text style={styles.buttonText}>Get Started</Text>
-                </TouchableOpacity>
+                <PressableScale style={styles.button} onPress={() => router.push('/(onboarding)/build')}>
+                    <Text style={styles.buttonText}>Get started</Text>
+                </PressableScale>
             </View>
         </SafeAreaView>
     );
@@ -38,7 +36,7 @@ export default function WelcomeScreen() {
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
-        backgroundColor: '#fdfcfa',
+        backgroundColor: colors.surface.page,
     },
     container: {
         flex: 1,
@@ -50,60 +48,50 @@ const styles = StyleSheet.create({
     content: {
         flex: 1,
         justifyContent: 'center',
-        alignItems: 'center',
-        gap: 48,
+        gap: 40,
     },
     logoRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: spacing.sm,
     },
-    logoIcon: {
-        fontSize: 28,
-        color: '#d4a574',
+    logo: {
+        width: 44,
+        height: 44,
     },
     logoText: {
-        fontSize: 28,
-        fontWeight: '500',
-        color: '#2a2621',
-        letterSpacing: 0.4,
+        fontFamily: 'Caprasimo_400Regular',
+        fontSize: 30,
+        color: colors.text.primary,
+        letterSpacing: -0.5,
     },
-    tagline: {
-        fontSize: 15,
-        color: '#7a736a',
-        letterSpacing: -0.23,
-        marginTop: -36,
-    },
-    introBlock: {
-        alignItems: 'center',
-        gap: 20,
-        paddingHorizontal: 8,
+    promiseBlock: {
+        gap: 16,
     },
     heading: {
-        fontSize: 20,
+        fontSize: 26,
         fontWeight: '600',
-        color: '#2a2621',
-        textAlign: 'center',
+        color: colors.text.primary,
         letterSpacing: -0.3,
+        lineHeight: 34,
     },
     body: {
         fontSize: 15,
-        color: '#7a736a',
-        textAlign: 'center',
+        color: colors.text.secondary,
         lineHeight: 24,
         letterSpacing: -0.23,
     },
     button: {
         height: 52,
-        backgroundColor: '#d4a574',
-        borderRadius: 16,
+        backgroundColor: colors.text.primary,
+        borderRadius: radius.md,
         justifyContent: 'center',
         alignItems: 'center',
     },
     buttonText: {
-        fontSize: 16,
-        fontWeight: '500',
-        color: '#2a2621',
-        letterSpacing: -0.31,
+        fontSize: 15,
+        fontWeight: '600',
+        color: colors.surface.page,
+        letterSpacing: -0.1,
     },
 });

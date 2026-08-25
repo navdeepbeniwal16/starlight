@@ -10,6 +10,7 @@ type TemplateState = {
     draft: TemplateDraft | null;
     blockKeys: string[];
     hydrate: (template: DayTemplate) => void;
+    seed: (draft: TemplateDraft) => void;
     setWakeSleep: (wakeTime: string, sleepTime: string) => void;
     updateBlock: (index: number, block: BlockInput) => void;
     addBlock: (block: BlockInput) => void;
@@ -44,6 +45,12 @@ export const useTemplateStore = create<TemplateState>((set) => ({
     hydrate: (template) => {
         const draft = toDraft(template);
         set({ baseline: toDraft(template), draft, blockKeys: draft.blocks.map(nextKey) });
+    },
+
+    // Baseline mirrors the draft so the editor opens clean; onboarding gates Continue on
+    // validity, not dirtiness.
+    seed: (draft) => {
+        set({ baseline: toDraft(draft), draft: toDraft(draft), blockKeys: draft.blocks.map(nextKey) });
     },
 
     setWakeSleep: (wakeTime, sleepTime) =>

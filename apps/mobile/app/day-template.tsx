@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useNavigation } from "expo-router";
@@ -9,30 +9,21 @@ import Animated, {
     FadeIn,
     FadeInDown,
     FadeOut,
-    LinearTransition,
     useSharedValue,
     useAnimatedStyle,
     useAnimatedScrollHandler,
     interpolate,
     Extrapolation,
-    withSequence,
-    withTiming,
-    type EntryOrExitLayoutType,
 } from "react-native-reanimated";
 import { api } from "../lib/api";
 import { colors, radius, spacing, shadow, typography } from "../lib/theme";
 import type { BlockInput } from "../lib/api.types";
-import { formatTime } from "../lib/time";
-import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, buildTimeline, hasContainer, type TimelineRow } from "../lib/templateDraft";
+import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, buildTimeline } from "../lib/templateDraft";
 import { useTemplateStore } from "../stores/template.store";
-import { BlockListItem } from "../components/BlockListItem";
 import { BlockEditorModal } from "../components/BlockEditorModal";
-import { GapAffordance } from "../components/GapAffordance";
-import { BoundaryTimeControl } from "../components/BoundaryTimeControl";
-import { TimelineThread } from "../components/timeline";
+import { TemplateTimeline } from "../components/TemplateTimeline";
+import { TemplateValidationBanner } from "../components/TemplateValidationBanner";
 import { PressableScale } from "../components/PressableScale";
-
-const ROW_LAYOUT = LinearTransition.springify().dampingRatio(1);
 
 // What the block modal is open on: editing a block in place, or adding one into a gap.
 type EditorTarget =
@@ -172,9 +163,6 @@ export default function DayTemplateScreen() {
     );
     const outOfBoundsIndexes = useMemo(() => new Set(outOfBounds.map((o) => o.index)), [outOfBounds]);
 
-    // The draft has blocks but no CONTAINER, which is invalid and worth flagging on its own.
-    const noContainer = !!draft && draft.blocks.length > 0 && !hasContainer(draft);
-
     const canSave = dirty && valid && !saving;
 
     const scrollY = useSharedValue(0);
@@ -235,25 +223,7 @@ export default function DayTemplateScreen() {
                             </View>
                         </Animated.View>
 
-                        {(!wakeBeforeSleep || outOfBounds.length > 0 || noContainer) && (
-                            <View style={styles.validation}>
-                                {!wakeBeforeSleep && (
-                                    <Text style={styles.boundsError}>Your wake time must be before your sleep time.</Text>
-                                )}
-                                {wakeBeforeSleep && outOfBounds.length > 0 && (
-                                    <Text style={styles.boundsError}>
-                                        {outOfBounds.length === 1 ? 'This block is' : 'These blocks are'} outside your{' '}
-                                        {formatTime(draft.wakeTime)}–{formatTime(draft.sleepTime)} window:{' '}
-                                        {outOfBounds.map((o) => o.block.name).join(', ')}. Edit to fit the new window before saving.
-                                    </Text>
-                                )}
-                                {noContainer && (
-                                    <Text style={styles.boundsError}>
-                                        Keep at least one Container block so Starlight has time to schedule tasks. Add one before saving.
-                                    </Text>
-                                )}
-                            </View>
-                        )}
+                        <TemplateValidationBanner draft={draft} />
 
                         <TemplateTimeline
                             rows={rows}
@@ -334,104 +304,6 @@ export default function DayTemplateScreen() {
     );
 }
 
-function TemplateTimeline({
-    rows,
-    wakeTime,
-    sleepTime,
-    blockKeys,
-    entering,
-    flashFor,
-    outOfBoundsIndexes,
-    onWakeChange,
-    onSleepChange,
-    onEditBlock,
-    onAddInGap,
-}: {
-    rows: TimelineRow[];
-    wakeTime: string;
-    sleepTime: string;
-    blockKeys: string[];
-    entering: boolean;
-    flashFor: { key: string; nonce: number };
-    outOfBoundsIndexes: Set<number>;
-    onWakeChange: (time: string) => void;
-    onSleepChange: (time: string) => void;
-    onEditBlock: (index: number) => void;
-    onAddInGap: (startTime: string, endTime: string) => void;
-}) {
-    const children: ReactNode[] = [
-        <Animated.View key="wake" entering={entering ? FadeInDown.duration(300) : undefined}>
-            <BoundaryTimeControl label="Wake" time={wakeTime} onChange={onWakeChange} />
-        </Animated.View>,
-    ];
-
-    rows.forEach((row, i) => {
-        const delay = (i + 1) * 40;
-        const key = row.kind === 'block' ? blockKeys[row.index] : `gap-${row.startTime}`;
-        children.push(<TimelineThread key={`thread-${key}`} />);
-
-        if (row.kind === 'block') {
-            children.push(
-                <BlockRow
-                    key={key}
-                    signal={flashFor.key === `block-${row.startTime}` ? flashFor.nonce : 0}
-                    entering={entering ? FadeInDown.duration(300).delay(delay) : undefined}
-                >
-                    <BlockListItem
-                        block={row.block}
-                        onPress={() => onEditBlock(row.index)}
-                        invalid={outOfBoundsIndexes.has(row.index)}
-                    />
-                </BlockRow>
-            );
-        } else {
-            children.push(
-                <Animated.View
-                    key={key}
-                    layout={ROW_LAYOUT}
-                    entering={entering ? FadeInDown.duration(300).delay(delay) : FadeIn.duration(160)}
-                    exiting={FadeOut.duration(160)}
-                >
-                    <GapAffordance gap={row.gap} onPress={() => onAddInGap(row.gap.startTime, row.gap.endTime)} />
-                </Animated.View>
-            );
-        }
-    });
-
-    children.push(<TimelineThread key="thread-sleep" />);
-    children.push(
-        <Animated.View key="sleep" entering={entering ? FadeInDown.duration(300).delay((rows.length + 1) * 40) : undefined}>
-            <BoundaryTimeControl label="Sleep" time={sleepTime} onChange={onSleepChange} />
-        </Animated.View>
-    );
-
-    return <View>{children}</View>;
-}
-
-// Wraps a block row with the timeline motion: neighbors reflow via `layout` when a
-// block is added or deleted, a deletion fades out, and an accent overlay flashes
-// when `signal` becomes a new positive value, confirming an add or edit landed.
-function BlockRow({ signal, entering, children }: { signal: number; entering?: EntryOrExitLayoutType; children: ReactNode }) {
-    const opacity = useSharedValue(0);
-    const prev = useRef(0);
-
-    useEffect(() => {
-        if (signal > 0 && signal !== prev.current) {
-            opacity.value = withSequence(withTiming(1, { duration: 140 }), withTiming(0, { duration: 620 }));
-        }
-        prev.current = signal;
-    }, [signal, opacity]);
-
-    const overlayStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
-
-    return (
-        <Animated.View layout={ROW_LAYOUT} entering={entering} exiting={FadeOut.duration(200)}>
-            {children}
-            <Animated.View pointerEvents="none" style={[styles.flashOverlay, overlayStyle]} />
-        </Animated.View>
-    );
-}
-
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: colors.surface.page },
 
@@ -465,9 +337,6 @@ const styles = StyleSheet.create({
     legendSwatchAnchor: { borderWidth: 1, borderColor: colors.border.hairline },
     legendText: { fontSize: 12, color: colors.text.secondary, letterSpacing: -0.1 },
 
-    validation: { gap: spacing.sm },
-    boundsError: { fontSize: 13, color: colors.danger.default, lineHeight: 19, letterSpacing: -0.1 },
-
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: spacing.lg },
     errorText: { fontSize: 14, color: colors.text.secondary, textAlign: 'center' },
     retryButton: {
@@ -491,12 +360,6 @@ const styles = StyleSheet.create({
     saveButtonText: { fontSize: 15, fontWeight: '500', color: colors.surface.page, letterSpacing: -0.1 },
     cancelButton: { height: 48, borderRadius: radius.lg, justifyContent: 'center', alignItems: 'center' },
     cancelButtonText: { fontSize: 15, fontWeight: '500', color: colors.text.secondary, letterSpacing: -0.23 },
-
-    flashOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        borderRadius: radius.lg,
-        backgroundColor: 'rgba(212,165,116,0.35)',
-    },
 
     savedToast: {
         position: 'absolute',

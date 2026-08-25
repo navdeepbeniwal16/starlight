@@ -1,10 +1,5 @@
-// Pure onboarding routing: given persisted progress, decide where app entry
-// should send an authenticated user. Kept free of React and navigation
-// internals so it can be unit-tested in isolation.
-
-// The onboarding screens in the order the user walks through them. The first
-// entry is where a brand-new user starts.
-export const ONBOARDING_STEPS = ['welcome', 'wake-sleep', 'blocks', 'review', 'finish'] as const;
+// Pure routing decision — no React or navigation imports, so it stays unit-testable.
+export const ONBOARDING_STEPS = ['welcome', 'build', 'first-task'] as const;
 
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 
@@ -12,15 +7,12 @@ export const TODAY_ROUTE = '/(main)';
 
 export const ONBOARDING_STEP_ROUTES: Record<OnboardingStep, string> = {
   welcome: '/(onboarding)/welcome',
-  'wake-sleep': '/(onboarding)/wake-sleep',
-  blocks: '/(onboarding)/blocks',
-  review: '/(onboarding)/review',
-  finish: '/(onboarding)/finish',
+  build: '/(onboarding)/build',
+  'first-task': '/(onboarding)/first-task',
 };
 
 export type OnboardingProgress = {
   completed: boolean;
-  // Furthest step the user has reached; null for someone who never started.
   furthestStep: OnboardingStep | null;
 };
 

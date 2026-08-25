@@ -11,7 +11,7 @@ describe("resolveAppEntryRoute", () => {
     });
 
     it("sends completed users to Today regardless of furthest step", () => {
-        expect(resolveAppEntryRoute({ completed: true, furthestStep: 'review' })).toBe(TODAY_ROUTE);
+        expect(resolveAppEntryRoute({ completed: true, furthestStep: 'build' })).toBe(TODAY_ROUTE);
     });
 
     it("sends a brand-new user to the first onboarding step", () => {
