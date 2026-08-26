@@ -7,6 +7,8 @@ import { colors, radius, spacing, shadow, typography } from "../../lib/theme";
 import type { BlockInput } from "../../lib/api.types";
 import { buildTimeline, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds } from "../../lib/templateDraft";
 import { buildStarterTemplate } from "../../lib/starterTemplate";
+import { previousStepRoute } from "../../lib/onboardingRouting";
+import { setFurthestOnboardingStep } from "../../lib/onboardingProgress";
 import { useTemplateStore } from "../../stores/template.store";
 import { StepEyebrow } from "../../components/StepEyebrow";
 import { TemplateTimeline } from "../../components/TemplateTimeline";
@@ -46,6 +48,8 @@ export default function BuildScreen() {
         setLoading(false);
     }, [hydrate, seed]);
 
+    useEffect(() => { setFurthestOnboardingStep('build'); }, []);
+
     useEffect(() => {
         // Keep any in-session draft (e.g. after stepping forward and back); otherwise load or seed.
         if (useTemplateStore.getState().draft) {
@@ -68,6 +72,14 @@ export default function BuildScreen() {
         if (editor?.mode === 'edit') removeBlock(editor.index);
         setSaveError(null);
         setEditor(null);
+    }
+
+    // A resumed user can enter on this step with no history to pop, so fall back
+    // to the previous onboarding step rather than a no-op GO_BACK.
+    function handleBack() {
+        if (router.canGoBack()) return router.back();
+        const prev = previousStepRoute('build');
+        if (prev) router.replace(prev);
     }
 
     async function handleContinue() {
@@ -166,7 +178,7 @@ export default function BuildScreen() {
                         </PressableScale>
                         <TouchableOpacity
                             style={styles.backButton}
-                            onPress={() => router.back()}
+                            onPress={handleBack}
                             disabled={saving}
                             activeOpacity={0.8}
                         >

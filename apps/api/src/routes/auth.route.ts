@@ -1,5 +1,5 @@
 import { Router, Request, Response} from "express";
-import { EmailAlreadyInUseError, getMe, InvalidCredentialsError, login, signup, UserNotFoundError } from "../services/auth.service";
+import { EmailAlreadyInUseError, getMe, InvalidCredentialsError, login, markOnboarded, signup, UserNotFoundError } from "../services/auth.service";
 import { authenticate } from "../middlewares/auth.middleware";
 
 const router = Router();
@@ -100,6 +100,23 @@ router.get("/me", authenticate, async (req: Request, res: Response): Promise<voi
 
     try {
         const user = await getMe(userId);
+        res.status(200).json({ success: true, data: user });
+        return;
+    } catch (error) {
+        if(error instanceof UserNotFoundError) {
+            res.status(404).json({ success: false, error: "User not found" });
+            return;
+        }
+
+        throw error;
+    }
+});
+
+router.post("/me/onboarding/complete", authenticate, async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user!.sub;
+
+    try {
+        const user = await markOnboarded(userId);
         res.status(200).json({ success: true, data: user });
         return;
     } catch (error) {

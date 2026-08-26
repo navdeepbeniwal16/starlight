@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image } from 'reac
 import { useAuthStore } from '../../stores/auth.store';
 import { useRef, useState } from 'react';
 import { api } from '../../lib/api';
+import { clearFurthestOnboardingStep } from '../../lib/onboardingProgress';
 import { KeyboardScreen } from '../../components/KeyboardScreen';
 import { colors, radius, spacing } from '../../lib/theme';
 
@@ -55,6 +56,8 @@ export default function SignupScreen() {
         }
 
         await setAuth(result.data.user, result.data.token);
+        // A fresh account must not inherit a prior session's resume hint from this device.
+        await clearFurthestOnboardingStep();
         router.replace('/(onboarding)');
     }
 

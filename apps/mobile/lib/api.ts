@@ -1,4 +1,4 @@
-import { ApiResult, BlockInput, ConfirmAssignment, ConfirmPlanResponse, CreateDayTemplateResponse, CreateTaskInput, CreateTaskResponse, GeneratePlanResponse, GetAllTasksResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, GetReviewTasksResponse, GetTaskDetailResponse, LoginResponse, MeResponse, SignupResponse, UpdateDayTemplateResponse, UpdateTaskInput, UpdateTaskResponse } from "./api.types";
+import { ApiResult, BlockInput, CompleteOnboardingResponse, ConfirmAssignment, ConfirmPlanResponse, CreateDayTemplateResponse, CreateTaskInput, CreateTaskResponse, GeneratePlanResponse, GetAllTasksResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, GetReviewTasksResponse, GetTaskDetailResponse, LoginResponse, MeResponse, SignupResponse, UpdateDayTemplateResponse, UpdateTaskInput, UpdateTaskResponse } from "./api.types";
 import { getToken } from "./auth-token";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
@@ -321,7 +321,7 @@ export const api = {
       });
       const responseJson = await response.json();
       if (!response.ok) {
-        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
+        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status, code: responseJson.code };
       }
       return { ok: true, data: responseJson.data };
     } catch (error) {
@@ -386,6 +386,30 @@ export const api = {
     try {
       const response = await fetch(`${API_URL}/auth/me`, {
         method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+
+      const responseJson = await response.json();
+      if(!response.ok) {
+        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
+      }
+
+      return { ok: true, data: responseJson.data };
+    } catch (error) {
+      return { ok: false, error: 'Network error. Please check your connection.'};
+    }
+  },
+
+  completeOnboarding: async (): Promise<CompleteOnboardingResponse> => {
+    const token = await getToken();
+
+    if(!token) {
+      return { ok: false, error: 'No token found' };
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/auth/me/onboarding/complete`, {
+        method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
       });
 

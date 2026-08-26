@@ -112,3 +112,41 @@ export async function updateDayTemplate(data: {
 
     return getDayTemplate(data.userId);
 }
+
+// Create-or-replace so callers can "save my day" without tracking whether a
+// template already exists — no client-side exists flag to drift from the server.
+export async function upsertDayTemplate(data: {
+    userId: string,
+    wakeTime: string,
+    sleepTime: string,
+    blocks: BlockInput[]
+}) {
+    validateDayTemplate({
+        wakeTime: data.wakeTime,
+        sleepTime: data.sleepTime,
+        blocks: data.blocks,
+    });
+
+    await prisma.$transaction(async (tx) => {
+        const template = await tx.dayTemplate.upsert({
+            where: { userId: data.userId },
+            update: { wakeTime: data.wakeTime, sleepTime: data.sleepTime },
+            create: { userId: data.userId, wakeTime: data.wakeTime, sleepTime: data.sleepTime }
+        });
+
+        await tx.block.deleteMany({ where: { dayTemplateId: template.id } });
+
+        await tx.block.createMany({
+            data: data.blocks.map(block => ({
+                dayTemplateId: template.id,
+                type: block.type,
+                name: block.name,
+                startTime: block.startTime,
+                endTime: block.endTime,
+                energyLevel: block.energyLevel
+            }))
+        });
+    });
+
+    return getDayTemplate(data.userId);
+}

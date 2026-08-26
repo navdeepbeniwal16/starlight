@@ -3,6 +3,7 @@ import {
     ONBOARDING_STEP_ROUTES,
     TODAY_ROUTE,
     resolveAppEntryRoute,
+    previousStepRoute,
 } from "./onboardingRouting";
 
 describe("resolveAppEntryRoute", () => {
@@ -26,5 +27,19 @@ describe("resolveAppEntryRoute", () => {
                 ONBOARDING_STEP_ROUTES[step],
             );
         }
+    });
+});
+
+describe("previousStepRoute", () => {
+    it("has no previous step at the cover", () => {
+        expect(previousStepRoute('welcome')).toBeNull();
+    });
+
+    it("steps back from build to welcome", () => {
+        expect(previousStepRoute('build')).toBe(ONBOARDING_STEP_ROUTES.welcome);
+    });
+
+    it("steps back from first-task to build", () => {
+        expect(previousStepRoute('first-task')).toBe(ONBOARDING_STEP_ROUTES.build);
     });
 });

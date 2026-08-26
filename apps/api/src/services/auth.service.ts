@@ -31,14 +31,15 @@ export async function signup(userData:{
     });
     
     const token = signToken({sub: user.id, email: user.email});
-    
+
     return {
         token,
         user: {
             id: user.id,
             email: user.email,
             firstName: user.firstName,
-            lastName: user.lastName
+            lastName: user.lastName,
+            onboardedAt: user.onboardedAt
         }
     };
 }
@@ -58,14 +59,15 @@ export async function login( data:{
     }
     
     const token = signToken({sub: user.id, email: user.email});
-    
+
     return {
         token,
         user: {
             id: user.id,
             email: user.email,
             firstName: user.firstName,
-            lastName: user.lastName
+            lastName: user.lastName,
+            onboardedAt: user.onboardedAt
         }
     };
 }
@@ -73,10 +75,28 @@ export async function login( data:{
 export async function getMe(userId:string) {
         const user = await prisma.user.findUnique({
             where: { id: userId },
-            select: { id: true, email: true, firstName: true, lastName: true }
+            select: { id: true, email: true, firstName: true, lastName: true, onboardedAt: true }
         });
 
         if (!user) throw new UserNotFoundError();
 
         return user;
+}
+
+// Idempotent: the first confirmed plan stamps completion; the null guard keeps
+// the original timestamp so re-running onboarding can't move it.
+export async function markOnboarded(userId: string) {
+    await prisma.user.updateMany({
+        where: { id: userId, onboardedAt: null },
+        data: { onboardedAt: new Date() }
+    });
+
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, email: true, firstName: true, lastName: true, onboardedAt: true }
+    });
+
+    if (!user) throw new UserNotFoundError();
+
+    return user;
 }

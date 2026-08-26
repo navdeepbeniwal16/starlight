@@ -1,11 +1,13 @@
 import { create } from "zustand";
 import { deleteToken, saveToken } from "../lib/auth-token";
+import { clearFurthestOnboardingStep } from "../lib/onboardingProgress";
 
 type User = {
     id: string;
     email: string;
     firstName: string;
     lastName: string;
+    onboardedAt: string | null;
 };
 
 type AuthState = {
@@ -29,6 +31,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     // Deletes token from SecureStore first, then wipes in-memory state
     clearAuth: async () => {
         await deleteToken();
+        await clearFurthestOnboardingStep();
         set({ user: null, token: null });
     }
 }));

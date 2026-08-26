@@ -56,15 +56,15 @@ router.post("/generate", authenticate, async (req: Request, res: Response): Prom
         res.status(200).json({ success: true, data: result });
     } catch (error) {
         if (error instanceof NoTemplateError) {
-            res.status(400).json({ success: false, error: 'No day template found. Please set up your day template first.' });
+            res.status(400).json({ success: false, code: 'NO_TEMPLATE', error: 'No day template found. Please set up your day template first.' });
             return;
         }
         if (error instanceof NoContainerBlocksError) {
-            res.status(400).json({ success: false, error: 'No time blocks remain for today — all your available blocks have passed.' });
+            res.status(400).json({ success: false, code: 'NO_CONTAINER_BLOCKS', error: 'No time blocks remain for today — all your available blocks have passed.' });
             return;
         }
         if (error instanceof AgentError) {
-            res.status(502).json({ success: false, error: 'The planning agent could not generate a plan. Please try again.' });
+            res.status(502).json({ success: false, code: 'AGENT_ERROR', error: 'The planning agent could not generate a plan. Please try again.' });
             return;
         }
         throw error;

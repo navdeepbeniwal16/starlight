@@ -1,12 +1,16 @@
+import { useEffect } from "react";
 import { View, Text, StyleSheet, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { colors, radius, spacing } from "../../lib/theme";
+import { setFurthestOnboardingStep } from "../../lib/onboardingProgress";
 import { PressableScale } from "../../components/PressableScale";
 
 // No progress eyebrow — the onboarding cover reads as a cover, not a working step.
 export default function WelcomeScreen() {
     const router = useRouter();
+
+    useEffect(() => { setFurthestOnboardingStep('welcome'); }, []);
 
     return (
         <SafeAreaView style={styles.safeArea}>

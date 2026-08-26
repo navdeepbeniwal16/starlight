@@ -5,6 +5,8 @@ import { useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import { KeyboardScreen } from '../../components/KeyboardScreen';
 import { colors, radius, spacing } from '../../lib/theme';
+import { getFurthestOnboardingStep } from '../../lib/onboardingProgress';
+import { resolveAppEntryRoute } from '../../lib/onboardingRouting';
 
 export default function LoginScreen() {
     const router = useRouter();
@@ -36,7 +38,8 @@ export default function LoginScreen() {
         }
 
         await setAuth(result.data.user, result.data.token);
-        router.replace('/(onboarding)');
+        const furthestStep = await getFurthestOnboardingStep();
+        router.replace(resolveAppEntryRoute({ completed: result.data.user.onboardedAt !== null, furthestStep }));
     }
 
     return (

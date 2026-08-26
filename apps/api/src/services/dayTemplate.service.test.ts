@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma";
 import {
     createDayTemplate,
     updateDayTemplate,
+    upsertDayTemplate,
     getDayTemplate,
     DayTemplateAlreadyExistsError,
     DayTemplateNotFoundError,
@@ -164,6 +165,49 @@ describe("updateDayTemplate", () => {
         await expect(updateDayTemplate({ userId, ...validTemplate() })).rejects.toBeInstanceOf(
             DayTemplateNotFoundError
         );
+    });
+});
+
+describe("upsertDayTemplate", () => {
+    it("creates the template when the user has none", async () => {
+        await upsertDayTemplate({ userId, ...validTemplate() });
+
+        const stored = await getDayTemplate(userId);
+        expect(stored.wakeTime).toBe("07:00");
+        expect(stored.blocks.map((b) => b.name).sort()).toEqual(["Deep Work", "Lunch", "Wind Down"]);
+    });
+
+    it("replaces wake/sleep and blocks when a template already exists", async () => {
+        await seedTemplate(userId);
+
+        const edited = {
+            wakeTime: "06:30",
+            sleepTime: "22:30",
+            blocks: [{ type: "CONTAINER", name: "Sprint", startTime: "08:00", endTime: "11:00", energyLevel: "HIGH" }] as BlockInput[],
+        };
+        await upsertDayTemplate({ userId, ...edited });
+
+        const stored = await getDayTemplate(userId);
+        expect(stored.wakeTime).toBe("06:30");
+        expect(stored.sleepTime).toBe("22:30");
+        expect(stored.blocks).toHaveLength(1);
+        expect(stored.blocks[0].name).toBe("Sprint");
+    });
+
+    it("does not create a second template on repeat saves", async () => {
+        await upsertDayTemplate({ userId, ...validTemplate() });
+        await upsertDayTemplate({ userId, ...validTemplate() });
+
+        const count = await prisma.dayTemplate.count({ where: { userId } });
+        expect(count).toBe(1);
+    });
+
+    it("routes through the validator and never persists an invalid template", async () => {
+        const invalid = validTemplate();
+        invalid.wakeTime = "not-a-time";
+
+        await expect(upsertDayTemplate({ userId, ...invalid })).rejects.toBeInstanceOf(DayTemplateValidationError);
+        await expect(getDayTemplate(userId)).rejects.toBeInstanceOf(DayTemplateNotFoundError);
     });
 });
 
