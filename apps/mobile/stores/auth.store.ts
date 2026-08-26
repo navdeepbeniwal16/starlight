@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { deleteToken, saveToken } from "../lib/auth-token";
-import { clearFurthestOnboardingStep } from "../lib/onboardingProgress";
+import { useTemplateStore } from "./template.store";
+import { useOnboardingTasksStore } from "./onboardingTasks.store";
 
 type User = {
     id: string;
@@ -18,20 +19,18 @@ type AuthState = {
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
-    // Initial state
     user: null,
     token: null,
 
-    // Persists token to SecureStore first, then updates in-memory state
     setAuth: async (user, token) => {
         await saveToken(token);
-        set({user, token});
+        useTemplateStore.getState().clear();
+        useOnboardingTasksStore.getState().reset();
+        set({ user, token });
     },
 
-    // Deletes token from SecureStore first, then wipes in-memory state
     clearAuth: async () => {
         await deleteToken();
-        await clearFurthestOnboardingStep();
         set({ user: null, token: null });
     }
 }));

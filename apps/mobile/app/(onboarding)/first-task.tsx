@@ -16,14 +16,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
 import { colors, radius, spacing, shadow, typography } from "../../lib/theme";
 import { canPlanFirstTask, canPlanTasks, type FirstTaskDraft } from "../../lib/firstTaskDraft";
-import { setFurthestOnboardingStep } from "../../lib/onboardingProgress";
-import { previousStepRoute } from "../../lib/onboardingRouting";
 import { usePlanGeneration } from "../../lib/usePlanGeneration";
 import { ESTIMATE_OPTIONS, getEstimateLabel } from "../../components/TaskFields";
 import { StepEyebrow } from "../../components/StepEyebrow";
 import { PressableScale } from "../../components/PressableScale";
 import { PlanGeneratingOverlay } from "../../components/PlanGeneratingOverlay";
-import { useOnboardingTasksStore } from "../../stores/onboardingTasks.store";
+import { useOnboardingTasksStore, type OnboardingTask } from "../../stores/onboardingTasks.store";
 
 const SUGGESTIONS: (FirstTaskDraft & { id: string })[] = [
     { id: 'emails', title: 'Reply to important emails', estimatedMins: 30 },
@@ -49,8 +47,6 @@ export default function FirstTaskScreen() {
     const [createError, setCreateError] = useState<string | null>(null);
 
     const { generating, generateError, generateErrorCode, generate, dismissError } = usePlanGeneration();
-
-    useEffect(() => { setFurthestOnboardingStep('first-task'); }, []);
 
     // Seed the pool from the backlog so it reflects tasks a prior "Plan my day"
     // already persisted (the review schedules the backlog, not this local pool).
@@ -94,26 +90,21 @@ export default function FirstTaskScreen() {
     }, [draftReady, draft, addTask]);
 
     // A persisted task must also leave the backlog, or generation would keep
-    // scheduling it after it's been removed from the pool. Blocked while submitting:
-    // the create loop stamps serverIds into the store by index, so a removal
-    // splicing the array mid-loop would mis-assign them.
-    const handleRemove = useCallback(async (index: number) => {
+    // scheduling it after it's been removed from the pool. Blocked while submitting
+    // so a removal can't race the create loop, which works from a pool snapshot.
+    const handleRemove = useCallback(async (task: OnboardingTask) => {
         if (submitting) return;
-        const task = pool[index];
-        if (task?.serverId) {
+        if (task.serverId) {
             const res = await api.deleteTask(task.serverId);
             if (!res.ok) { setCreateError(res.error); return; }
         }
-        removeTask(index);
-    }, [submitting, pool, removeTask]);
+        removeTask(task.id);
+    }, [submitting, removeTask]);
 
-    // A resumed user can land here as the entry route with no history to pop, so
-    // fall back to the previous onboarding step rather than a no-op GO_BACK. This
-    // also backs the "Adjust my day" recovery when the day window has elapsed.
+    // Doubles as the "Adjust my day" recovery when generation fails: stepping back
+    // to build lets the user reshape the template that left no room to schedule.
     const handleBack = useCallback(() => {
-        if (router.canGoBack()) return router.back();
-        const prev = previousStepRoute('first-task');
-        if (prev) router.replace(prev);
+        router.back();
     }, [router]);
 
     const goToPayoff = useCallback(() => router.push('/(onboarding)/review'), [router]);
@@ -127,8 +118,7 @@ export default function FirstTaskScreen() {
 
         // Skip tasks already persisted on an earlier attempt so a re-plan after
         // adjusting the day doesn't duplicate them in the backlog.
-        for (let i = 0; i < pool.length; i++) {
-            const task = pool[i];
+        for (const task of pool) {
             if (task.serverId) continue;
             const created = await api.createTask({ title: task.title.trim(), estimatedMins: task.estimatedMins });
             if (!created.ok) {
@@ -136,7 +126,7 @@ export default function FirstTaskScreen() {
                 setCreateError(created.error);
                 return;
             }
-            markCreated(i, created.data.id);
+            markCreated(task.id, created.data.id);
         }
 
         setSubmitting(false);
@@ -208,13 +198,13 @@ export default function FirstTaskScreen() {
 
                     {pool.length > 0 && (
                         <View style={styles.poolList}>
-                            {pool.map((task, index) => (
-                                <View key={index} style={styles.poolCard}>
+                            {pool.map((task) => (
+                                <View key={task.id} style={styles.poolCard}>
                                     <Text style={styles.poolTitle} numberOfLines={1}>{task.title.trim()}</Text>
                                     <View style={styles.poolRight}>
                                         <Text style={styles.poolEstimate}>{getEstimateLabel(task.estimatedMins)}</Text>
                                         <TouchableOpacity
-                                            onPress={() => handleRemove(index)}
+                                            onPress={() => handleRemove(task)}
                                             disabled={submitting}
                                             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                         >

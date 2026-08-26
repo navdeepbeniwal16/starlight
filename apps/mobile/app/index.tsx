@@ -4,8 +4,6 @@ import { api } from "../lib/api";
 import { ActivityIndicator, View } from "react-native";
 import { getToken } from "../lib/auth-token";
 import { useAuthStore } from "../stores/auth.store";
-import { getFurthestOnboardingStep } from "../lib/onboardingProgress";
-import { resolveAppEntryRoute } from "../lib/onboardingRouting";
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -18,8 +16,7 @@ export default function HomeScreen() {
       if(result.ok) {
         const token = await getToken();
         await setAuth(result.data, token!);
-        const furthestStep = await getFurthestOnboardingStep();
-        router.replace(resolveAppEntryRoute({ completed: result.data.onboardedAt !== null, furthestStep }));
+        router.replace(result.data.onboardedAt ? '/(main)' : '/(onboarding)/welcome');
       } else {
         router.replace('/(auth)/signup');
       }

@@ -1,9 +1,13 @@
 import { create } from "zustand";
 
-// One task the user drafted during onboarding. `serverId` is set once the task
-// has been persisted, so a re-plan (after adjusting the day) reuses the existing
-// backlog task instead of creating a duplicate.
+// One task the user drafted during onboarding. `id` is a stable client id so the
+// pool is mutated by identity, never array index: hydrate() reorders the pool and
+// the create loop stamps serverIds mid-flight, so an index-keyed write would land
+// on the wrong entry. `serverId` is set once the task has been persisted, so a
+// re-plan (after adjusting the day) reuses the existing backlog task instead of
+// creating a duplicate.
 export type OnboardingTask = {
+    id: string;
     title: string;
     estimatedMins: number;
     serverId: string | null;
@@ -15,12 +19,15 @@ export type OnboardingTask = {
 // confirmed.
 type OnboardingTasksState = {
     pool: OnboardingTask[];
-    hydrate: (saved: OnboardingTask[]) => void;
+    hydrate: (saved: { title: string; estimatedMins: number; serverId: string }[]) => void;
     addTask: (task: { title: string; estimatedMins: number }) => void;
-    removeTask: (index: number) => void;
-    markCreated: (index: number, serverId: string) => void;
+    removeTask: (id: string) => void;
+    markCreated: (id: string, serverId: string) => void;
     reset: () => void;
 };
+
+let idSeq = 0;
+const nextId = () => `otask_${++idSeq}`;
 
 export const useOnboardingTasksStore = create<OnboardingTasksState>((set) => ({
     pool: [],
@@ -28,10 +35,12 @@ export const useOnboardingTasksStore = create<OnboardingTasksState>((set) => ({
     // persisted tasks come authoritatively from `saved`, and any not-yet-created
     // drafts the user is still holding are kept ahead of a lost local state.
     hydrate: (saved) =>
-        set((s) => ({ pool: [...saved, ...s.pool.filter((t) => t.serverId === null)] })),
-    addTask: (task) => set((s) => ({ pool: [...s.pool, { ...task, serverId: null }] })),
-    removeTask: (index) => set((s) => ({ pool: s.pool.filter((_, i) => i !== index) })),
-    markCreated: (index, serverId) =>
-        set((s) => ({ pool: s.pool.map((t, i) => (i === index ? { ...t, serverId } : t)) })),
+        set((s) => ({
+            pool: [...saved.map((t) => ({ ...t, id: nextId() })), ...s.pool.filter((t) => t.serverId === null)],
+        })),
+    addTask: (task) => set((s) => ({ pool: [...s.pool, { ...task, id: nextId(), serverId: null }] })),
+    removeTask: (id) => set((s) => ({ pool: s.pool.filter((t) => t.id !== id) })),
+    markCreated: (id, serverId) =>
+        set((s) => ({ pool: s.pool.map((t) => (t.id === id ? { ...t, serverId } : t)) })),
     reset: () => set({ pool: [] }),
 }));
