@@ -1,31 +1,26 @@
-export type ApiResult<T> = { ok: true, data: T } | { ok: false, error: string, status?: number };
+export type ApiResult<T> = { ok: true, data: T } | { ok: false, error: string, status?: number, code?: string };
+
+export type AuthUser = {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    onboardedAt: string | null;
+};
 
 export type SignupResponse = ApiResult<{
     token: string;
-    user: {
-        id: string
-        email: string;
-        firstName: string;
-        lastName: string;
-    }
+    user: AuthUser;
 }>;
 
 export type LoginResponse = ApiResult<{
     token: string;
-    user: {
-        id: string;
-        email: string;
-        firstName: string;
-        lastName: string;
-    }
+    user: AuthUser;
 }>;
 
-export type MeResponse = ApiResult<{
-    id: string,
-    email: string,
-    firstName: string,
-    lastName: string
-}>;
+export type MeResponse = ApiResult<AuthUser>;
+
+export type CompleteOnboardingResponse = ApiResult<AuthUser>;
 
 export type BlockType = 'CONTAINER' | 'ANCHOR';
 export type EnergyLevel = 'HIGH' | 'MEDIUM' | 'LOW';

@@ -551,8 +551,8 @@ export default function TodayScreen() {
                 <Wordmark size={34} />
                 <PressableScale style={styles.planButton} onPress={handlePlanDay}>
                     <PlanButtonGradient />
-                    <Text style={styles.planButtonIcon}>✦</Text>
-                    <Text style={styles.planButtonText}>Plan your day</Text>
+                    <Ionicons name="sparkles" size={14} color="#2a2621" />
+                    <Text style={styles.planButtonText}>{state.status === 'loaded' ? 'Replan' : 'Plan your day'}</Text>
                 </PressableScale>
             </View>
 
@@ -646,10 +646,6 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         paddingHorizontal: 12,
         paddingVertical: 10,
-    },
-    planButtonIcon: {
-        fontSize: 12,
-        color: '#2a2621',
     },
     planButtonText: {
         fontSize: 14,

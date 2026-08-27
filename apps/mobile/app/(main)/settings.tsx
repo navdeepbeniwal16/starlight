@@ -81,7 +81,7 @@ function SettingsRow({ icon, label, onPress }: { icon: keyof typeof Ionicons.gly
         <PressableScale style={styles.row} onPress={onPress} activeScale={0.98}>
             <Ionicons name={icon} size={18} color={colors.text.secondary} />
             <Text style={styles.rowLabel}>{label}</Text>
-            <Ionicons name="chevron-forward" size={18} color={colors.text.muted} style={styles.rowChevron} />
+            <Ionicons name="create-outline" size={18} color={colors.text.muted} style={styles.rowChevron} />
         </PressableScale>
     );
 }

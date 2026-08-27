@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
 import {
     createDayTemplate,
-    updateDayTemplate,
+    upsertDayTemplate,
     getDayTemplate,
     DayTemplateAlreadyExistsError,
     DayTemplateNotFoundError
@@ -114,7 +114,7 @@ router.put("/", authenticate, async (req: Request, res: Response): Promise<void>
     }
 
     try {
-        const template = await updateDayTemplate({
+        const template = await upsertDayTemplate({
             userId: req.user!.sub,
             wakeTime: parsed.wakeTime,
             sleepTime: parsed.sleepTime,
@@ -125,11 +125,6 @@ router.put("/", authenticate, async (req: Request, res: Response): Promise<void>
     } catch (error) {
         if (error instanceof DayTemplateValidationError) {
             res.status(400).json({ success: false, error: error.message });
-            return;
-        }
-
-        if (error instanceof DayTemplateNotFoundError) {
-            res.status(404).json({ success: false, error: "Day template not found" });
             return;
         }
 

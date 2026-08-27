@@ -8,15 +8,15 @@ import { useAuthStore } from "../stores/auth.store";
 export default function HomeScreen() {
   const router = useRouter();
   const setAuth = useAuthStore((state) => state.setAuth);
-  
+
   useEffect(() => {
     const checkSession = async () => {
       const result = await api.getMe();
-      
+
       if(result.ok) {
         const token = await getToken();
         await setAuth(result.data, token!);
-        router.replace('/(onboarding)');
+        router.replace(result.data.onboardedAt ? '/(main)' : '/(onboarding)/welcome');
       } else {
         router.replace('/(auth)/signup');
       }

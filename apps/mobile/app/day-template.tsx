@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useNavigation } from "expo-router";
@@ -9,30 +9,22 @@ import Animated, {
     FadeIn,
     FadeInDown,
     FadeOut,
-    LinearTransition,
     useSharedValue,
     useAnimatedStyle,
     useAnimatedScrollHandler,
     interpolate,
     Extrapolation,
-    withSequence,
-    withTiming,
-    type EntryOrExitLayoutType,
 } from "react-native-reanimated";
 import { api } from "../lib/api";
-import { colors, radius, spacing, shadow, typography } from "../lib/theme";
+import { colors, radius, spacing, shadow } from "../lib/theme";
 import type { BlockInput } from "../lib/api.types";
-import { formatTime } from "../lib/time";
-import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, buildTimeline, hasContainer, type TimelineRow } from "../lib/templateDraft";
+import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, buildTimeline } from "../lib/templateDraft";
+import { formatDuration, durationMins } from "../lib/time";
 import { useTemplateStore } from "../stores/template.store";
-import { BlockListItem } from "../components/BlockListItem";
 import { BlockEditorModal } from "../components/BlockEditorModal";
-import { GapAffordance } from "../components/GapAffordance";
-import { BoundaryTimeControl } from "../components/BoundaryTimeControl";
-import { TimelineThread } from "../components/timeline";
+import { TemplateTimeline } from "../components/TemplateTimeline";
+import { TemplateValidationBanner } from "../components/TemplateValidationBanner";
 import { PressableScale } from "../components/PressableScale";
-
-const ROW_LAYOUT = LinearTransition.springify().dampingRatio(1);
 
 // What the block modal is open on: editing a block in place, or adding one into a gap.
 type EditorTarget =
@@ -55,6 +47,9 @@ export default function DayTemplateScreen() {
     const [saveError, setSaveError] = useState<string | null>(null);
     const [savedVisible, setSavedVisible] = useState(false);
     const [entering, setEntering] = useState(false);
+    // Measured so the scroll can reserve exactly the dirty-state footer's height,
+    // keeping the last row (sleep) reachable above it rather than hidden behind.
+    const [footerHeight, setFooterHeight] = useState(0);
     // The draft row to flash after an add or edit lands, keyed by the block's start time.
     // The nonce lets re-touching the same row retrigger the flash.
     const [flashFor, setFlashFor] = useState<{ key: string; nonce: number }>({ key: '', nonce: 0 });
@@ -94,6 +89,13 @@ export default function DayTemplateScreen() {
         clear();
         if (savedTimer.current) clearTimeout(savedTimer.current);
     }, [clear]);
+
+    // A modal swipe-down dismiss resolves natively and can slip past the
+    // beforeRemove guard below, so disable the gesture while there are unsaved
+    // edits — the back button (which the guard intercepts) becomes the only exit.
+    useEffect(() => {
+        navigation.setOptions({ gestureEnabled: !dirty });
+    }, [navigation, dirty]);
 
     // Confirm before discarding unsaved edits on any back navigation.
     useEffect(() => {
@@ -164,6 +166,14 @@ export default function DayTemplateScreen() {
 
     const rows = useMemo(() => buildTimeline(draft), [draft]);
 
+    const totals = useMemo(() => {
+        const sum = (type: BlockInput['type']) =>
+            (draft?.blocks ?? [])
+                .filter((b) => b.type === type)
+                .reduce((mins, b) => mins + durationMins(b.startTime, b.endTime), 0);
+        return { container: sum('CONTAINER'), anchor: sum('ANCHOR') };
+    }, [draft]);
+
     // Skip the bounds check while wake and sleep are inverted; the window is meaningless then.
     const wakeBeforeSleep = isWakeBeforeSleep(draft);
     const outOfBounds = useMemo(
@@ -171,9 +181,6 @@ export default function DayTemplateScreen() {
         [draft, wakeBeforeSleep],
     );
     const outOfBoundsIndexes = useMemo(() => new Set(outOfBounds.map((o) => o.index)), [outOfBounds]);
-
-    // The draft has blocks but no CONTAINER, which is invalid and worth flagging on its own.
-    const noContainer = !!draft && draft.blocks.length > 0 && !hasContainer(draft);
 
     const canSave = dirty && valid && !saving;
 
@@ -185,15 +192,17 @@ export default function DayTemplateScreen() {
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-            <View style={styles.backRow}>
-                <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.7} hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}>
-                    <Ionicons name="chevron-back" size={20} color={colors.text.secondary} />
-                    <Text style={styles.backLabel}>Settings</Text>
-                </TouchableOpacity>
-            </View>
-
             <View style={styles.header}>
-                <Text style={styles.headerTitle}>Day Template</Text>
+                <View style={styles.headerEyebrow}>
+                    <Text style={styles.headerEyebrowLabel}>Day Template</Text>
+                </View>
+                <View style={styles.headerRow}>
+                    <Text style={styles.headerTitle}>Reshape your day</Text>
+                    <TouchableOpacity onPress={() => router.back()} activeOpacity={0.6} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <Ionicons name="close" size={22} color={colors.text.primary} />
+                    </TouchableOpacity>
+                </View>
+                <Text style={styles.headerSubtitle}>Add, move, or resize your time blocks.</Text>
             </View>
 
             {loading && (
@@ -216,7 +225,7 @@ export default function DayTemplateScreen() {
                     <Animated.View pointerEvents="none" style={[styles.scrollEdge, scrollEdgeStyle]} />
                     <Animated.ScrollView
                         style={styles.scroll}
-                        contentContainerStyle={[styles.content, dirty && { paddingBottom: 96 + insets.bottom }]}
+                        contentContainerStyle={[styles.content, dirty && { paddingBottom: (footerHeight || 160) + spacing.md }]}
                         showsVerticalScrollIndicator={false}
                         onScroll={scrollHandler}
                         scrollEventThrottle={16}
@@ -228,32 +237,16 @@ export default function DayTemplateScreen() {
                             <View style={styles.legendItem}>
                                 <View style={[styles.legendSwatch, styles.legendSwatchContainer]} />
                                 <Text style={styles.legendText}>Container</Text>
+                                <Text style={styles.legendTotal}>{formatDuration(totals.container)}</Text>
                             </View>
                             <View style={styles.legendItem}>
                                 <View style={[styles.legendSwatch, styles.legendSwatchAnchor]} />
                                 <Text style={styles.legendText}>Anchor</Text>
+                                <Text style={styles.legendTotal}>{formatDuration(totals.anchor)}</Text>
                             </View>
                         </Animated.View>
 
-                        {(!wakeBeforeSleep || outOfBounds.length > 0 || noContainer) && (
-                            <View style={styles.validation}>
-                                {!wakeBeforeSleep && (
-                                    <Text style={styles.boundsError}>Your wake time must be before your sleep time.</Text>
-                                )}
-                                {wakeBeforeSleep && outOfBounds.length > 0 && (
-                                    <Text style={styles.boundsError}>
-                                        {outOfBounds.length === 1 ? 'This block is' : 'These blocks are'} outside your{' '}
-                                        {formatTime(draft.wakeTime)}–{formatTime(draft.sleepTime)} window:{' '}
-                                        {outOfBounds.map((o) => o.block.name).join(', ')}. Edit to fit the new window before saving.
-                                    </Text>
-                                )}
-                                {noContainer && (
-                                    <Text style={styles.boundsError}>
-                                        Keep at least one Container block so Starlight has time to schedule tasks. Add one before saving.
-                                    </Text>
-                                )}
-                            </View>
-                        )}
+                        <TemplateValidationBanner draft={draft} />
 
                         <TemplateTimeline
                             rows={rows}
@@ -273,6 +266,7 @@ export default function DayTemplateScreen() {
                     {dirty && (
                         <Animated.View
                             style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}
+                            onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}
                             entering={SlideInDown.springify().damping(20).stiffness(220).mass(0.6)}
                             exiting={SlideOutDown.duration(180)}
                         >
@@ -334,116 +328,23 @@ export default function DayTemplateScreen() {
     );
 }
 
-function TemplateTimeline({
-    rows,
-    wakeTime,
-    sleepTime,
-    blockKeys,
-    entering,
-    flashFor,
-    outOfBoundsIndexes,
-    onWakeChange,
-    onSleepChange,
-    onEditBlock,
-    onAddInGap,
-}: {
-    rows: TimelineRow[];
-    wakeTime: string;
-    sleepTime: string;
-    blockKeys: string[];
-    entering: boolean;
-    flashFor: { key: string; nonce: number };
-    outOfBoundsIndexes: Set<number>;
-    onWakeChange: (time: string) => void;
-    onSleepChange: (time: string) => void;
-    onEditBlock: (index: number) => void;
-    onAddInGap: (startTime: string, endTime: string) => void;
-}) {
-    const children: ReactNode[] = [
-        <Animated.View key="wake" entering={entering ? FadeInDown.duration(300) : undefined}>
-            <BoundaryTimeControl label="Wake" time={wakeTime} onChange={onWakeChange} />
-        </Animated.View>,
-    ];
-
-    rows.forEach((row, i) => {
-        const delay = (i + 1) * 40;
-        const key = row.kind === 'block' ? blockKeys[row.index] : `gap-${row.startTime}`;
-        children.push(<TimelineThread key={`thread-${key}`} />);
-
-        if (row.kind === 'block') {
-            children.push(
-                <BlockRow
-                    key={key}
-                    signal={flashFor.key === `block-${row.startTime}` ? flashFor.nonce : 0}
-                    entering={entering ? FadeInDown.duration(300).delay(delay) : undefined}
-                >
-                    <BlockListItem
-                        block={row.block}
-                        onPress={() => onEditBlock(row.index)}
-                        invalid={outOfBoundsIndexes.has(row.index)}
-                    />
-                </BlockRow>
-            );
-        } else {
-            children.push(
-                <Animated.View
-                    key={key}
-                    layout={ROW_LAYOUT}
-                    entering={entering ? FadeInDown.duration(300).delay(delay) : FadeIn.duration(160)}
-                    exiting={FadeOut.duration(160)}
-                >
-                    <GapAffordance gap={row.gap} onPress={() => onAddInGap(row.gap.startTime, row.gap.endTime)} />
-                </Animated.View>
-            );
-        }
-    });
-
-    children.push(<TimelineThread key="thread-sleep" />);
-    children.push(
-        <Animated.View key="sleep" entering={entering ? FadeInDown.duration(300).delay((rows.length + 1) * 40) : undefined}>
-            <BoundaryTimeControl label="Sleep" time={sleepTime} onChange={onSleepChange} />
-        </Animated.View>
-    );
-
-    return <View>{children}</View>;
-}
-
-// Wraps a block row with the timeline motion: neighbors reflow via `layout` when a
-// block is added or deleted, a deletion fades out, and an accent overlay flashes
-// when `signal` becomes a new positive value, confirming an add or edit landed.
-function BlockRow({ signal, entering, children }: { signal: number; entering?: EntryOrExitLayoutType; children: ReactNode }) {
-    const opacity = useSharedValue(0);
-    const prev = useRef(0);
-
-    useEffect(() => {
-        if (signal > 0 && signal !== prev.current) {
-            opacity.value = withSequence(withTiming(1, { duration: 140 }), withTiming(0, { duration: 620 }));
-        }
-        prev.current = signal;
-    }, [signal, opacity]);
-
-    const overlayStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
-
-    return (
-        <Animated.View layout={ROW_LAYOUT} entering={entering} exiting={FadeOut.duration(200)}>
-            {children}
-            <Animated.View pointerEvents="none" style={[styles.flashOverlay, overlayStyle]} />
-        </Animated.View>
-    );
-}
-
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: colors.surface.page },
 
-    backRow: { paddingHorizontal: spacing.md, paddingTop: spacing.xl, paddingBottom: 2 },
-    backButton: {
-        flexDirection: 'row', alignItems: 'center', gap: 2,
-        alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: spacing.xs,
+    // Mirrors the planning review screen's header (eyebrow, small title + close,
+    // subtitle, hairline divider) so the two screens read as one flow.
+    header: {
+        paddingHorizontal: 20, paddingTop: 24, paddingBottom: 16,
+        borderBottomWidth: 1, borderBottomColor: 'rgba(42,38,33,0.06)',
     },
-    backLabel: { fontSize: 15, color: colors.text.secondary },
-
-    header: { paddingHorizontal: spacing.xl, paddingTop: spacing.sm, paddingBottom: spacing.lg },
-    headerTitle: { ...typography.title, color: colors.text.primary, letterSpacing: 0.07 },
+    headerEyebrow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
+    headerEyebrowLabel: {
+        fontSize: 11, fontWeight: '600', color: 'rgba(122,115,106,0.5)',
+        letterSpacing: 0.5, textTransform: 'uppercase',
+    },
+    headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    headerTitle: { fontSize: 16, fontWeight: '600', color: colors.text.primary, letterSpacing: -0.3 },
+    headerSubtitle: { fontSize: 13, color: colors.text.secondary, lineHeight: 18, marginTop: 6, maxWidth: 320 },
 
     scrollEdge: {
         position: 'absolute', top: 0, left: 0, right: 0, height: 1, zIndex: 5,
@@ -458,15 +359,13 @@ const styles = StyleSheet.create({
     scroll: { flex: 1 },
     content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
 
-    legend: { flexDirection: 'row', gap: spacing.lg, paddingHorizontal: spacing.xs },
+    legend: { flexDirection: 'row', gap: spacing.lg, paddingHorizontal: spacing.xs, marginTop: spacing.md },
     legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
     legendSwatch: { width: 12, height: 12, borderRadius: 3, backgroundColor: colors.surface.block },
     legendSwatchContainer: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.16)', borderStyle: 'dashed' },
     legendSwatchAnchor: { borderWidth: 1, borderColor: colors.border.hairline },
     legendText: { fontSize: 12, color: colors.text.secondary, letterSpacing: -0.1 },
-
-    validation: { gap: spacing.sm },
-    boundsError: { fontSize: 13, color: colors.danger.default, lineHeight: 19, letterSpacing: -0.1 },
+    legendTotal: { fontSize: 12, color: colors.text.muted, letterSpacing: -0.1, fontVariant: ['tabular-nums'] },
 
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: spacing.lg },
     errorText: { fontSize: 14, color: colors.text.secondary, textAlign: 'center' },
@@ -491,12 +390,6 @@ const styles = StyleSheet.create({
     saveButtonText: { fontSize: 15, fontWeight: '500', color: colors.surface.page, letterSpacing: -0.1 },
     cancelButton: { height: 48, borderRadius: radius.lg, justifyContent: 'center', alignItems: 'center' },
     cancelButtonText: { fontSize: 15, fontWeight: '500', color: colors.text.secondary, letterSpacing: -0.23 },
-
-    flashOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        borderRadius: radius.lg,
-        backgroundColor: 'rgba(212,165,116,0.35)',
-    },
 
     savedToast: {
         position: 'absolute',

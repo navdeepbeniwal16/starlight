@@ -36,7 +36,7 @@ export default function LoginScreen() {
         }
 
         await setAuth(result.data.user, result.data.token);
-        router.replace('/(onboarding)');
+        router.replace(result.data.user.onboardedAt ? '/(main)' : '/(onboarding)/welcome');
     }
 
     return (

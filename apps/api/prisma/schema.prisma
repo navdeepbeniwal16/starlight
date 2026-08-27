@@ -12,6 +12,7 @@ model User {
   passwordHash String
   firstName    String
   lastName     String
+  onboardedAt  DateTime?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   dayTemplate  DayTemplate?

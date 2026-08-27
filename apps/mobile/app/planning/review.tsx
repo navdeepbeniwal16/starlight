@@ -23,8 +23,9 @@ import { api } from "../../lib/api";
 import { formatTime } from "../../lib/time";
 import type { BacklogBuckets, BacklogTask, ScheduledTask, TaskDetail } from "../../lib/api.types";
 import { applyCreated, applyProgress, applyToggle, createSequencer, groupForReconcile, patchTask, restoreTask, withoutTask } from "../../lib/backlogState";
-import { usePlanningStore } from "../../stores/planning.store";
+import { usePlanGeneration } from "../../lib/usePlanGeneration";
 import CreateTaskModal from "../../components/CreateTaskModal";
+import { PlanGeneratingOverlay } from "../../components/PlanGeneratingOverlay";
 import CircularProgress from "../../components/CircularProgress";
 import ReanimatedSwipeable, { SwipeDirection, type SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 
@@ -293,8 +294,6 @@ function GroupHeader({ label, description, count, collapsible, open, onToggle }:
 export default function PlanningReviewScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
-    const setProposal = usePlanningStore(s => s.setProposal);
-
     const [buckets, setBuckets] = useState<BacklogBuckets | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [showCreateModal, setShowCreateModal] = useState(false);
@@ -302,8 +301,7 @@ export default function PlanningReviewScreen() {
     const [openOverrides, setOpenOverrides] = useState<Partial<Record<GroupKey, boolean>>>({});
 
     // Agent plan generation: full-screen while the agent runs, retry on error.
-    const [generating, setGenerating] = useState(false);
-    const [generateError, setGenerateError] = useState<string | null>(null);
+    const { generating, generateError, generateErrorCode, generate, cancel, dismissError } = usePlanGeneration();
 
     // Gates out slow responses that would otherwise clobber an optimistic update.
     const seq = useRef(createSequencer()).current;
@@ -318,33 +316,17 @@ export default function PlanningReviewScreen() {
         });
     }, [seq]);
 
-    const planRun = useRef<AbortController | null>(null);
+    const planDay = useCallback(() => {
+        generate(() => router.push('/planning/plan'));
+    }, [generate, router]);
 
-    const handlePlanDay = useCallback(async () => {
-        if (generating) return;
-        const run = new AbortController();
-        planRun.current = run;
-        setGenerating(true);
-        setGenerateError(null);
-        const result = await api.generatePlan(run.signal);
-        // Drop the result if this run was superseded, so an aborted request
-        // (cancel) or a stale one never errors or navigates.
-        if (planRun.current !== run) return;
-        planRun.current = null;
-        setGenerating(false);
-        if (result.ok) {
-            setProposal(result.data);
-            router.push('/planning/plan');
-        } else {
-            setGenerateError(result.error);
-        }
-    }, [generating, router, setProposal]);
-
-    const cancelPlanDay = useCallback(() => {
-        planRun.current?.abort();
-        planRun.current = null;
-        setGenerating(false);
-    }, []);
+    // Shared by the footer button and the generation-error overlay's "Adjust my day".
+    // Dismiss the error before pushing: review stays mounted under the sheet, so a
+    // lingering overlay would still cover it when the editor is popped back.
+    const adjustDay = useCallback(() => {
+        dismissError();
+        router.push('/day-template');
+    }, [dismissError, router]);
 
     // Refetch on focus so edits made on the task detail screen reflect here.
     useFocusEffect(
@@ -500,9 +482,13 @@ export default function PlanningReviewScreen() {
 
             {!loading && !error && (
                 <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+                    <PressableScale style={s.adjustButton} onPress={adjustDay}>
+                        <Text style={s.adjustPrompt}>Need to reshape your day first?</Text>
+                        <Text style={s.adjustButtonLabel}>Adjust my day</Text>
+                    </PressableScale>
                     <PressableScale
                         style={s.doneButton}
-                        onPress={handlePlanDay}
+                        onPress={planDay}
                     >
                         <Text style={s.doneButtonLabel}>Plan my day</Text>
                     </PressableScale>
@@ -519,33 +505,15 @@ export default function PlanningReviewScreen() {
                 }}
             />
 
-            {(generating || generateError) && (
-                <View style={s.generateOverlay}>
-                    {generating ? (
-                        <>
-                            <ActivityIndicator color="#d4a574" size="large" />
-                            <Text style={s.generateSubtitle}>Starlight is scheduling your tasks into your day.</Text>
-                            <PressableScale style={s.cancelButton} onPress={cancelPlanDay}>
-                                <Text style={s.cancelButtonLabel}>Cancel</Text>
-                            </PressableScale>
-                        </>
-                    ) : (
-                        <>
-                            <View style={s.generateErrorIcon}>
-                                <Ionicons name="alert-circle-outline" size={24} color="#d4a574" />
-                            </View>
-                            <Text style={s.generateTitle}>Couldn't build your plan</Text>
-                            <Text style={s.generateSubtitle}>{generateError}</Text>
-                            <PressableScale style={s.retryButton} onPress={handlePlanDay}>
-                                <Text style={s.retryButtonLabel}>Try again</Text>
-                            </PressableScale>
-                            <TouchableOpacity onPress={() => setGenerateError(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                                <Text style={s.retryDismiss}>Back to tasks</Text>
-                            </TouchableOpacity>
-                        </>
-                    )}
-                </View>
-            )}
+            <PlanGeneratingOverlay
+                generating={generating}
+                error={generateError}
+                errorCode={generateErrorCode}
+                onRetry={planDay}
+                onDismiss={dismissError}
+                onCancel={cancel}
+                onAdjust={adjustDay}
+            />
         </SafeAreaView>
     );
 }
@@ -769,9 +737,25 @@ const s = StyleSheet.create({
 
     footer: {
         paddingHorizontal: 16,
-        paddingTop: 12,
+        paddingTop: 16,
+        gap: 16,
         borderTopWidth: 1,
         borderTopColor: 'rgba(42,38,33,0.06)',
+    },
+    adjustButton: {
+        alignItems: 'center',
+        gap: 3,
+    },
+    adjustPrompt: {
+        fontSize: 12,
+        color: 'rgba(122,115,106,0.7)',
+        letterSpacing: -0.1,
+    },
+    adjustButtonLabel: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#5c5248',
+        letterSpacing: -0.2,
     },
     doneButton: {
         backgroundColor: '#2a2621',
@@ -784,67 +768,5 @@ const s = StyleSheet.create({
         fontWeight: '600',
         color: '#fdfcfa',
         letterSpacing: -0.2,
-    },
-
-    generateOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: '#fdfcfa',
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingHorizontal: 40,
-        gap: 12,
-    },
-    generateErrorIcon: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: 'rgba(212,165,116,0.12)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    generateTitle: {
-        fontSize: 17,
-        fontWeight: '600',
-        color: '#2a2621',
-        letterSpacing: -0.3,
-        marginTop: 4,
-    },
-    generateSubtitle: {
-        fontSize: 13,
-        color: '#7a736a',
-        textAlign: 'center',
-        lineHeight: 18,
-        maxWidth: 260,
-    },
-    retryButton: {
-        backgroundColor: '#2a2621',
-        borderRadius: 14,
-        paddingVertical: 14,
-        paddingHorizontal: 32,
-        alignItems: 'center',
-        marginTop: 12,
-    },
-    retryButtonLabel: {
-        fontSize: 15,
-        fontWeight: '600',
-        color: '#fdfcfa',
-        letterSpacing: -0.2,
-    },
-    retryDismiss: {
-        fontSize: 14,
-        color: '#7a736a',
-        marginTop: 4,
-    },
-    cancelButton: {
-        marginTop: 8,
-        paddingVertical: 10,
-        paddingHorizontal: 20,
-        borderRadius: 12,
-        backgroundColor: '#f5f3ef',
-    },
-    cancelButtonLabel: {
-        fontSize: 14,
-        fontWeight: '500',
-        color: '#7a736a',
     },
 });

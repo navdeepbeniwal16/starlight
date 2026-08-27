@@ -64,12 +64,9 @@ export async function createDayTemplate(data: {
     return result;
 }
 
-// Full-replace edit of a user's existing day template: the whole template is
-// validated, then its blocks are replaced atomically by deleting and recreating
-// them. Payload block ids are ignored.
-// Throws DayTemplateNotFoundError if the user has no template, or
-// DayTemplateValidationError if the payload is invalid.
-export async function updateDayTemplate(data: {
+// Create-or-replace so callers can "save my day" without tracking whether a
+// template already exists — no client-side exists flag to drift from the server.
+export async function upsertDayTemplate(data: {
     userId: string,
     wakeTime: string,
     sleepTime: string,
@@ -81,26 +78,18 @@ export async function updateDayTemplate(data: {
         blocks: data.blocks,
     });
 
-    const existing = await prisma.dayTemplate.findUnique({
-        where: { userId: data.userId },
-        select: { id: true }
-    });
-
-    if (!existing) {
-        throw new DayTemplateNotFoundError();
-    }
-
     await prisma.$transaction(async (tx) => {
-        await tx.dayTemplate.update({
-            where: { id: existing.id },
-            data: { wakeTime: data.wakeTime, sleepTime: data.sleepTime }
+        const template = await tx.dayTemplate.upsert({
+            where: { userId: data.userId },
+            update: { wakeTime: data.wakeTime, sleepTime: data.sleepTime },
+            create: { userId: data.userId, wakeTime: data.wakeTime, sleepTime: data.sleepTime }
         });
 
-        await tx.block.deleteMany({ where: { dayTemplateId: existing.id } });
+        await tx.block.deleteMany({ where: { dayTemplateId: template.id } });
 
         await tx.block.createMany({
             data: data.blocks.map(block => ({
-                dayTemplateId: existing.id,
+                dayTemplateId: template.id,
                 type: block.type,
                 name: block.name,
                 startTime: block.startTime,

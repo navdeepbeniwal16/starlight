@@ -429,7 +429,6 @@ export default function TaskDetailScreen() {
                         />
                     </View>
 
-                    {/* Delete */}
                     <TouchableOpacity
                         style={s.deleteButton}
                         onPress={confirmDelete}

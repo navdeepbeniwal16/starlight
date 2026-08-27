@@ -277,7 +277,6 @@ export function BlockEditorModal({
                                         </View>
                                     </View>
 
-                                    {/* Free slots that quick-fill the time fields above */}
                                     {availableRanges.length > 0 && (
                                         <View style={styles.availableSection}>
                                             <Text style={styles.availableHint}>Tap a free slot to fill</Text>
@@ -448,7 +447,6 @@ const styles = StyleSheet.create({
     modalDivider: { height: 1, backgroundColor: colors.border.hairline },
     modalDividerLight: { height: 1, backgroundColor: colors.border.hairline, marginHorizontal: 24 },
     modalSection: { paddingHorizontal: 24, paddingVertical: 16, gap: spacing.md },
-    // Less top padding groups the time fields with Block name above, rather than reading as a divided section.
     timeSection: { paddingTop: spacing.xs },
     modalLabel: { fontSize: 14, fontWeight: '500', color: colors.text.secondary, letterSpacing: -0.15 },
 
