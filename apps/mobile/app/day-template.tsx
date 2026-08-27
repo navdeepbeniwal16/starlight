@@ -16,9 +16,10 @@ import Animated, {
     Extrapolation,
 } from "react-native-reanimated";
 import { api } from "../lib/api";
-import { colors, radius, spacing, shadow, typography } from "../lib/theme";
+import { colors, radius, spacing, shadow } from "../lib/theme";
 import type { BlockInput } from "../lib/api.types";
 import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, buildTimeline } from "../lib/templateDraft";
+import { formatDuration, durationMins } from "../lib/time";
 import { useTemplateStore } from "../stores/template.store";
 import { BlockEditorModal } from "../components/BlockEditorModal";
 import { TemplateTimeline } from "../components/TemplateTimeline";
@@ -46,6 +47,9 @@ export default function DayTemplateScreen() {
     const [saveError, setSaveError] = useState<string | null>(null);
     const [savedVisible, setSavedVisible] = useState(false);
     const [entering, setEntering] = useState(false);
+    // Measured so the scroll can reserve exactly the dirty-state footer's height,
+    // keeping the last row (sleep) reachable above it rather than hidden behind.
+    const [footerHeight, setFooterHeight] = useState(0);
     // The draft row to flash after an add or edit lands, keyed by the block's start time.
     // The nonce lets re-touching the same row retrigger the flash.
     const [flashFor, setFlashFor] = useState<{ key: string; nonce: number }>({ key: '', nonce: 0 });
@@ -85,6 +89,13 @@ export default function DayTemplateScreen() {
         clear();
         if (savedTimer.current) clearTimeout(savedTimer.current);
     }, [clear]);
+
+    // A modal swipe-down dismiss resolves natively and can slip past the
+    // beforeRemove guard below, so disable the gesture while there are unsaved
+    // edits — the back button (which the guard intercepts) becomes the only exit.
+    useEffect(() => {
+        navigation.setOptions({ gestureEnabled: !dirty });
+    }, [navigation, dirty]);
 
     // Confirm before discarding unsaved edits on any back navigation.
     useEffect(() => {
@@ -155,6 +166,14 @@ export default function DayTemplateScreen() {
 
     const rows = useMemo(() => buildTimeline(draft), [draft]);
 
+    const totals = useMemo(() => {
+        const sum = (type: BlockInput['type']) =>
+            (draft?.blocks ?? [])
+                .filter((b) => b.type === type)
+                .reduce((mins, b) => mins + durationMins(b.startTime, b.endTime), 0);
+        return { container: sum('CONTAINER'), anchor: sum('ANCHOR') };
+    }, [draft]);
+
     // Skip the bounds check while wake and sleep are inverted; the window is meaningless then.
     const wakeBeforeSleep = isWakeBeforeSleep(draft);
     const outOfBounds = useMemo(
@@ -173,15 +192,17 @@ export default function DayTemplateScreen() {
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-            <View style={styles.backRow}>
-                <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.7} hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}>
-                    <Ionicons name="chevron-back" size={20} color={colors.text.secondary} />
-                    <Text style={styles.backLabel}>Settings</Text>
-                </TouchableOpacity>
-            </View>
-
             <View style={styles.header}>
-                <Text style={styles.headerTitle}>Day Template</Text>
+                <View style={styles.headerEyebrow}>
+                    <Text style={styles.headerEyebrowLabel}>Day Template</Text>
+                </View>
+                <View style={styles.headerRow}>
+                    <Text style={styles.headerTitle}>Reshape your day</Text>
+                    <TouchableOpacity onPress={() => router.back()} activeOpacity={0.6} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <Ionicons name="close" size={22} color={colors.text.primary} />
+                    </TouchableOpacity>
+                </View>
+                <Text style={styles.headerSubtitle}>Add, move, or resize your time blocks.</Text>
             </View>
 
             {loading && (
@@ -204,7 +225,7 @@ export default function DayTemplateScreen() {
                     <Animated.View pointerEvents="none" style={[styles.scrollEdge, scrollEdgeStyle]} />
                     <Animated.ScrollView
                         style={styles.scroll}
-                        contentContainerStyle={[styles.content, dirty && { paddingBottom: 96 + insets.bottom }]}
+                        contentContainerStyle={[styles.content, dirty && { paddingBottom: (footerHeight || 160) + spacing.md }]}
                         showsVerticalScrollIndicator={false}
                         onScroll={scrollHandler}
                         scrollEventThrottle={16}
@@ -216,10 +237,12 @@ export default function DayTemplateScreen() {
                             <View style={styles.legendItem}>
                                 <View style={[styles.legendSwatch, styles.legendSwatchContainer]} />
                                 <Text style={styles.legendText}>Container</Text>
+                                <Text style={styles.legendTotal}>{formatDuration(totals.container)}</Text>
                             </View>
                             <View style={styles.legendItem}>
                                 <View style={[styles.legendSwatch, styles.legendSwatchAnchor]} />
                                 <Text style={styles.legendText}>Anchor</Text>
+                                <Text style={styles.legendTotal}>{formatDuration(totals.anchor)}</Text>
                             </View>
                         </Animated.View>
 
@@ -243,6 +266,7 @@ export default function DayTemplateScreen() {
                     {dirty && (
                         <Animated.View
                             style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}
+                            onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}
                             entering={SlideInDown.springify().damping(20).stiffness(220).mass(0.6)}
                             exiting={SlideOutDown.duration(180)}
                         >
@@ -307,15 +331,20 @@ export default function DayTemplateScreen() {
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: colors.surface.page },
 
-    backRow: { paddingHorizontal: spacing.md, paddingTop: spacing.xl, paddingBottom: 2 },
-    backButton: {
-        flexDirection: 'row', alignItems: 'center', gap: 2,
-        alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: spacing.xs,
+    // Mirrors the planning review screen's header (eyebrow, small title + close,
+    // subtitle, hairline divider) so the two screens read as one flow.
+    header: {
+        paddingHorizontal: 20, paddingTop: 24, paddingBottom: 16,
+        borderBottomWidth: 1, borderBottomColor: 'rgba(42,38,33,0.06)',
     },
-    backLabel: { fontSize: 15, color: colors.text.secondary },
-
-    header: { paddingHorizontal: spacing.xl, paddingTop: spacing.sm, paddingBottom: spacing.lg },
-    headerTitle: { ...typography.title, color: colors.text.primary, letterSpacing: 0.07 },
+    headerEyebrow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
+    headerEyebrowLabel: {
+        fontSize: 11, fontWeight: '600', color: 'rgba(122,115,106,0.5)',
+        letterSpacing: 0.5, textTransform: 'uppercase',
+    },
+    headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    headerTitle: { fontSize: 16, fontWeight: '600', color: colors.text.primary, letterSpacing: -0.3 },
+    headerSubtitle: { fontSize: 13, color: colors.text.secondary, lineHeight: 18, marginTop: 6, maxWidth: 320 },
 
     scrollEdge: {
         position: 'absolute', top: 0, left: 0, right: 0, height: 1, zIndex: 5,
@@ -330,12 +359,13 @@ const styles = StyleSheet.create({
     scroll: { flex: 1 },
     content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
 
-    legend: { flexDirection: 'row', gap: spacing.lg, paddingHorizontal: spacing.xs },
+    legend: { flexDirection: 'row', gap: spacing.lg, paddingHorizontal: spacing.xs, marginTop: spacing.md },
     legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
     legendSwatch: { width: 12, height: 12, borderRadius: 3, backgroundColor: colors.surface.block },
     legendSwatchContainer: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.16)', borderStyle: 'dashed' },
     legendSwatchAnchor: { borderWidth: 1, borderColor: colors.border.hairline },
     legendText: { fontSize: 12, color: colors.text.secondary, letterSpacing: -0.1 },
+    legendTotal: { fontSize: 12, color: colors.text.muted, letterSpacing: -0.1, fontVariant: ['tabular-nums'] },
 
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: spacing.lg },
     errorText: { fontSize: 14, color: colors.text.secondary, textAlign: 'center' },

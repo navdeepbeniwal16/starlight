@@ -21,6 +21,12 @@ export function fromMins(mins: number): string {
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
 
+// Minutes spanned from start to end, wrapping past midnight when end precedes start.
+export function durationMins(startHhMm: string, endHhMm: string): number {
+    const d = toMins(endHhMm) - toMins(startHhMm);
+    return d < 0 ? d + 1440 : d;
+}
+
 // Formats a minute count as a compact duration: "2h", "45m", or "1h 30m".
 export function formatDuration(mins: number): string {
     const h = Math.floor(mins / 60);

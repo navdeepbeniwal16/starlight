@@ -301,7 +301,7 @@ export default function PlanningReviewScreen() {
     const [openOverrides, setOpenOverrides] = useState<Partial<Record<GroupKey, boolean>>>({});
 
     // Agent plan generation: full-screen while the agent runs, retry on error.
-    const { generating, generateError, generate, cancel, dismissError } = usePlanGeneration();
+    const { generating, generateError, generateErrorCode, generate, cancel, dismissError } = usePlanGeneration();
 
     // Gates out slow responses that would otherwise clobber an optimistic update.
     const seq = useRef(createSequencer()).current;
@@ -319,6 +319,14 @@ export default function PlanningReviewScreen() {
     const planDay = useCallback(() => {
         generate(() => router.push('/planning/plan'));
     }, [generate, router]);
+
+    // Shared by the footer button and the generation-error overlay's "Adjust my day".
+    // Dismiss the error before pushing: review stays mounted under the sheet, so a
+    // lingering overlay would still cover it when the editor is popped back.
+    const adjustDay = useCallback(() => {
+        dismissError();
+        router.push('/day-template');
+    }, [dismissError, router]);
 
     // Refetch on focus so edits made on the task detail screen reflect here.
     useFocusEffect(
@@ -474,6 +482,10 @@ export default function PlanningReviewScreen() {
 
             {!loading && !error && (
                 <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+                    <PressableScale style={s.adjustButton} onPress={adjustDay}>
+                        <Text style={s.adjustPrompt}>Need to reshape your day first?</Text>
+                        <Text style={s.adjustButtonLabel}>Adjust my day</Text>
+                    </PressableScale>
                     <PressableScale
                         style={s.doneButton}
                         onPress={planDay}
@@ -496,9 +508,11 @@ export default function PlanningReviewScreen() {
             <PlanGeneratingOverlay
                 generating={generating}
                 error={generateError}
+                errorCode={generateErrorCode}
                 onRetry={planDay}
                 onDismiss={dismissError}
                 onCancel={cancel}
+                onAdjust={adjustDay}
             />
         </SafeAreaView>
     );
@@ -723,9 +737,25 @@ const s = StyleSheet.create({
 
     footer: {
         paddingHorizontal: 16,
-        paddingTop: 12,
+        paddingTop: 16,
+        gap: 16,
         borderTopWidth: 1,
         borderTopColor: 'rgba(42,38,33,0.06)',
+    },
+    adjustButton: {
+        alignItems: 'center',
+        gap: 3,
+    },
+    adjustPrompt: {
+        fontSize: 12,
+        color: 'rgba(122,115,106,0.7)',
+        letterSpacing: -0.1,
+    },
+    adjustButtonLabel: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#5c5248',
+        letterSpacing: -0.2,
     },
     doneButton: {
         backgroundColor: '#2a2621',

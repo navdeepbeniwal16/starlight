@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { BlockInput } from "../lib/api.types";
-import { formatTimeRange } from "../lib/time";
+import { formatTimeRange, formatDuration, durationMins } from "../lib/time";
 import { ENERGY_LABELS } from "../lib/templateBlocks";
 import { PressableScale } from "./PressableScale";
 import { colors, radius, spacing } from "../lib/theme";
@@ -28,7 +28,10 @@ export function BlockListItem({ block, onPress, invalid }: { block: BlockInput; 
                         </View>
                     )}
                 </View>
-                <Text style={styles.blockItemTime}>{formatTimeRange(block.startTime, block.endTime)}</Text>
+                <Text style={styles.blockItemTime}>
+                    {formatTimeRange(block.startTime, block.endTime)}
+                    <Text style={styles.blockItemDuration}>  ·  {formatDuration(durationMins(block.startTime, block.endTime))}</Text>
+                </Text>
             </View>
             {onPress && <Ionicons name="create-outline" size={18} color={colors.text.muted} />}
         </View>
@@ -59,6 +62,7 @@ const styles = StyleSheet.create({
     blockItemHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.sm },
     blockItemName: { fontSize: 15, fontWeight: '500', color: colors.text.primary, letterSpacing: -0.23, flexShrink: 1 },
     blockItemTime: { fontSize: 11, color: '#9a9389', letterSpacing: -0.15, marginTop: 3, fontVariant: ['tabular-nums'] },
+    blockItemDuration: { color: 'rgba(154,147,137,0.7)' },
     energyBadge: { backgroundColor: 'rgba(232,223,209,0.3)', borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start' },
     energyBadgeText: { fontSize: 12, color: 'rgba(122,115,106,0.6)' },
 });
