@@ -5,6 +5,10 @@ import { toMins, formatTime } from "./time";
 export const BLOCK_TYPES: BlockType[] = ['CONTAINER', 'ANCHOR'];
 export const ENERGY_LEVELS: EnergyLevel[] = ['HIGH', 'MEDIUM', 'LOW'];
 
+// Shortest block the grid allows, in minutes — unified across create, move, and resize
+// so a block can capture a brief routine (medication) but never collapse to nothing.
+export const MIN_BLOCK_MINUTES = 5;
+
 export const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
     CONTAINER: 'Container',
     ANCHOR: 'Anchor',
@@ -61,6 +65,7 @@ export type BlockDraftError =
     | { code: 'NAME_REQUIRED' }
     | { code: 'TIME_REQUIRED' }
     | { code: 'END_BEFORE_START' }
+    | { code: 'TOO_SHORT' }
     | { code: 'BEFORE_WAKE'; boundary: string }
     | { code: 'AFTER_SLEEP'; boundary: string }
     | { code: 'ENERGY_REQUIRED' }
@@ -89,6 +94,9 @@ export function validateBlockDraft(draft: BlockDraft, ctx: BlockValidationContex
     if (toMins(draft.startTime) >= toMins(draft.endTime)) {
         return { code: 'END_BEFORE_START' };
     }
+    if (toMins(draft.endTime) - toMins(draft.startTime) < MIN_BLOCK_MINUTES) {
+        return { code: 'TOO_SHORT' };
+    }
     if (ctx.wakeTime && toMins(draft.startTime) < toMins(ctx.wakeTime)) {
         return { code: 'BEFORE_WAKE', boundary: ctx.wakeTime };
     }
@@ -110,6 +118,7 @@ export function blockDraftErrorMessage(error: BlockDraftError): string {
         case 'NAME_REQUIRED': return 'Block name is required';
         case 'TIME_REQUIRED': return 'Start and end time are required';
         case 'END_BEFORE_START': return 'End time must be after start time';
+        case 'TOO_SHORT': return `A block must be at least ${MIN_BLOCK_MINUTES} minutes long`;
         case 'BEFORE_WAKE': return `Block must start at or after your wake time (${formatTime(error.boundary)})`;
         case 'AFTER_SLEEP': return `Block must end by your sleep time (${formatTime(error.boundary)})`;
         case 'ENERGY_REQUIRED': return 'Energy level is required for container blocks';

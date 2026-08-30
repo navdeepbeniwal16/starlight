@@ -10,6 +10,7 @@ import Animated, {
     FadeInDown,
     FadeOut,
     useSharedValue,
+    useAnimatedRef,
     useAnimatedStyle,
     useAnimatedScrollHandler,
     interpolate,
@@ -18,31 +19,30 @@ import Animated, {
 import { api } from "../lib/api";
 import { colors, radius, spacing, shadow } from "../lib/theme";
 import type { BlockInput } from "../lib/api.types";
-import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, buildTimeline } from "../lib/templateDraft";
-import { formatDuration, durationMins } from "../lib/time";
+import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, POINTS_PER_HOUR, type OverlapChange } from "../lib/templateDraft";
+import { formatDuration, durationMins, toMins } from "../lib/time";
 import { useTemplateStore } from "../stores/template.store";
 import { BlockEditorModal } from "../components/BlockEditorModal";
 import { TemplateTimeline } from "../components/TemplateTimeline";
 import { TemplateValidationBanner } from "../components/TemplateValidationBanner";
+import { UndoSnackbar, useUndoableEdit } from "../components/UndoSnackbar";
 import { PressableScale } from "../components/PressableScale";
 
-// What the block modal is open on: editing a block in place, or adding one into a gap.
-type EditorTarget =
-    | { mode: 'edit'; index: number }
-    | { mode: 'add'; startTime: string; endTime: string };
+// What the block editor is open on: an existing block by index, or a new block seeded into a
+// tapped free slot.
+type Editor = { mode: 'edit'; index: number } | { mode: 'create'; startTime: string; endTime: string };
 
 export default function DayTemplateScreen() {
     const router = useRouter();
     const navigation = useNavigation();
     const insets = useSafeAreaInsets();
 
-    const { baseline, draft, blockKeys, hydrate, setWakeSleep, updateBlock, addBlock, removeBlock, commit, reset, clear } = useTemplateStore();
+    const { baseline, draft, blockKeys, hydrate, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap, commit, reset, clear } = useTemplateStore();
+    const { undoLabel, offerUndo, undo } = useUndoableEdit();
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    // The block modal's target: an existing block by index, a gap's range to add into,
-    // or null when closed. A single state keeps the two modes mutually exclusive.
-    const [editor, setEditor] = useState<EditorTarget | null>(null);
+    const [editor, setEditor] = useState<Editor | null>(null);
     const [saving, setSaving] = useState(false);
     const [saveError, setSaveError] = useState<string | null>(null);
     const [savedVisible, setSavedVisible] = useState(false);
@@ -50,9 +50,6 @@ export default function DayTemplateScreen() {
     // Measured so the scroll can reserve exactly the dirty-state footer's height,
     // keeping the last row (sleep) reachable above it rather than hidden behind.
     const [footerHeight, setFooterHeight] = useState(0);
-    // The draft row to flash after an add or edit lands, keyed by the block's start time.
-    // The nonce lets re-touching the same row retrigger the flash.
-    const [flashFor, setFlashFor] = useState<{ key: string; nonce: number }>({ key: '', nonce: 0 });
 
     const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -119,11 +116,22 @@ export default function DayTemplateScreen() {
         setWakeSleep(wake, sleep);
     }
 
+    function handleCreateRange(startTime: string, endTime: string) {
+        setEditor({ mode: 'create', startTime, endTime });
+    }
+
     function handleEditorSubmit(block: BlockInput) {
         if (!editor) return;
         if (editor.mode === 'edit') updateBlock(editor.index, block);
         else addBlock(block);
-        setFlashFor((f) => ({ key: `block-${block.startTime}`, nonce: f.nonce + 1 }));
+        setSaveError(null);
+        setEditor(null);
+    }
+
+    // Confirmed an overlap resolution: apply the neighbour trims/removals and seat the block together.
+    function handleResolveOverlap(block: BlockInput, changes: OverlapChange[]) {
+        if (!editor) return;
+        resolveOverlap({ index: editor.mode === 'edit' ? editor.index : null, block }, changes);
         setSaveError(null);
         setEditor(null);
     }
@@ -164,8 +172,6 @@ export default function DayTemplateScreen() {
         );
     }
 
-    const rows = useMemo(() => buildTimeline(draft), [draft]);
-
     const totals = useMemo(() => {
         const sum = (type: BlockInput['type']) =>
             (draft?.blocks ?? [])
@@ -182,8 +188,19 @@ export default function DayTemplateScreen() {
     );
     const outOfBoundsIndexes = useMemo(() => new Set(outOfBounds.map((o) => o.index)), [outOfBounds]);
 
+    // A block ending after sleep overflows below the grid via absolute positioning, which RN
+    // leaves out of the scroll's content height — so reserve that overflow as extra bottom padding,
+    // otherwise the tail (and its "after sleep" note) hides under the absolute Save/Cancel footer.
+    const bottomOverflow = useMemo(() => {
+        if (!draft) return 0;
+        const sleep = toMins(draft.sleepTime);
+        const maxEnd = draft.blocks.reduce((m, b) => Math.max(m, toMins(b.endTime)), sleep);
+        return ((maxEnd - sleep) / 60) * POINTS_PER_HOUR;
+    }, [draft]);
+
     const canSave = dirty && valid && !saving;
 
+    const scrollRef = useAnimatedRef<Animated.ScrollView>();
     const scrollY = useSharedValue(0);
     const scrollHandler = useAnimatedScrollHandler((e) => { scrollY.value = e.contentOffset.y; });
     const scrollEdgeStyle = useAnimatedStyle(() => ({
@@ -202,7 +219,7 @@ export default function DayTemplateScreen() {
                         <Ionicons name="close" size={22} color={colors.text.primary} />
                     </TouchableOpacity>
                 </View>
-                <Text style={styles.headerSubtitle}>Add, move, or resize your time blocks.</Text>
+                <Text style={styles.headerSubtitle}>Tap a block to edit, or tap empty space to add one.</Text>
             </View>
 
             {loading && (
@@ -224,8 +241,9 @@ export default function DayTemplateScreen() {
                 <Animated.View style={styles.contentFill} entering={entering ? FadeIn.duration(240) : undefined}>
                     <Animated.View pointerEvents="none" style={[styles.scrollEdge, scrollEdgeStyle]} />
                     <Animated.ScrollView
+                        ref={scrollRef}
                         style={styles.scroll}
-                        contentContainerStyle={[styles.content, dirty && { paddingBottom: (footerHeight || 160) + spacing.md }]}
+                        contentContainerStyle={[styles.content, dirty && { paddingBottom: (footerHeight || 160) + spacing.md + bottomOverflow }]}
                         showsVerticalScrollIndicator={false}
                         onScroll={scrollHandler}
                         scrollEventThrottle={16}
@@ -249,17 +267,18 @@ export default function DayTemplateScreen() {
                         <TemplateValidationBanner draft={draft} />
 
                         <TemplateTimeline
-                            rows={rows}
+                            blocks={draft.blocks}
                             wakeTime={draft.wakeTime}
                             sleepTime={draft.sleepTime}
                             blockKeys={blockKeys}
                             entering={entering}
-                            flashFor={flashFor}
                             outOfBoundsIndexes={outOfBoundsIndexes}
+                            scrollRef={scrollRef}
                             onWakeChange={(w) => handleWakeSleep(w, draft.sleepTime)}
                             onSleepChange={(s) => handleWakeSleep(draft.wakeTime, s)}
                             onEditBlock={(index) => setEditor({ mode: 'edit', index })}
-                            onAddInGap={(startTime, endTime) => setEditor({ mode: 'add', startTime, endTime })}
+                            onCreateRange={handleCreateRange}
+                            onLiveEdit={(snapshot, label) => { setSaveError(null); offerUndo(snapshot, label); }}
                         />
                     </Animated.ScrollView>
 
@@ -305,6 +324,8 @@ export default function DayTemplateScreen() {
                 </Animated.View>
             )}
 
+            {undoLabel && <UndoSnackbar label={undoLabel} onUndo={undo} bottom={(footerHeight || 140) + spacing.sm} />}
+
             <BlockEditorModal
                 visible={editor !== null}
                 onClose={() => setEditor(null)}
@@ -313,13 +334,14 @@ export default function DayTemplateScreen() {
                 initialValues={
                     editor?.mode === 'edit'
                         ? draft?.blocks[editor.index]
-                        : editor?.mode === 'add'
+                        : editor?.mode === 'create'
                             ? { startTime: editor.startTime, endTime: editor.endTime }
                             : undefined
                 }
                 onSave={handleEditorSubmit}
                 onAdd={handleEditorSubmit}
                 onDelete={handleBlockDelete}
+                onResolveOverlap={handleResolveOverlap}
                 saveLabel="Done"
                 wakeTime={draft?.wakeTime ?? null}
                 sleepTime={draft?.sleepTime ?? null}

@@ -1,36 +1,40 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import Animated, { useAnimatedRef } from "react-native-reanimated";
 import { api } from "../../lib/api";
 import { colors, radius, spacing, shadow, typography } from "../../lib/theme";
 import type { BlockInput } from "../../lib/api.types";
-import { buildTimeline, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds } from "../../lib/templateDraft";
+import { isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, POINTS_PER_HOUR, type OverlapChange } from "../../lib/templateDraft";
+import { toMins } from "../../lib/time";
 import { buildStarterTemplate } from "../../lib/starterTemplate";
 import { useTemplateStore } from "../../stores/template.store";
 import { StepEyebrow } from "../../components/StepEyebrow";
 import { TemplateTimeline } from "../../components/TemplateTimeline";
 import { TemplateValidationBanner } from "../../components/TemplateValidationBanner";
 import { BlockEditorModal } from "../../components/BlockEditorModal";
+import { UndoSnackbar, useUndoableEdit } from "../../components/UndoSnackbar";
 import { PressableScale } from "../../components/PressableScale";
 
-type EditorTarget =
-    | { mode: 'edit'; index: number }
-    | { mode: 'add'; startTime: string; endTime: string };
+// What the block editor is open on: an existing block by index, or a new block seeded into a
+// tapped free slot.
+type Editor = { mode: 'edit'; index: number } | { mode: 'create'; startTime: string; endTime: string };
 
 export default function BuildScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
 
-    const { draft, blockKeys, hydrate, seed, setWakeSleep, updateBlock, addBlock, removeBlock } = useTemplateStore();
+    const { draft, blockKeys, hydrate, seed, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap } = useTemplateStore();
+    const { undoLabel, offerUndo, undo } = useUndoableEdit();
+    const scrollRef = useAnimatedRef<Animated.ScrollView>();
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [editor, setEditor] = useState<EditorTarget | null>(null);
+    const [editor, setEditor] = useState<Editor | null>(null);
     const [saving, setSaving] = useState(false);
     const [saveError, setSaveError] = useState<string | null>(null);
-    // A bumped nonce re-triggers the row flash when the same row is edited again.
-    const [flashFor, setFlashFor] = useState<{ key: string; nonce: number }>({ key: '', nonce: 0 });
+    const [footerHeight, setFooterHeight] = useState(0);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -55,11 +59,22 @@ export default function BuildScreen() {
         load();
     }, [load]);
 
+    function handleCreateRange(startTime: string, endTime: string) {
+        setEditor({ mode: 'create', startTime, endTime });
+    }
+
     function handleEditorSubmit(block: BlockInput) {
         if (!editor) return;
         if (editor.mode === 'edit') updateBlock(editor.index, block);
         else addBlock(block);
-        setFlashFor((f) => ({ key: `block-${block.startTime}`, nonce: f.nonce + 1 }));
+        setSaveError(null);
+        setEditor(null);
+    }
+
+    // Confirmed an overlap resolution: apply the neighbour trims/removals and seat the block together.
+    function handleResolveOverlap(block: BlockInput, changes: OverlapChange[]) {
+        if (!editor) return;
+        resolveOverlap({ index: editor.mode === 'edit' ? editor.index : null, block }, changes);
         setSaveError(null);
         setEditor(null);
     }
@@ -87,7 +102,6 @@ export default function BuildScreen() {
         }
     }
 
-    const rows = useMemo(() => buildTimeline(draft), [draft]);
     const valid = useMemo(() => isTemplateValid(draft), [draft]);
     const wakeBeforeSleep = isWakeBeforeSleep(draft);
     const outOfBoundsIndexes = useMemo(
@@ -97,13 +111,23 @@ export default function BuildScreen() {
 
     const canContinue = valid && !saving;
 
+    // A block ending after sleep overflows below the grid via absolute positioning, which RN leaves
+    // out of the scroll's content height — reserve it so the tail (and its "after sleep" note) stays
+    // scrollable into view rather than clipped at the bottom.
+    const bottomOverflow = useMemo(() => {
+        if (!draft) return 0;
+        const sleep = toMins(draft.sleepTime);
+        const maxEnd = draft.blocks.reduce((m, b) => Math.max(m, toMins(b.endTime)), sleep);
+        return ((maxEnd - sleep) / 60) * POINTS_PER_HOUR;
+    }, [draft]);
+
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <View style={styles.header}>
                 <StepEyebrow step={1} total={3} />
                 <Text style={styles.headerTitle}>Let's build your day</Text>
                 <Text style={styles.headerSubtitle}>
-                    Set your wake and sleep times, then shape the blocks in between. Tap a gap to add, or a block to edit.
+                    Set your wake and sleep times, then shape the blocks in between. Tap a block to edit, or tap empty space to add one.
                 </Text>
             </View>
 
@@ -124,7 +148,7 @@ export default function BuildScreen() {
 
             {!loading && !error && draft && (
                 <>
-                    <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+                    <Animated.ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={[styles.content, bottomOverflow > 0 && { paddingBottom: spacing.xxl + bottomOverflow }]} showsVerticalScrollIndicator={false}>
                         <View style={styles.legend}>
                             <View style={styles.legendItem}>
                                 <View style={[styles.legendSwatch, styles.legendSwatchContainer]} />
@@ -143,21 +167,25 @@ export default function BuildScreen() {
                             <TemplateValidationBanner draft={draft} />
 
                             <TemplateTimeline
-                                rows={rows}
+                                blocks={draft.blocks}
                                 wakeTime={draft.wakeTime}
                                 sleepTime={draft.sleepTime}
                                 blockKeys={blockKeys}
                                 entering={false}
-                                flashFor={flashFor}
                                 outOfBoundsIndexes={outOfBoundsIndexes}
+                                scrollRef={scrollRef}
                                 onWakeChange={(w) => { setSaveError(null); setWakeSleep(w, draft.sleepTime); }}
                                 onSleepChange={(s) => { setSaveError(null); setWakeSleep(draft.wakeTime, s); }}
                                 onEditBlock={(index) => setEditor({ mode: 'edit', index })}
-                                onAddInGap={(startTime, endTime) => setEditor({ mode: 'add', startTime, endTime })}
+                                onCreateRange={handleCreateRange}
+                                onLiveEdit={(snapshot, label) => { setSaveError(null); offerUndo(snapshot, label); }}
                             />
-                    </ScrollView>
+                    </Animated.ScrollView>
 
-                    <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>
+                    <View
+                        style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}
+                        onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}
+                    >
                         {saveError && <Text style={styles.saveErrorText}>{saveError}</Text>}
                         <PressableScale
                             style={[styles.continueButton, !canContinue && styles.continueButtonDisabled]}
@@ -188,17 +216,20 @@ export default function BuildScreen() {
                 initialValues={
                     editor?.mode === 'edit'
                         ? draft?.blocks[editor.index]
-                        : editor?.mode === 'add'
+                        : editor?.mode === 'create'
                             ? { startTime: editor.startTime, endTime: editor.endTime }
                             : undefined
                 }
                 onSave={handleEditorSubmit}
                 onAdd={handleEditorSubmit}
                 onDelete={handleBlockDelete}
+                onResolveOverlap={handleResolveOverlap}
                 saveLabel="Done"
                 wakeTime={draft?.wakeTime ?? null}
                 sleepTime={draft?.sleepTime ?? null}
             />
+
+            {undoLabel && <UndoSnackbar label={undoLabel} onUndo={undo} bottom={(footerHeight || 140) + spacing.sm} />}
         </SafeAreaView>
     );
 }
