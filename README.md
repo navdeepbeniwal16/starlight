@@ -6,15 +6,15 @@ AI-powered personal day planning app.
 
 | Layer | Choice |
 |---|---|
-| Backend | TypeScript, Express, tRPC |
+| Backend | TypeScript, Express, REST |
 | Database | PostgreSQL, Prisma |
 | Mobile | React Native, Expo |
 | AI | Anthropic Claude APIs |
-| Infra | AWS EC2, RDS, GitHub Actions |
+| Infra | Railway (API + Postgres), EAS + App Store (iOS), GitHub Actions (CI) |
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22+ (CI and production builds pin Node 26 via `.mise.toml`)
 - Docker (for local PostgreSQL)
 - Xcode + iOS Simulator (for mobile development)
 
@@ -69,6 +69,31 @@ The API runs on `http://localhost:3000`. The mobile app connects to it via `EXPO
 | `RESEND_API_KEY` | `apps/api/.env` | Resend email API key |
 | `RESEND_FROM_EMAIL` | `apps/api/.env` | Verified sending address |
 | `EXPO_PUBLIC_API_URL` | `apps/mobile/.env.local` | API base URL for the mobile app |
+
+## Deployment
+
+Backend and mobile ship **independently, on different triggers**. CI never deploys — it is only a quality gate.
+
+### API — auto-deploys to Railway
+
+- Hosted on Railway at `https://starlightapi-production.up.railway.app`; PostgreSQL is a Railway-managed database.
+- Railway's GitHub integration watches `main`: **every push to `main` triggers a production deploy.** There is no Dockerfile — Railway's railpack builder auto-detects the app and `.mise.toml` pins Node 26 for the build.
+- The start command applies migrations before booting, so a healthy server implies migrations ran: `prisma migrate deploy && node dist/index.js`.
+- Deploy check: `curl https://starlightapi-production.up.railway.app/health`.
+- Secrets (`DATABASE_URL`, `JWT_SECRET`, `ANTHROPIC_API_KEY`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`) live in the Railway dashboard, not in git.
+
+### Mobile — manual via EAS
+
+- Built in the cloud by EAS and distributed through Apple TestFlight / the App Store (bundle `com.starlight.assistant`).
+- No automatic trigger — a human runs the CLI from `apps/mobile`: `eas build -p ios --profile production --auto-submit`.
+- The `production` profile (`apps/mobile/eas.json`) bakes `EXPO_PUBLIC_API_URL` (the Railway API) in at build time and lets EAS own the build number (`appVersionSource: remote`, `autoIncrement`).
+- `ios/` is gitignored (Continuous Native Generation) — EAS runs `expo prebuild` from `app.json` + `assets/` on each build.
+
+### CI — quality gate only
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push/PR to `main`: it spins up a Postgres service, runs `prisma migrate deploy`, then `turbo run type-check` and `turbo run test`. It does not deploy.
+
+> For a change spanning both: deploy the API first (merge to `main`), then build the app — the app's baked-in API URL expects the new backend to already be live.
 
 ## Scripts
 
