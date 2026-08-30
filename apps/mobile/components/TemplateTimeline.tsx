@@ -38,8 +38,11 @@ const CONTENT_LEFT = RULER_WIDTH + spacing.sm;
 
 const POINTS_PER_MINUTE = POINTS_PER_HOUR / 60;
 
-// Gating a move behind a hold is what lets a plain drag fall through to scrolling.
-const LONG_PRESS_MS = 220;
+// Both moves and edge-resizes wait out this hold before activating, so a plain drag — or one
+// that pauses briefly before flicking — falls through to the ScrollView instead of grabbing
+// the block. A block edit is inherently vertical like scrolling, so the hold, not direction, is
+// what separates the two intents.
+const LONG_PRESS_MS = 300;
 
 const EDGE_HANDLE = 16;
 // Below this height the grab strips would cover the whole card, so short blocks resize via modal.
@@ -305,6 +308,7 @@ function BlockCard({
 
         const resize = (edge: 'start' | 'end') =>
             Gesture.Pan()
+                .activateAfterLongPress(LONG_PRESS_MS)
                 .onStart(() => {
                     const snapshot = useTemplateStore.getState().draft;
                     if (!snapshot) return;
