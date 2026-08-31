@@ -21,6 +21,7 @@ import { colors, radius, spacing, shadow } from "../lib/theme";
 import type { BlockInput } from "../lib/api.types";
 import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, blockTypeTotals, POINTS_PER_HOUR, type OverlapChange } from "../lib/templateDraft";
 import { formatDuration, toMins } from "../lib/time";
+import { BLOCK_TYPE_LABELS, BLOCK_TYPE_LEGEND_HINTS } from "../lib/templateBlocks";
 import { useTemplateStore } from "../stores/template.store";
 import { BlockEditorModal } from "../components/BlockEditorModal";
 import { TemplateTimeline } from "../components/TemplateTimeline";
@@ -250,7 +251,7 @@ export default function DayTemplateScreen() {
                                 <View style={styles.legendLabelGroup}>
                                     <View style={[styles.legendSwatch, styles.legendSwatchContainer]} />
                                     <Text style={styles.legendText} numberOfLines={1}>
-                                        Container <Text style={styles.legendDesc}>(Starlight fills these with your tasks)</Text>
+                                        {BLOCK_TYPE_LABELS['CONTAINER']} <Text style={styles.legendDesc}>({BLOCK_TYPE_LEGEND_HINTS['CONTAINER']})</Text>
                                     </Text>
                                 </View>
                                 <Text style={styles.legendTotal}>{formatDuration(totals.container)}</Text>
@@ -259,7 +260,7 @@ export default function DayTemplateScreen() {
                                 <View style={styles.legendLabelGroup}>
                                     <View style={[styles.legendSwatch, styles.legendSwatchAnchor]} />
                                     <Text style={styles.legendText} numberOfLines={1}>
-                                        Anchor <Text style={styles.legendDesc}>(A fixed event, like lunch or the gym)</Text>
+                                        {BLOCK_TYPE_LABELS['ANCHOR']} <Text style={styles.legendDesc}>({BLOCK_TYPE_LEGEND_HINTS['ANCHOR']})</Text>
                                     </Text>
                                 </View>
                                 <Text style={styles.legendTotal}>{formatDuration(totals.anchor)}</Text>

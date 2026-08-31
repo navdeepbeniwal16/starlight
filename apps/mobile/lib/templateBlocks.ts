@@ -10,13 +10,18 @@ export const ENERGY_LEVELS: EnergyLevel[] = ['HIGH', 'MEDIUM', 'LOW'];
 export const MIN_BLOCK_MINUTES = 5;
 
 export const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
-    CONTAINER: 'Container',
-    ANCHOR: 'Anchor',
+    CONTAINER: 'Time Block',
+    ANCHOR: 'Event',
 };
 
 export const BLOCK_TYPE_DESCRIPTIONS: Record<BlockType, string> = {
-    CONTAINER: 'Time slots for Starlight to schedule your tasks into.',
-    ANCHOR: 'A fixed daily event e.g lunch, dinner or the gym.',
+    CONTAINER: 'A block of time for scheduling tasks — deep work, admin, errands.',
+    ANCHOR: 'A fixed routine you want to track — lunch, the gym, a meeting.',
+};
+
+export const BLOCK_TYPE_LEGEND_HINTS: Record<BlockType, string> = {
+    CONTAINER: 'time for scheduling tasks',
+    ANCHOR: 'a fixed routine to track',
 };
 
 export const ENERGY_LABELS: Record<EnergyLevel, string> = {
@@ -121,7 +126,7 @@ export function blockDraftErrorMessage(error: BlockDraftError): string {
         case 'TOO_SHORT': return `A block must be at least ${MIN_BLOCK_MINUTES} minutes long`;
         case 'BEFORE_WAKE': return `Block must start at or after your wake time (${formatTime(error.boundary)})`;
         case 'AFTER_SLEEP': return `Block must end by your sleep time (${formatTime(error.boundary)})`;
-        case 'ENERGY_REQUIRED': return 'Energy level is required for container blocks';
+        case 'ENERGY_REQUIRED': return 'Energy level is required for Time Blocks';
         case 'OVERLAP': return 'This block overlaps with an existing one';
     }
 }

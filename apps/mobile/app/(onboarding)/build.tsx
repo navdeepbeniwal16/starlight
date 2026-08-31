@@ -8,6 +8,7 @@ import { colors, radius, spacing, shadow, typography } from "../../lib/theme";
 import type { BlockInput } from "../../lib/api.types";
 import { isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, blockTypeTotals, POINTS_PER_HOUR, type OverlapChange } from "../../lib/templateDraft";
 import { formatDuration, toMins } from "../../lib/time";
+import { BLOCK_TYPE_LABELS, BLOCK_TYPE_LEGEND_HINTS } from "../../lib/templateBlocks";
 import { buildStarterTemplate } from "../../lib/starterTemplate";
 import { useTemplateStore } from "../../stores/template.store";
 import { StepEyebrow } from "../../components/StepEyebrow";
@@ -35,6 +36,8 @@ export default function BuildScreen() {
     const [saving, setSaving] = useState(false);
     const [saveError, setSaveError] = useState<string | null>(null);
     const [footerHeight, setFooterHeight] = useState(0);
+    // Only true when we pre-seeded the example day; a loaded saved template is the user's own.
+    const [showStarterHint, setShowStarterHint] = useState(false);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -44,6 +47,7 @@ export default function BuildScreen() {
             hydrate(result.data);
         } else if (result.status === 404) {
             seed(buildStarterTemplate());
+            setShowStarterHint(true);
         } else {
             setError(result.error);
         }
@@ -155,7 +159,7 @@ export default function BuildScreen() {
                                 <View style={styles.legendLabelGroup}>
                                     <View style={[styles.legendSwatch, styles.legendSwatchContainer]} />
                                     <Text style={styles.legendText} numberOfLines={1}>
-                                        Container <Text style={styles.legendDesc}>(Starlight fills these with your tasks)</Text>
+                                        {BLOCK_TYPE_LABELS['CONTAINER']} <Text style={styles.legendDesc}>({BLOCK_TYPE_LEGEND_HINTS['CONTAINER']})</Text>
                                     </Text>
                                 </View>
                                 <Text style={styles.legendTotal}>{formatDuration(totals.container)}</Text>
@@ -164,7 +168,7 @@ export default function BuildScreen() {
                                 <View style={styles.legendLabelGroup}>
                                     <View style={[styles.legendSwatch, styles.legendSwatchAnchor]} />
                                     <Text style={styles.legendText} numberOfLines={1}>
-                                        Anchor <Text style={styles.legendDesc}>(A fixed event, like lunch or the gym)</Text>
+                                        {BLOCK_TYPE_LABELS['ANCHOR']} <Text style={styles.legendDesc}>({BLOCK_TYPE_LEGEND_HINTS['ANCHOR']})</Text>
                                     </Text>
                                 </View>
                                 <Text style={styles.legendTotal}>{formatDuration(totals.anchor)}</Text>
@@ -181,6 +185,18 @@ export default function BuildScreen() {
                             <Text style={styles.hintKey}>Hold</Text>
                             {' move'}
                         </Text>
+
+                        {showStarterHint && (
+                            <View style={styles.starterHint}>
+                                <Text style={styles.starterHintText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+                                    <Text style={styles.starterHintLead}>Sample day</Text>
+                                    {' to get you started, edit any block to make it yours'}
+                                </Text>
+                                <TouchableOpacity onPress={() => setShowStarterHint(false)} hitSlop={10} accessibilityLabel="Dismiss example day hint">
+                                    <Text style={styles.starterHintDismiss}>×</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
 
                             <TemplateValidationBanner draft={draft} />
 
@@ -262,6 +278,15 @@ const styles = StyleSheet.create({
     headerSubtitle: { fontSize: 15, color: colors.text.secondary, lineHeight: 22, letterSpacing: -0.2, marginTop: spacing.sm },
     hintStrip: { fontSize: 12, color: colors.text.muted, letterSpacing: -0.2, textAlign: 'center' },
     hintKey: { fontWeight: '600', color: colors.text.primary },
+
+    starterHint: {
+        flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+        backgroundColor: colors.accent.tint, borderRadius: radius.md,
+        paddingVertical: 8, paddingLeft: 12, paddingRight: 10,
+    },
+    starterHintText: { flex: 1, fontSize: 12.5, color: colors.text.secondary, letterSpacing: -0.1 },
+    starterHintLead: { fontWeight: '600', color: colors.accent.strong },
+    starterHintDismiss: { fontSize: 18, lineHeight: 18, color: colors.text.muted },
 
     scroll: { flex: 1 },
     content: { paddingHorizontal: spacing.xl, paddingTop: spacing.sm, paddingBottom: spacing.xxl, gap: spacing.lg },
