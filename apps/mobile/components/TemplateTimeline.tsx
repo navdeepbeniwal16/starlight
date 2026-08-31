@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useRef } from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
+import { View, Text, StyleSheet, Pressable, type StyleProp, type ViewStyle } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
     FadeInDown,
@@ -74,6 +74,7 @@ export function TemplateTimeline({
     onEditBlock,
     onCreateRange,
     onLiveEdit,
+    style,
 }: {
     blocks: BlockInput[];
     wakeTime: string;
@@ -87,6 +88,7 @@ export function TemplateTimeline({
     onEditBlock: (index: number) => void;
     onCreateRange: (startTime: string, endTime: string) => void;
     onLiveEdit: (snapshot: TemplateDraft, label: string) => void;
+    style?: StyleProp<ViewStyle>;
 }) {
     const setDraft = useTemplateStore((s) => s.setDraft);
     const scrollOffset = useScrollViewOffset(scrollRef);
@@ -179,7 +181,7 @@ export function TemplateTimeline({
     };
 
     return (
-        <View>
+        <View style={style}>
             <Animated.View entering={entering ? FadeInDown.duration(300) : undefined}>
                 <BoundaryTimeControl label="Wake" time={wakeTime} onChange={onWakeChange} />
             </Animated.View>

@@ -1,6 +1,6 @@
 import { BlockInput } from "./api.types";
 import { validateBlockDraft, MIN_BLOCK_MINUTES } from "./templateBlocks";
-import { fromMins, toMins } from "./time";
+import { durationMins, fromMins, toMins } from "./time";
 
 // A day template being edited. Its blocks carry no id.
 export type TemplateDraft = {
@@ -8,6 +8,15 @@ export type TemplateDraft = {
     sleepTime: string;
     blocks: BlockInput[];
 };
+
+// Total minutes occupied by CONTAINER vs ANCHOR blocks.
+export function blockTypeTotals(draft: TemplateDraft | null): { container: number; anchor: number } {
+    const sum = (type: BlockInput['type']) =>
+        (draft?.blocks ?? [])
+            .filter((b) => b.type === type)
+            .reduce((mins, b) => mins + durationMins(b.startTime, b.endTime), 0);
+    return { container: sum('CONTAINER'), anchor: sum('ANCHOR') };
+}
 
 // A free span of time, with its length in minutes.
 export type TemplateGap = { startTime: string; endTime: string; durationMinutes: number };

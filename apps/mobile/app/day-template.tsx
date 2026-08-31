@@ -19,8 +19,8 @@ import Animated, {
 import { api } from "../lib/api";
 import { colors, radius, spacing, shadow } from "../lib/theme";
 import type { BlockInput } from "../lib/api.types";
-import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, POINTS_PER_HOUR, type OverlapChange } from "../lib/templateDraft";
-import { formatDuration, durationMins, toMins } from "../lib/time";
+import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, blockTypeTotals, POINTS_PER_HOUR, type OverlapChange } from "../lib/templateDraft";
+import { formatDuration, toMins } from "../lib/time";
 import { useTemplateStore } from "../stores/template.store";
 import { BlockEditorModal } from "../components/BlockEditorModal";
 import { TemplateTimeline } from "../components/TemplateTimeline";
@@ -172,13 +172,7 @@ export default function DayTemplateScreen() {
         );
     }
 
-    const totals = useMemo(() => {
-        const sum = (type: BlockInput['type']) =>
-            (draft?.blocks ?? [])
-                .filter((b) => b.type === type)
-                .reduce((mins, b) => mins + durationMins(b.startTime, b.endTime), 0);
-        return { container: sum('CONTAINER'), anchor: sum('ANCHOR') };
-    }, [draft]);
+    const totals = useMemo(() => blockTypeTotals(draft), [draft]);
 
     // Skip the bounds check while wake and sleep are inverted; the window is meaningless then.
     const wakeBeforeSleep = isWakeBeforeSleep(draft);
@@ -219,7 +213,7 @@ export default function DayTemplateScreen() {
                         <Ionicons name="close" size={22} color={colors.text.primary} />
                     </TouchableOpacity>
                 </View>
-                <Text style={styles.headerSubtitle}>Tap a block to edit, or tap empty space to add one.</Text>
+                <Text style={styles.headerSubtitle}>Adjust your wake and sleep times, or reshape the blocks in between.</Text>
             </View>
 
             {loading && (
@@ -253,20 +247,40 @@ export default function DayTemplateScreen() {
                             entering={entering ? FadeInDown.duration(300) : undefined}
                         >
                             <View style={styles.legendItem}>
-                                <View style={[styles.legendSwatch, styles.legendSwatchContainer]} />
-                                <Text style={styles.legendText}>Container</Text>
+                                <View style={styles.legendLabelGroup}>
+                                    <View style={[styles.legendSwatch, styles.legendSwatchContainer]} />
+                                    <Text style={styles.legendText} numberOfLines={1}>
+                                        Container <Text style={styles.legendDesc}>(Starlight fills these with your tasks)</Text>
+                                    </Text>
+                                </View>
                                 <Text style={styles.legendTotal}>{formatDuration(totals.container)}</Text>
                             </View>
                             <View style={styles.legendItem}>
-                                <View style={[styles.legendSwatch, styles.legendSwatchAnchor]} />
-                                <Text style={styles.legendText}>Anchor</Text>
+                                <View style={styles.legendLabelGroup}>
+                                    <View style={[styles.legendSwatch, styles.legendSwatchAnchor]} />
+                                    <Text style={styles.legendText} numberOfLines={1}>
+                                        Anchor <Text style={styles.legendDesc}>(A fixed event, like lunch or the gym)</Text>
+                                    </Text>
+                                </View>
                                 <Text style={styles.legendTotal}>{formatDuration(totals.anchor)}</Text>
                             </View>
                         </Animated.View>
 
+                        <Text style={styles.hintStrip} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                            <Text style={styles.hintKey}>Tap space</Text>
+                            {' add · '}
+                            <Text style={styles.hintKey}>Tap</Text>
+                            {' edit · '}
+                            <Text style={styles.hintKey}>Hold edge</Text>
+                            {' resize · '}
+                            <Text style={styles.hintKey}>Hold</Text>
+                            {' move'}
+                        </Text>
+
                         <TemplateValidationBanner draft={draft} />
 
                         <TemplateTimeline
+                            style={styles.timeline}
                             blocks={draft.blocks}
                             wakeTime={draft.wakeTime}
                             sleepTime={draft.sleepTime}
@@ -380,14 +394,19 @@ const styles = StyleSheet.create({
     contentFill: { flex: 1 },
     scroll: { flex: 1 },
     content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
+    timeline: { paddingTop: spacing.lg, paddingBottom: spacing.lg },
 
-    legend: { flexDirection: 'row', gap: spacing.lg, paddingHorizontal: spacing.xs, marginTop: spacing.md },
-    legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    legend: { gap: spacing.sm, backgroundColor: colors.surface.sunken, borderRadius: radius.md, paddingVertical: 10, paddingHorizontal: 12, marginTop: spacing.md },
+    legendItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+    legendLabelGroup: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
     legendSwatch: { width: 12, height: 12, borderRadius: 3, backgroundColor: colors.surface.block },
     legendSwatchContainer: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.16)', borderStyle: 'dashed' },
     legendSwatchAnchor: { borderWidth: 1, borderColor: colors.border.hairline },
-    legendText: { fontSize: 12, color: colors.text.secondary, letterSpacing: -0.1 },
+    legendText: { fontSize: 12, fontWeight: '600', color: colors.text.primary, letterSpacing: -0.1, flexShrink: 1 },
     legendTotal: { fontSize: 12, color: colors.text.muted, letterSpacing: -0.1, fontVariant: ['tabular-nums'] },
+    legendDesc: { fontWeight: '400', fontStyle: 'italic', color: colors.text.secondary },
+    hintStrip: { fontSize: 12, color: colors.text.muted, letterSpacing: -0.2, textAlign: 'center' },
+    hintKey: { fontWeight: '600', color: colors.text.primary },
 
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: spacing.lg },
     errorText: { fontSize: 14, color: colors.text.secondary, textAlign: 'center' },

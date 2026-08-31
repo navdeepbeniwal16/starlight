@@ -6,8 +6,8 @@ import Animated, { useAnimatedRef } from "react-native-reanimated";
 import { api } from "../../lib/api";
 import { colors, radius, spacing, shadow, typography } from "../../lib/theme";
 import type { BlockInput } from "../../lib/api.types";
-import { isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, POINTS_PER_HOUR, type OverlapChange } from "../../lib/templateDraft";
-import { toMins } from "../../lib/time";
+import { isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, blockTypeTotals, POINTS_PER_HOUR, type OverlapChange } from "../../lib/templateDraft";
+import { formatDuration, toMins } from "../../lib/time";
 import { buildStarterTemplate } from "../../lib/starterTemplate";
 import { useTemplateStore } from "../../stores/template.store";
 import { StepEyebrow } from "../../components/StepEyebrow";
@@ -103,6 +103,7 @@ export default function BuildScreen() {
     }
 
     const valid = useMemo(() => isTemplateValid(draft), [draft]);
+    const totals = useMemo(() => blockTypeTotals(draft), [draft]);
     const wakeBeforeSleep = isWakeBeforeSleep(draft);
     const outOfBoundsIndexes = useMemo(
         () => new Set((wakeBeforeSleep ? blocksOutOfBounds(draft) : []).map((o) => o.index)),
@@ -127,7 +128,7 @@ export default function BuildScreen() {
                 <StepEyebrow step={1} total={3} />
                 <Text style={styles.headerTitle}>Let's build your day</Text>
                 <Text style={styles.headerSubtitle}>
-                    Set your wake and sleep times, then shape the blocks in between. Tap a block to edit, or tap empty space to add one.
+                    Set your wake and sleep times, then shape the blocks in between.
                 </Text>
             </View>
 
@@ -151,18 +152,35 @@ export default function BuildScreen() {
                     <Animated.ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={[styles.content, bottomOverflow > 0 && { paddingBottom: spacing.xxl + bottomOverflow }]} showsVerticalScrollIndicator={false}>
                         <View style={styles.legend}>
                             <View style={styles.legendItem}>
-                                <View style={[styles.legendSwatch, styles.legendSwatchContainer]} />
-                                <Text style={styles.legendText}>
-                                    <Text style={styles.legendLabel}>Container</Text>  ·  Starlight fills these with your tasks
-                                </Text>
+                                <View style={styles.legendLabelGroup}>
+                                    <View style={[styles.legendSwatch, styles.legendSwatchContainer]} />
+                                    <Text style={styles.legendText} numberOfLines={1}>
+                                        Container <Text style={styles.legendDesc}>(Starlight fills these with your tasks)</Text>
+                                    </Text>
+                                </View>
+                                <Text style={styles.legendTotal}>{formatDuration(totals.container)}</Text>
                             </View>
                             <View style={styles.legendItem}>
-                                <View style={[styles.legendSwatch, styles.legendSwatchAnchor]} />
-                                <Text style={styles.legendText}>
-                                    <Text style={styles.legendLabel}>Anchor</Text>  ·  A fixed event, like lunch or the gym
-                                </Text>
+                                <View style={styles.legendLabelGroup}>
+                                    <View style={[styles.legendSwatch, styles.legendSwatchAnchor]} />
+                                    <Text style={styles.legendText} numberOfLines={1}>
+                                        Anchor <Text style={styles.legendDesc}>(A fixed event, like lunch or the gym)</Text>
+                                    </Text>
+                                </View>
+                                <Text style={styles.legendTotal}>{formatDuration(totals.anchor)}</Text>
                             </View>
                         </View>
+
+                        <Text style={styles.hintStrip} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                            <Text style={styles.hintKey}>Tap space</Text>
+                            {' add · '}
+                            <Text style={styles.hintKey}>Tap</Text>
+                            {' edit · '}
+                            <Text style={styles.hintKey}>Hold edge</Text>
+                            {' resize · '}
+                            <Text style={styles.hintKey}>Hold</Text>
+                            {' move'}
+                        </Text>
 
                             <TemplateValidationBanner draft={draft} />
 
@@ -242,23 +260,27 @@ const styles = StyleSheet.create({
     backLabel: { fontSize: 15, fontWeight: '500', color: colors.text.secondary, letterSpacing: -0.1 },
     headerTitle: { ...typography.title, color: colors.text.primary, letterSpacing: 0.07, marginTop: 4 },
     headerSubtitle: { fontSize: 15, color: colors.text.secondary, lineHeight: 22, letterSpacing: -0.2, marginTop: spacing.sm },
+    hintStrip: { fontSize: 12, color: colors.text.muted, letterSpacing: -0.2, textAlign: 'center' },
+    hintKey: { fontWeight: '600', color: colors.text.primary },
 
     scroll: { flex: 1 },
     content: { paddingHorizontal: spacing.xl, paddingTop: spacing.sm, paddingBottom: spacing.xxl, gap: spacing.lg },
 
     legend: {
-        gap: 5,
+        gap: spacing.sm,
         backgroundColor: colors.surface.sunken,
         borderRadius: radius.md,
         paddingVertical: 10,
         paddingHorizontal: 12,
     },
-    legendItem: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    legendSwatch: { width: 11, height: 11, borderRadius: 3, backgroundColor: colors.surface.block },
+    legendItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+    legendLabelGroup: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+    legendSwatch: { width: 12, height: 12, borderRadius: 3, backgroundColor: colors.surface.block },
     legendSwatchContainer: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.16)', borderStyle: 'dashed' },
     legendSwatchAnchor: { borderWidth: 1, borderColor: colors.border.hairline },
-    legendText: { fontSize: 12.5, color: colors.text.secondary, letterSpacing: -0.1 },
-    legendLabel: { fontWeight: '600', color: colors.text.primary },
+    legendText: { fontSize: 12, fontWeight: '600', color: colors.text.primary, letterSpacing: -0.1, flexShrink: 1 },
+    legendTotal: { fontSize: 12, color: colors.text.muted, letterSpacing: -0.1, fontVariant: ['tabular-nums'] },
+    legendDesc: { fontWeight: '400', fontStyle: 'italic', color: colors.text.secondary },
 
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: spacing.lg },
     errorText: { fontSize: 14, color: colors.text.secondary, textAlign: 'center' },
