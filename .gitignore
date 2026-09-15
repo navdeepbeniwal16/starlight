@@ -19,6 +19,20 @@ build/
 .DS_Store
 Thumbs.db
 
+# Agent tooling
+# Third-party skills are installed globally (~/.claude)
+# ignore the installer's vendor store, its lockfile, and personal/runtime files.
+.agents/
+skills-lock.json
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# Skills discovery dir: ignore by default (stray global-install symlinks land here)
+.claude/skills/*
+
+# Starlight-specific skills — un-ignore each one explicitly, e.g.:
+# !.claude/skills/my-starlight-skill/
+
 # IDE
 .vscode/
 .idea/
