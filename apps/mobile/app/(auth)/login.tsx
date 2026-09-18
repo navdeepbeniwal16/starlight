@@ -4,6 +4,7 @@ import { useSignIn } from '@clerk/expo';
 import { useRef, useState } from 'react';
 import { runClerkPasswordFlow } from '../../lib/clerkAuth';
 import { KeyboardScreen } from '../../components/KeyboardScreen';
+import { OAuthButtons } from '../../components/OAuthButtons';
 import { colors, radius, spacing } from '../../lib/theme';
 
 export default function LoginScreen() {
@@ -93,6 +94,8 @@ export default function LoginScreen() {
                 >
                     <Text style={styles.buttonText}>{isLoading ? 'Logging in…' : 'Login'}</Text>
                 </TouchableOpacity>
+
+                <OAuthButtons onError={setError} />
 
                 <View style={styles.signupRow}>
                     <Text style={styles.signupText}>Don't have an account? </Text>
