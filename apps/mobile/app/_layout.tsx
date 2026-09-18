@@ -1,8 +1,11 @@
 import { Stack } from "expo-router";
+import { ClerkProvider } from "@clerk/expo";
+import { tokenCache } from "@clerk/expo/token-cache";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider, KeyboardToolbar } from "react-native-keyboard-controller";
 import { Caprasimo_400Regular, useFonts } from "@expo-google-fonts/caprasimo";
+import { CLERK_PUBLISHABLE_KEY } from "../lib/clerk";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
@@ -13,18 +16,22 @@ export default function RootLayout() {
   const [fontsLoaded] = useFonts({ Caprasimo_400Regular });
   if (!fontsLoaded) return null;
 
+  // The secure-store token cache persists the session across restarts and lets
+  // Clerk refresh tokens without a round-trip through React.
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <KeyboardProvider>
-        <QueryClientProvider client={queryClient}>
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="planning" options={{ presentation: "modal" }} />
-            <Stack.Screen name="task/[taskId]" options={{ presentation: "modal" }} />
-            <Stack.Screen name="day-template" options={{ presentation: "modal" }} />
-          </Stack>
-          <KeyboardToolbar />
-        </QueryClientProvider>
-      </KeyboardProvider>
-    </GestureHandlerRootView>
+    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} tokenCache={tokenCache}>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <KeyboardProvider>
+          <QueryClientProvider client={queryClient}>
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="planning" options={{ presentation: "modal" }} />
+              <Stack.Screen name="task/[taskId]" options={{ presentation: "modal" }} />
+              <Stack.Screen name="day-template" options={{ presentation: "modal" }} />
+            </Stack>
+            <KeyboardToolbar />
+          </QueryClientProvider>
+        </KeyboardProvider>
+      </GestureHandlerRootView>
+    </ClerkProvider>
   );
 }

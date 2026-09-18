@@ -1,14 +1,14 @@
 import { useRouter } from 'expo-router';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image } from 'react-native';
-import { useAuthStore } from '../../stores/auth.store';
+import { useSignUp } from '@clerk/expo';
 import { useRef, useState } from 'react';
-import { api } from '../../lib/api';
+import { clerkErrorMessage } from '../../lib/clerkErrors';
 import { KeyboardScreen } from '../../components/KeyboardScreen';
 import { colors, radius, spacing } from '../../lib/theme';
 
 export default function SignupScreen() {
     const router = useRouter();
-    const setAuth = useAuthStore((state) => state.setAuth);
+    const { signUp } = useSignUp();
 
     const emailRef = useRef<TextInput>(null);
     const passwordRef = useRef<TextInput>(null);
@@ -46,16 +46,27 @@ export default function SignupScreen() {
         }
 
         setIsLoading(true);
-        const result = await api.signup({email: trimmedEmail, password, firstName, lastName});
-        setIsLoading(false);
+        try {
+            // Instant sign-up: the dev instance requires no email verification, so a
+            // successful password sign-up completes straight away. Breach and length
+            // rejections resolve as a ClerkError here, surfaced inline.
+            const { error: passwordError } = await signUp.password({ emailAddress: trimmedEmail, password, firstName, lastName });
+            if (passwordError) {
+                setError(clerkErrorMessage(passwordError));
+                return;
+            }
 
-        if(!result.ok) {
-            setError(result.error);
-            return;
+            if (signUp.status === 'complete') {
+                // finalize() activates the session; the (auth) guard redirects to the
+                // gate, which lands a brand-new account (no onboardedAt) on onboarding.
+                const { error: finalizeError } = await signUp.finalize();
+                if (finalizeError) setError(clerkErrorMessage(finalizeError));
+            } else {
+                setError('Could not complete sign up. Please try again.');
+            }
+        } finally {
+            setIsLoading(false);
         }
-
-        await setAuth(result.data.user, result.data.token);
-        router.replace('/(onboarding)');
     }
 
     return (

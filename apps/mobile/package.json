@@ -11,6 +11,7 @@
     "test": "jest"
   },
   "dependencies": {
+    "@clerk/expo": "^4.6.8",
     "@expo-google-fonts/caprasimo": "^0.4.0",
     "@expo/metro-runtime": "~55.0.11",
     "@expo/vector-icons": "^15.0.2",

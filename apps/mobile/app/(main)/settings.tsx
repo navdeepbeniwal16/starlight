@@ -3,26 +3,29 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
-import { useShallow } from "zustand/react/shallow";
-import { useAuthStore } from "../../stores/auth.store";
+import { useUser, useClerk } from "@clerk/expo";
 import { PressableScale } from "../../components/PressableScale";
+import { useSessionStore } from "../../stores/session.store";
 import { colors, radius, spacing, shadow } from "../../lib/theme";
 
 export default function SettingsScreen() {
     const router = useRouter();
-    const { user, clearAuth } = useAuthStore(
-        useShallow(state => ({ user: state.user, clearAuth: state.clearAuth }))
-    );
+    const { user } = useUser();
+    const { signOut } = useClerk();
+    const resetSession = useSessionStore(state => state.reset);
 
-    const initials = user
-        ? `${user.firstName.charAt(0)}${user.lastName.charAt(0)}`.toUpperCase()
-        : '';
+    const firstName = user?.firstName ?? '';
+    const lastName = user?.lastName ?? '';
+    const email = user?.primaryEmailAddress?.emailAddress ?? '';
+    const initials = `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
 
     const version = Constants.expoConfig?.version;
 
     async function handleLogout() {
-        await clearAuth();
-        router.replace('/(auth)/login');
+        // Drop the previous user's cached domain data, then end the Clerk session.
+        // The layout guard sees the cleared session and redirects — no navigation here.
+        resetSession();
+        await signOut();
     }
 
     function confirmLogout() {
@@ -49,9 +52,9 @@ export default function SettingsScreen() {
                     </View>
                     <View style={styles.profileInfo}>
                         <Text style={styles.profileName}>
-                            {user?.firstName} {user?.lastName}
+                            {firstName} {lastName}
                         </Text>
-                        <Text style={styles.profileEmail}>{user?.email}</Text>
+                        <Text style={styles.profileEmail}>{email}</Text>
                     </View>
                 </View>
 

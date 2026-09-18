@@ -1,14 +1,14 @@
 import { useRouter } from 'expo-router';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image } from 'react-native';
-import { useAuthStore } from '../../stores/auth.store';
+import { useSignIn } from '@clerk/expo';
 import { useRef, useState } from 'react';
-import { api } from '../../lib/api';
+import { clerkErrorMessage } from '../../lib/clerkErrors';
 import { KeyboardScreen } from '../../components/KeyboardScreen';
 import { colors, radius, spacing } from '../../lib/theme';
 
 export default function LoginScreen() {
     const router = useRouter();
-    const setAuth = useAuthStore((state) => state.setAuth);
+    const { signIn } = useSignIn();
 
     const passwordRef = useRef<TextInput>(null);
 
@@ -27,16 +27,24 @@ export default function LoginScreen() {
         }
 
         setIsLoading(true);
-        const result = await api.login({email: trimmedEmail, password});
-        setIsLoading(false);
+        try {
+            const { error: passwordError } = await signIn.password({ identifier: trimmedEmail, password });
+            if (passwordError) {
+                setError(clerkErrorMessage(passwordError));
+                return;
+            }
 
-        if(!result.ok) {
-            setError(result.error);
-            return;
+            if (signIn.status === 'complete') {
+                // finalize() activates the session; the (auth) guard then redirects to
+                // the gate, which routes to onboarding or main. No navigation here.
+                const { error: finalizeError } = await signIn.finalize();
+                if (finalizeError) setError(clerkErrorMessage(finalizeError));
+            } else {
+                setError('Additional verification is required to sign in.');
+            }
+        } finally {
+            setIsLoading(false);
         }
-
-        await setAuth(result.data.user, result.data.token);
-        router.replace(result.data.user.onboardedAt ? '/(main)' : '/(onboarding)/welcome');
     }
 
     return (

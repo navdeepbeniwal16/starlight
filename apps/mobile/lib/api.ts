@@ -1,5 +1,5 @@
-import { ApiResult, BlockInput, CompleteOnboardingResponse, ConfirmAssignment, ConfirmPlanResponse, CreateDayTemplateResponse, CreateTaskInput, CreateTaskResponse, GeneratePlanResponse, GetAllTasksResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, GetReviewTasksResponse, GetTaskDetailResponse, LoginResponse, MeResponse, SignupResponse, UpdateDayTemplateResponse, UpdateTaskInput, UpdateTaskResponse } from "./api.types";
-import { getToken } from "./auth-token";
+import { ApiResult, BlockInput, ConfirmAssignment, ConfirmPlanResponse, CreateDayTemplateResponse, CreateTaskInput, CreateTaskResponse, GeneratePlanResponse, GetAllTasksResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, GetReviewTasksResponse, GetTaskDetailResponse, OnboardingResponse, UpdateDayTemplateResponse, UpdateTaskInput, UpdateTaskResponse } from "./api.types";
+import { getToken } from "./clerk";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
 
@@ -9,52 +9,6 @@ export const api = {
     const json = await res.json();
     if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
     return json;
-  },
-
-  signup: async (data: {
-    email: string;
-    password: string;
-    firstName: string;
-    lastName: string;
-  }): Promise<SignupResponse> => {
-    try {
-      const response = await fetch(`${API_URL}/auth/signup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json'},
-        body: JSON.stringify(data)
-      });
-
-      const responseJson = await response.json();
-      if(!response.ok) {
-        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
-      }
-
-      return { ok: true, data: responseJson.data };
-    } catch (error) {
-      return { ok: false, error: 'Network error. Please check your connection.'};
-    }
-  },
-
-  login: async (data: {
-    email: string;
-    password: string;
-  }): Promise<LoginResponse> => {
-    try {
-      const response = await fetch(`${API_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json'},
-        body: JSON.stringify(data)
-      });
-
-      const responseJson = await response.json();
-      if(!response.ok) {
-        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
-      }
-
-      return { ok: true, data: responseJson.data };
-    } catch (error) {
-      return { ok: false, error: 'Network error. Please check your connection.'};
-    }
   },
 
   getDayTemplate: async (): Promise<GetDayTemplateResponse> => {
@@ -376,7 +330,7 @@ export const api = {
     }
   },
 
-  getMe: async (): Promise<MeResponse> => {
+  getOnboarding: async (): Promise<OnboardingResponse> => {
     const token = await getToken();
 
     if(!token) {
@@ -384,7 +338,7 @@ export const api = {
     }
 
     try {
-      const response = await fetch(`${API_URL}/auth/me`, {
+      const response = await fetch(`${API_URL}/me/onboarding`, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` },
       });
@@ -400,7 +354,7 @@ export const api = {
     }
   },
 
-  completeOnboarding: async (): Promise<CompleteOnboardingResponse> => {
+  completeOnboarding: async (): Promise<OnboardingResponse> => {
     const token = await getToken();
 
     if(!token) {
@@ -408,8 +362,8 @@ export const api = {
     }
 
     try {
-      const response = await fetch(`${API_URL}/auth/me/onboarding/complete`, {
-        method: 'POST',
+      const response = await fetch(`${API_URL}/me/onboarding`, {
+        method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}` },
       });
 
