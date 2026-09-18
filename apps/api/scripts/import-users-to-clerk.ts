@@ -75,11 +75,21 @@ async function resolveClerkUser(user: {
         return created.id;
     } catch (error) {
         if (!isIdentifierTakenError(error)) throw error;
-        // Someone already holds this email on the Clerk side (e.g. an earlier
-        // run without externalId, or a manual create) — link it instead.
+        // Email already taken on the Clerk side. Safe to adopt only when it's the
+        // same identity — our own externalId (a create Clerk hadn't yet indexed
+        // for the lookup above) or an unclaimed account. An email owned by a
+        // *different* externalId is a genuine conflict: linking it would graft
+        // this user onto a Clerk account whose password we don't control, so
+        // their "existing password" sign-in would fail. Refuse it loudly.
         const byEmail = await clerk.users.getUserList({ emailAddress: [user.email], limit: 1 });
-        if (byEmail.data[0]) return byEmail.data[0].id;
-        throw error;
+        const existing = byEmail.data[0];
+        if (existing && (existing.externalId === null || existing.externalId === user.id)) {
+            return existing.id;
+        }
+        throw new Error(
+            `Email ${user.email} is already held by a different Clerk identity ` +
+                `(externalId ${existing?.externalId ?? "unknown"}); refusing to link local user ${user.id}.`,
+        );
     }
 }
 
@@ -93,8 +103,8 @@ async function main() {
     let skipped = 0;
     for (const user of users) {
         if (!user.email || !user.passwordHash) {
-            // No importable credentials — nothing to move into Clerk. These get
-            // provisioned just-in-time on their next authenticated request.
+            // No importable credentials — no hash to preserve, so there's nothing
+            // to move into Clerk. Left unlinked for a human to resolve.
             console.warn(`Skipping user ${user.id}: missing email or password hash.`);
             skipped += 1;
             continue;
