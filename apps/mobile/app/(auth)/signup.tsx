@@ -2,7 +2,7 @@ import { useRouter } from 'expo-router';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { useSignUp } from '@clerk/expo';
 import { useRef, useState } from 'react';
-import { clerkErrorMessage } from '../../lib/clerkErrors';
+import { runClerkPasswordFlow } from '../../lib/clerkAuth';
 import { KeyboardScreen } from '../../components/KeyboardScreen';
 import { colors, radius, spacing } from '../../lib/theme';
 
@@ -48,22 +48,15 @@ export default function SignupScreen() {
         setIsLoading(true);
         try {
             // Instant sign-up: the dev instance requires no email verification, so a
-            // successful password sign-up completes straight away. Breach and length
-            // rejections resolve as a ClerkError here, surfaced inline.
-            const { error: passwordError } = await signUp.password({ emailAddress: trimmedEmail, password, firstName, lastName });
-            if (passwordError) {
-                setError(clerkErrorMessage(passwordError));
-                return;
-            }
-
-            if (signUp.status === 'complete') {
-                // finalize() activates the session; the (auth) guard redirects to the
-                // gate, which lands a brand-new account (no onboardedAt) on onboarding.
-                const { error: finalizeError } = await signUp.finalize();
-                if (finalizeError) setError(clerkErrorMessage(finalizeError));
-            } else {
-                setError('Could not complete sign up. Please try again.');
-            }
+            // successful password sign-up completes and finalizes straight away. A
+            // brand-new account has no onboardedAt, so the gate lands on onboarding.
+            const message = await runClerkPasswordFlow({
+                attempt: () => signUp.password({ emailAddress: trimmedEmail, password, firstName, lastName }),
+                isComplete: () => signUp.status === 'complete',
+                finalize: () => signUp.finalize(),
+                incompleteMessage: 'Could not complete sign up. Please try again.',
+            });
+            if (message) setError(message);
         } finally {
             setIsLoading(false);
         }

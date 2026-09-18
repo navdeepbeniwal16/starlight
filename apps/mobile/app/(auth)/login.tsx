@@ -2,7 +2,7 @@ import { useRouter } from 'expo-router';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { useSignIn } from '@clerk/expo';
 import { useRef, useState } from 'react';
-import { clerkErrorMessage } from '../../lib/clerkErrors';
+import { runClerkPasswordFlow } from '../../lib/clerkAuth';
 import { KeyboardScreen } from '../../components/KeyboardScreen';
 import { colors, radius, spacing } from '../../lib/theme';
 
@@ -28,20 +28,15 @@ export default function LoginScreen() {
 
         setIsLoading(true);
         try {
-            const { error: passwordError } = await signIn.password({ identifier: trimmedEmail, password });
-            if (passwordError) {
-                setError(clerkErrorMessage(passwordError));
-                return;
-            }
-
-            if (signIn.status === 'complete') {
-                // finalize() activates the session; the (auth) guard then redirects to
-                // the gate, which routes to onboarding or main. No navigation here.
-                const { error: finalizeError } = await signIn.finalize();
-                if (finalizeError) setError(clerkErrorMessage(finalizeError));
-            } else {
-                setError('Additional verification is required to sign in.');
-            }
+            // On success finalize() activates the session and the (auth) guard
+            // redirects to the gate — no imperative navigation here.
+            const message = await runClerkPasswordFlow({
+                attempt: () => signIn.password({ identifier: trimmedEmail, password }),
+                isComplete: () => signIn.status === 'complete',
+                finalize: () => signIn.finalize(),
+                incompleteMessage: 'Additional verification is required to sign in.',
+            });
+            if (message) setError(message);
         } finally {
             setIsLoading(false);
         }
