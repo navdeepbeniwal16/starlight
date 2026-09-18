@@ -8,11 +8,11 @@ datasource db {
 
 model User {
   id           String       @id @default(cuid())
-  email        String       @unique
+  email        String?      @unique
   clerkUserId  String?      @unique
-  passwordHash String
-  firstName    String
-  lastName     String
+  passwordHash String?
+  firstName    String?
+  lastName     String?
   onboardedAt  DateTime?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
@@ -22,14 +22,14 @@ model User {
 }
 
 model DayTemplate {
-  id        String             @id @default(cuid())
-  userId    String             @unique
-  user      User               @relation(fields: [userId], references: [id])
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
   wakeTime  String
   sleepTime String
   blocks    Block[]
-  createdAt DateTime           @default(now())
-  updatedAt DateTime           @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Block {
@@ -43,7 +43,8 @@ model Block {
   energyLevel   EnergyLevel?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
-	@@map("DayTemplateBlock")
+
+  @@map("DayTemplateBlock")
 }
 
 enum BlockType {
@@ -126,4 +127,3 @@ model AppConfig {
   key   String @unique
   value String
 }
-

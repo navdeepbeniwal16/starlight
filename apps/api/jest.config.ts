@@ -7,7 +7,7 @@ const config: Config = {
   moduleFileExtensions: ["ts", "js", "json"],
   collectCoverageFrom: ["src/**/*.ts", "!src/**/*.test.ts"],
   coverageDirectory: "coverage",
-  setupFiles: ["dotenv/config"],
+  setupFiles: ["dotenv/config", "<rootDir>/src/test/setupEnv.ts"],
   transform: {
     "^.+\\.ts$": ["@swc/jest", {}],
   },
