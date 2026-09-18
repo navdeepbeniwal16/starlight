@@ -3,12 +3,21 @@ import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native
 import { Ionicons } from '@expo/vector-icons';
 import { useSSO } from '@clerk/expo/experimental';
 import * as WebBrowser from 'expo-web-browser';
+import * as AuthSession from 'expo-auth-session';
 import { runClerkOAuthFlow } from '../lib/clerkOAuth';
 import { colors, radius, spacing } from '../lib/theme';
 
 // Dismisses the OAuth web session once Clerk redirects back to the app; required
 // for `openAuthSessionAsync` to resolve. Safe to call at module scope.
 WebBrowser.maybeCompleteAuthSession();
+
+// Where Clerk sends the browser after the provider authenticates. Passed
+// explicitly (rather than leaning on useSSO's internal default) so the exact URL
+// is visible here: it MUST be whitelisted in the Clerk Dashboard's allowed
+// redirect URLs, or the callback drops the rotating_token_nonce and the flow
+// fails. Resolves to `starlight://sso-callback` in a dev/standalone build (the
+// app scheme is `starlight`); browser SSO does not run in Expo Go.
+const redirectUrl = AuthSession.makeRedirectUri({ path: 'sso-callback' });
 
 // The dev instance disables email verification, so a first-time social sign-in
 // completes and JIT-provisions the local user just like password sign-up.
@@ -37,7 +46,7 @@ export function OAuthButtons({ onError }: { onError: (message: string | null) =>
         onError(null);
         setPending(strategy);
         try {
-            const message = await runClerkOAuthFlow(() => startSSOFlow({ strategy }));
+            const message = await runClerkOAuthFlow(() => startSSOFlow({ strategy, redirectUrl }));
             if (message) onError(message);
         } finally {
             setPending(null);
