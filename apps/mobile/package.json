@@ -49,5 +49,11 @@
     "jest": "^30.4.2",
     "typescript": "~5.9.2"
   },
+  "expo": {
+    "autolinking": {
+      "//": "We use Clerk's headless JS hooks only. Excluding its native module (@clerk/expo loads it via requireOptionalNativeModule, so JS runs without it — as in Expo Go) keeps the build off Clerk's native iOS SDK, which needs iOS 17 via SPM and trips RN 0.83's cocoapods SPM hook. Revisit if CLERK-5 wants native Google/Apple sign-in.",
+      "exclude": ["@clerk/expo"]
+    }
+  },
   "private": true
 }
