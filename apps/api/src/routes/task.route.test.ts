@@ -3,7 +3,7 @@ import type { Request, Response, NextFunction } from "express";
 import app from "../app";
 import { prisma } from "../lib/prisma";
 
-const TEST_EMAIL = "test-task-route@starlight.test";
+const TEST_CLERK_ID = "user_test_task_route";
 
 let mockUserId = "";
 jest.mock("../middlewares/auth.middleware", () => ({
@@ -12,17 +12,17 @@ jest.mock("../middlewares/auth.middleware", () => ({
             res.status(401).json({ error: "Missing or invalid authorization token" });
             return;
         }
-        req.user = { sub: mockUserId, email: "test-task-route@starlight.test" };
+        req.user = { sub: mockUserId };
         res.locals["userId"] = mockUserId;
         next();
     },
 }));
 
-async function seedUser(email: string) {
+async function seedUser(clerkUserId: string) {
     return prisma.user.upsert({
-        where: { email },
+        where: { clerkUserId },
         update: {},
-        create: { email, passwordHash: "not-a-real-hash", firstName: "Test", lastName: "User" },
+        create: { clerkUserId },
     });
 }
 
@@ -31,7 +31,7 @@ describe("task routes", () => {
     let taskId: string;
 
     beforeAll(async () => {
-        const user = await seedUser(TEST_EMAIL);
+        const user = await seedUser(TEST_CLERK_ID);
         userId = user.id;
         mockUserId = userId;
         await prisma.task.deleteMany({ where: { userId } });

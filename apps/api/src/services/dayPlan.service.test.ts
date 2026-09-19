@@ -3,7 +3,7 @@ import { getDayPlan, getReviewTasks, generatePlanProposal, confirmPlan, NoTempla
 import type { Anthropic } from "@anthropic-ai/sdk";
 import type { AgentInput, AgentResult } from "./planAgent.service";
 
-const TEST_EMAIL = "test-dayplan-service@starlight.test";
+const TEST_CLERK_ID = "user_test_dayplan_service";
 const DATE = "2026-06-20";
 const YESTERDAY = "2026-06-19";
 const NOW = "2026-06-20T08:00:00.000Z";
@@ -120,14 +120,9 @@ async function cleanup() {
 
 beforeAll(async () => {
     const user = await prisma.user.upsert({
-        where: { email: TEST_EMAIL },
+        where: { clerkUserId: TEST_CLERK_ID },
         update: {},
-        create: {
-            email: TEST_EMAIL,
-            passwordHash: "not-a-real-hash",
-            firstName: "Test",
-            lastName: "User",
-        },
+        create: { clerkUserId: TEST_CLERK_ID },
     });
     userId = user.id;
 });
@@ -364,7 +359,7 @@ describe("confirmPlan", () => {
         const done = await seedTask("Completed during review", { status: "DONE", progress: 100 });
 
         const otherUser = await prisma.user.create({
-            data: { email: "other-confirm@starlight.test", passwordHash: "x", firstName: "O", lastName: "U" },
+            data: { clerkUserId: "user_test_dayplan_other_confirm" },
         });
         const foreign = await prisma.task.create({
             data: { userId: otherUser.id, title: "Not yours", estimatedMins: 30 },

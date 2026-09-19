@@ -2,8 +2,8 @@ import { prisma } from "../lib/prisma";
 import { getBacklog, getAllTasks } from "./task.service";
 import type { DayPlanStatus } from "@prisma/client";
 
-const TEST_EMAIL = "test-task-service@starlight.test";
-const OTHER_EMAIL = "test-task-service-other@starlight.test";
+const TEST_CLERK_ID = "user_test_task_service";
+const OTHER_CLERK_ID = "user_test_task_service_other";
 
 // getBacklog buckets "today" from the client's local date; tests pin offset 0
 // so the day range is the UTC calendar day and freshly created tasks (whose
@@ -18,16 +18,11 @@ function utcDateString(d: Date): string {
 const TODAY = utcDateString(new Date());
 const YESTERDAY = utcDateString(new Date(Date.now() - DAY_MS));
 
-async function seedUser(email: string) {
+async function seedUser(clerkUserId: string) {
     return prisma.user.upsert({
-        where: { email },
+        where: { clerkUserId },
         update: {},
-        create: {
-            email,
-            passwordHash: "not-a-real-hash",
-            firstName: "Test",
-            lastName: "User",
-        },
+        create: { clerkUserId },
     });
 }
 
@@ -91,8 +86,8 @@ async function backdateUpdatedAt(taskId: string, to: Date) {
 }
 
 afterAll(async () => {
-    for (const email of [TEST_EMAIL, OTHER_EMAIL]) {
-        const user = await prisma.user.findUnique({ where: { email } });
+    for (const clerkUserId of [TEST_CLERK_ID, OTHER_CLERK_ID]) {
+        const user = await prisma.user.findUnique({ where: { clerkUserId } });
         if (user) {
             await cleanup(user.id);
             await prisma.user.delete({ where: { id: user.id } });
@@ -105,7 +100,7 @@ describe("getBacklog", () => {
     let userId: string;
 
     beforeEach(async () => {
-        const user = await seedUser(TEST_EMAIL);
+        const user = await seedUser(TEST_CLERK_ID);
         userId = user.id;
         await cleanup(userId);
     });
@@ -225,7 +220,7 @@ describe("getBacklog", () => {
     });
 
     it("does not return another user's tasks", async () => {
-        const other = await seedUser(OTHER_EMAIL);
+        const other = await seedUser(OTHER_CLERK_ID);
         await cleanup(other.id);
         const [otherBlock] = await seedPlan(other.id, TODAY);
         await seedTask(other.id, { title: "Other scheduled", plannedBlockId: otherBlock.id, blockOrder: 1 });
@@ -242,7 +237,7 @@ describe("getAllTasks", () => {
     let userId: string;
 
     beforeEach(async () => {
-        const user = await seedUser(TEST_EMAIL);
+        const user = await seedUser(TEST_CLERK_ID);
         userId = user.id;
         await cleanup(userId);
     });
@@ -309,7 +304,7 @@ describe("getAllTasks", () => {
     });
 
     it("does not return another user's tasks", async () => {
-        const other = await seedUser(OTHER_EMAIL);
+        const other = await seedUser(OTHER_CLERK_ID);
         await cleanup(other.id);
         await seedTask(other.id, { title: "Other task" });
 
