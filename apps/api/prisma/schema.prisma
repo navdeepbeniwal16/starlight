@@ -1,9 +1,11 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
+  provider   = "postgresql"
+  extensions = [citext]
 }
 
 model User {
@@ -107,7 +109,7 @@ model Project {
   id        String   @id @default(cuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name      String
+  name      String   @db.Citext
   goal      String?
   isInFocus Boolean  @default(false)
   tasks     Task[]
