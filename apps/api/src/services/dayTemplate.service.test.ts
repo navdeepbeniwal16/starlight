@@ -9,18 +9,13 @@ import {
 import { DayTemplateValidationError } from "./dayTemplate.validator";
 import { BlockInput } from "../types/dayTemplate.types";
 
-const TEST_EMAIL = "test-day-template-service@starlight.test";
+const TEST_CLERK_ID = "user_test_day_template_service";
 
-async function seedUser(email: string) {
+async function seedUser(clerkUserId: string) {
     return prisma.user.upsert({
-        where: { email },
+        where: { clerkUserId },
         update: {},
-        create: {
-            email,
-            passwordHash: "not-a-real-hash",
-            firstName: "Test",
-            lastName: "User",
-        },
+        create: { clerkUserId },
     });
 }
 
@@ -61,13 +56,13 @@ async function seedTemplate(userId: string) {
 let userId: string;
 
 beforeEach(async () => {
-    const user = await seedUser(TEST_EMAIL);
+    const user = await seedUser(TEST_CLERK_ID);
     userId = user.id;
     await cleanup(userId);
 });
 
 afterAll(async () => {
-    const user = await prisma.user.findUnique({ where: { email: TEST_EMAIL } });
+    const user = await prisma.user.findUnique({ where: { clerkUserId: TEST_CLERK_ID } });
     if (user) {
         await cleanup(user.id);
         await prisma.user.delete({ where: { id: user.id } });

@@ -1,25 +1,21 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 
-// Identity Clerk carries in its session claims. Populated on the first
-// authenticated request (JIT provisioning) and never after — the local row is a
-// minimal anchor, and Clerk stays the source of truth for these fields. For a
-// social sign-in, first/last name arrive from the OAuth provider (CLERK-5).
-export type ClerkIdentity = { email?: string; firstName?: string; lastName?: string };
-
-export async function resolveLocalUser(clerkUserId: string, identity: ClerkIdentity = {}): Promise<{ id: string }> {
+// The local row is a minimal anchor keyed on the Clerk user id — Clerk is the
+// sole source of truth for identity, so the backend stores none of it. Created
+// on the first authenticated request (JIT provisioning) and never mutated after.
+export async function resolveLocalUser(clerkUserId: string): Promise<{ id: string }> {
     const existing = await prisma.user.findUnique({
         where: { clerkUserId },
         select: { id: true },
     });
     if (existing) return existing;
 
-    const { email, firstName, lastName } = identity;
     try {
         return await prisma.user.upsert({
             where: { clerkUserId },
             update: {},
-            create: { clerkUserId, email, firstName, lastName },
+            create: { clerkUserId },
             select: { id: true },
         });
     } catch (error) {

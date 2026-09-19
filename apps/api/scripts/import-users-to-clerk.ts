@@ -93,11 +93,23 @@ async function resolveClerkUser(user: {
     }
 }
 
+// CLERK-6 drops these identity columns from the schema, so the generated Prisma
+// client no longer exposes them. This import only ever runs against a *pre*-drop
+// database (columns still present), so it reads them with raw SQL — decoupled
+// from the current schema — while the writeback below uses the typed client.
+type UnlinkedUser = {
+    id: string;
+    email: string | null;
+    passwordHash: string | null;
+    firstName: string | null;
+    lastName: string | null;
+};
+
 async function main() {
-    const users = await prisma.user.findMany({
-        where: { clerkUserId: null },
-        select: { id: true, email: true, passwordHash: true, firstName: true, lastName: true },
-    });
+    const users = await prisma.$queryRaw<UnlinkedUser[]>`
+        SELECT "id", "email", "passwordHash", "firstName", "lastName"
+        FROM "User" WHERE "clerkUserId" IS NULL
+    `;
 
     let imported = 0;
     let skipped = 0;
@@ -122,10 +134,12 @@ async function main() {
         imported += 1;
     }
 
-    const alreadyLinked = await prisma.user.count({ where: { clerkUserId: { not: null } } });
+    const [{ count }] = await prisma.$queryRaw<{ count: bigint }[]>`
+        SELECT COUNT(*)::bigint AS count FROM "User" WHERE "clerkUserId" IS NOT NULL
+    `;
     console.log(
         `Imported ${imported} user(s) into Clerk, skipped ${skipped} without credentials. ` +
-            `${alreadyLinked} user(s) now linked.`,
+            `${count} user(s) now linked.`,
     );
 }
 

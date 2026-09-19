@@ -3,7 +3,7 @@ import type { Request, Response, NextFunction } from "express";
 import app from "../app";
 import { prisma } from "../lib/prisma";
 
-const TEST_EMAIL = "test-me-route@starlight.test";
+const TEST_CLERK_ID = "user_test_me_route";
 
 let mockUserId = "";
 jest.mock("../middlewares/auth.middleware", () => ({
@@ -18,11 +18,11 @@ jest.mock("../middlewares/auth.middleware", () => ({
     },
 }));
 
-async function seedUser(email: string) {
+async function seedUser(clerkUserId: string) {
     return prisma.user.upsert({
-        where: { email },
+        where: { clerkUserId },
         update: { onboardedAt: null },
-        create: { email },
+        create: { clerkUserId },
     });
 }
 
@@ -30,7 +30,7 @@ describe("me/onboarding routes", () => {
     let userId: string;
 
     beforeAll(async () => {
-        const user = await seedUser(TEST_EMAIL);
+        const user = await seedUser(TEST_CLERK_ID);
         userId = user.id;
         mockUserId = userId;
     });
