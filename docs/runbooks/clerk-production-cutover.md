@@ -65,24 +65,7 @@ domain is DNS-verified.
 4. Sanity check: trigger a password-reset email to yourself and confirm it
    arrives from the verified domain.
 
-### 3. Configure the session token (custom claims)
-
-The API reads `email`, `first_name`, and `last_name` from the session JWT
-(`apps/api/src/middlewares/auth.middleware.ts`). These are **not** in the
-default token.
-
-1. Clerk Dashboard (prod) → **Sessions** → **Customize session token**.
-2. Add to the claims:
-   ```json
-   {
-     "email": "{{user.primary_email_address}}",
-     "first_name": "{{user.first_name}}",
-     "last_name": "{{user.last_name}}"
-   }
-   ```
-3. Mirror whatever the dev instance already has so behaviour matches.
-
-### 4. Configure social providers (Google + Apple)
+### 3. Configure social providers (Google + Apple)
 
 CLERK-5 ships Google and Apple sign-in. The dev instance uses Clerk's shared
 credentials; **production requires your own OAuth credentials.**
@@ -91,14 +74,14 @@ credentials; **production requires your own OAuth credentials.**
 2. Provide production OAuth client IDs/secrets (Google Cloud console; Apple
    Developer → Sign in with Apple) and register Clerk's prod redirect URLs.
 
-### 5. Stage the API secrets in Railway
+### 4. Stage the API secrets in Railway
 
 Add to the Railway service (do **not** deploy yet — just set the variables):
 
 - `CLERK_PUBLISHABLE_KEY` = `pk_live_…`
 - `CLERK_SECRET_KEY` = `sk_live_…`
 
-### 6. Create the mobile publishable key in EAS
+### 5. Create the mobile publishable key in EAS
 
 The `production` build profile is configured to pull env vars from the EAS
 `production` environment (`apps/mobile/eas.json`). Create the key there:
@@ -171,9 +154,11 @@ DATABASE_URL=<prod-db-url> \
   npx tsx scripts/import-users-to-clerk.ts
 ```
 
-- The script refuses to run against the test/dummy secret key and is idempotent
-  (matches on `externalId` + email), so it is safe to re-run if it's
-  interrupted.
+- The script refuses to run against the placeholder dummy key (or an unset key)
+  and is idempotent (matches on `externalId` + email), so it is safe to re-run
+  if it's interrupted. Point `CLERK_SECRET_KEY` at the `sk_live_` prod key — a
+  real `sk_test_` dev key would pass the guard but import into the wrong
+  instance.
 - Confirm the user count in the Clerk prod dashboard matches the DB.
 
 ### Step 4 — Deploy the API (the flip)
@@ -231,7 +216,8 @@ Maps to the CLERK-7 acceptance criteria:
       DNS-verified domain, complete it, and sign in with the new password.
 - [ ] **Social login:** Google and Apple sign-in complete against the prod
       instance.
-- [ ] **API auth:** authenticated API calls succeed (JWT verified against prod
-      JWKS); `req.auth` resolves `email` / `first_name` / `last_name`.
+- [ ] **API auth:** authenticated API calls succeed — the session JWT is
+      verified against the prod JWKS and resolves to the local user via the
+      `clerkUserId` anchor (`apps/api/src/middlewares/auth.middleware.ts`).
 - [ ] **Key hygiene:** the mobile bundle contains only the publishable key; the
       secret key is present only in Railway.
