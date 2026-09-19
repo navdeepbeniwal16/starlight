@@ -4,6 +4,8 @@ import { useSignIn } from '@clerk/expo';
 import { useRef, useState } from 'react';
 import { runClerkPasswordFlow } from '../../lib/clerkAuth';
 import { KeyboardScreen } from '../../components/KeyboardScreen';
+import { OAuthButtons } from '../../components/OAuthButtons';
+import { PasswordInput } from '../../components/PasswordInput';
 import { colors, radius, spacing } from '../../lib/theme';
 
 export default function LoginScreen() {
@@ -52,6 +54,8 @@ export default function LoginScreen() {
                 </View>
             </View>
 
+            <OAuthButtons onError={setError} />
+
             <View style={styles.form}>
                 <View style={styles.fieldContainer}>
                     <Text style={styles.label}>Email</Text>
@@ -71,14 +75,12 @@ export default function LoginScreen() {
 
                 <View style={styles.fieldContainer}>
                     <Text style={styles.label}>Password</Text>
-                    <TextInput
+                    <PasswordInput
                         ref={passwordRef}
                         value={password}
                         onChangeText={setPassword}
                         style={styles.input}
                         placeholder="Enter your password"
-                        placeholderTextColor={colors.text.muted}
-                        secureTextEntry
                         returnKeyType="done"
                         onSubmitEditing={handleLogin}
                     />
@@ -114,15 +116,16 @@ const styles = StyleSheet.create({
         flexGrow: 1,
         justifyContent: 'center',
         paddingHorizontal: 24,
-        gap: 44,
+        paddingVertical: 32,
+        gap: 28,
     },
     header: {
         alignItems: 'center',
         gap: spacing.xs,
     },
     logo: {
-        width: 96,
-        height: 96,
+        width: 64,
+        height: 64,
     },
     wordmark: {
         alignItems: 'center',
@@ -143,7 +146,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
     },
     form: {
-        gap: spacing.xl,
+        gap: spacing.lg,
     },
     fieldContainer: {
         gap: spacing.sm,

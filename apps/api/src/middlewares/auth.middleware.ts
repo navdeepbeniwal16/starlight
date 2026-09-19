@@ -12,9 +12,17 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     }
 
     try {
-        const email = typeof sessionClaims?.["email"] === "string" ? sessionClaims["email"] : undefined;
+        // These custom claims must be added to the Clerk session token template
+        // (Dashboard → Sessions). first/last name only arrive once name-bearing
+        // claims are configured; a social sign-in supplies them from the provider.
+        const claim = (key: string): string | undefined =>
+            typeof sessionClaims?.[key] === "string" ? (sessionClaims[key] as string) : undefined;
 
-        const user = await resolveLocalUser(clerkUserId, email);
+        const user = await resolveLocalUser(clerkUserId, {
+            email: claim("email"),
+            firstName: claim("first_name"),
+            lastName: claim("last_name"),
+        });
 
         req.user = { sub: user.id };
         res.locals["userId"] = user.id;
