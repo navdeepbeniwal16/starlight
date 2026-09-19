@@ -53,14 +53,10 @@ export function OAuthButtons({ onError }: { onError: (message: string | null) =>
         }
     }
 
+    // Social-first: the provider buttons lead, and the divider sits below them to
+    // separate social sign-in from the email form the screen renders next.
     return (
         <View style={styles.container}>
-            <View style={styles.dividerRow}>
-                <View style={styles.divider} />
-                <Text style={styles.dividerText}>or</Text>
-                <View style={styles.divider} />
-            </View>
-
             {PROVIDERS.map(({ strategy, label, icon }) => (
                 <TouchableOpacity
                     key={strategy}
@@ -72,6 +68,12 @@ export function OAuthButtons({ onError }: { onError: (message: string | null) =>
                     <Text style={styles.buttonText}>{label}</Text>
                 </TouchableOpacity>
             ))}
+
+            <View style={styles.dividerRow}>
+                <View style={styles.divider} />
+                <Text style={styles.dividerText}>or</Text>
+                <View style={styles.divider} />
+            </View>
         </View>
     );
 }
