@@ -1,10 +1,19 @@
 import { prisma } from "../lib/prisma";
 import type { BacklogTask, BacklogBuckets, ScheduledTask, TaskDetail, TaskPage, CreateTaskInput, UpdateTaskInput } from "../types/task.types";
 import { TaskStatus, Priority } from "@prisma/client";
+import { ProjectNotFoundError } from "./project.service";
 
-export class InvalidProgressError extends Error {}
-export class InvalidDeadlineError extends Error {}
-export class TaskNotFoundError extends Error {}
+export class InvalidProgressError extends Error { }
+export class InvalidDeadlineError extends Error { }
+export class TaskNotFoundError extends Error { }
+
+async function assertProjectOwned(userId: string, projectId: string): Promise<void> {
+    const owned = await prisma.project.findFirst({
+        where: { id: projectId, userId },
+        select: { id: true },
+    });
+    if (!owned) throw new ProjectNotFoundError();
+}
 
 const backlogTaskSelect = {
     id: true,
@@ -144,6 +153,10 @@ export async function createTask(userId: string, input: CreateTaskInput): Promis
         }
     }
 
+    if (input.projectId) {
+        await assertProjectOwned(userId, input.projectId);
+    }
+
     return prisma.task.create({
         data: {
             userId,
@@ -152,9 +165,10 @@ export async function createTask(userId: string, input: CreateTaskInput): Promis
             status: deriveStatus(progress),
             progress,
             ...(input.priority && { priority: input.priority }),
-            ...(input.effort   && { effort: input.effort }),
-            ...(deadlineDate   && { deadline: deadlineDate }),
-            ...(input.notes    && { notes: input.notes }),
+            ...(input.effort && { effort: input.effort }),
+            ...(deadlineDate && { deadline: deadlineDate }),
+            ...(input.notes && { notes: input.notes }),
+            ...(input.projectId && { projectId: input.projectId }),
         },
         select: {
             id: true,
@@ -218,6 +232,15 @@ export async function updateTask(userId: string, taskId: string, input: UpdateTa
         }
         data.progress = input.progress;
         data.status = deriveStatus(input.progress);
+    }
+
+    if (input.projectId !== undefined) {
+        if (input.projectId === null) {
+            data.projectId = null;
+        } else {
+            await assertProjectOwned(userId, input.projectId);
+            data.projectId = input.projectId;
+        }
     }
 
     return prisma.task.update({

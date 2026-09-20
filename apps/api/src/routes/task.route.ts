@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
 import { getBacklog, getAllTasks, createTask, getTaskById, deleteTask, updateTask, InvalidProgressError, InvalidDeadlineError, TaskNotFoundError } from "../services/task.service";
+import { ProjectNotFoundError } from "../services/project.service";
 import type { CreateTaskInput, UpdateTaskInput } from "../types/task.types";
 import { todayDateString, parseTimezoneOffset } from "../lib/clientDate";
 
@@ -35,7 +36,7 @@ router.post("/", authenticate, async (req: Request, res: Response): Promise<void
         return;
     }
 
-    const { title, estimatedMins, priority, effort, deadline, progress, notes } = req.body as CreateTaskInput;
+    const { title, estimatedMins, priority, effort, deadline, progress, notes, projectId } = req.body as CreateTaskInput;
 
     if (!title || typeof title !== "string" || title.trim().length === 0) {
         res.status(400).json({ success: false, error: "Title is required" });
@@ -47,7 +48,7 @@ router.post("/", authenticate, async (req: Request, res: Response): Promise<void
     }
 
     try {
-        const task = await createTask(req.user!.sub, { title, estimatedMins, priority, effort, deadline, progress, notes });
+        const task = await createTask(req.user!.sub, { title, estimatedMins, priority, effort, deadline, progress, notes, projectId });
         res.status(201).json({ success: true, data: task });
     } catch (error) {
         if (error instanceof InvalidProgressError) {
@@ -56,6 +57,10 @@ router.post("/", authenticate, async (req: Request, res: Response): Promise<void
         }
         if (error instanceof InvalidDeadlineError) {
             res.status(400).json({ success: false, error: "Invalid deadline date" });
+            return;
+        }
+        if (error instanceof ProjectNotFoundError) {
+            res.status(404).json({ success: false, error: "Project not found" });
             return;
         }
 
@@ -71,9 +76,9 @@ router.patch("/:id", authenticate, async (req: Request, res: Response): Promise<
         return;
     }
 
-    const { title, notes, estimatedMins, priority, effort, deadline, progress } = req.body as UpdateTaskInput;
+    const { title, notes, estimatedMins, priority, effort, deadline, progress, projectId } = req.body as UpdateTaskInput;
 
-    const hasField = [title, notes, estimatedMins, priority, effort, deadline, progress].some(v => v !== undefined);
+    const hasField = [title, notes, estimatedMins, priority, effort, deadline, progress, projectId].some(v => v !== undefined);
     if (!hasField) {
         res.status(400).json({ success: false, error: "At least one field is required" });
         return;
@@ -90,7 +95,7 @@ router.patch("/:id", authenticate, async (req: Request, res: Response): Promise<
     }
 
     try {
-        const task = await updateTask(req.user!.sub, req.params.id as string, { title, notes, estimatedMins, priority, effort, deadline, progress });
+        const task = await updateTask(req.user!.sub, req.params.id as string, { title, notes, estimatedMins, priority, effort, deadline, progress, projectId });
         res.json({ success: true, data: task });
     } catch (error) {
         if (error instanceof TaskNotFoundError) {
@@ -103,6 +108,10 @@ router.patch("/:id", authenticate, async (req: Request, res: Response): Promise<
         }
         if (error instanceof InvalidDeadlineError) {
             res.status(400).json({ success: false, error: "Invalid deadline date" });
+            return;
+        }
+        if (error instanceof ProjectNotFoundError) {
+            res.status(404).json({ success: false, error: "Project not found" });
             return;
         }
         throw error;
