@@ -49,6 +49,7 @@ export type CreateTaskInput = {
     deadline?: string;   // ISO datetime string
     progress?: number;   // 0–100
     notes?: string;
+    projectId?: string;
 };
 
 export type UpdateTaskInput = {
@@ -59,4 +60,5 @@ export type UpdateTaskInput = {
     effort?: EnergyLevel | null;
     deadline?: string | null;  // null = clear deadline
     progress?: number;
+    projectId?: string | null;  // null = detach to Todos
 };
