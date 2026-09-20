@@ -11,6 +11,7 @@ import appConfigRouter from "./routes/app";
 import dayTemplateRouter from "./routes/dayTemplate.route";
 import dayPlanRouter from "./routes/dayPlan.route";
 import taskRouter from "./routes/task.route";
+import projectRouter from "./routes/project.route";
 
 const app = express();
 
@@ -60,6 +61,7 @@ app.use("/app", appConfigRouter);
 app.use("/day-template", dayTemplateRouter);
 app.use("/day-plan", dayPlanRouter);
 app.use("/tasks", taskRouter);
+app.use("/projects", projectRouter);
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
