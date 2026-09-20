@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
-import type { CreateProjectInput, ProjectDetail } from "../types/project.types";
+import type { CreateProjectInput, UpdateProjectInput, ProjectDetail } from "../types/project.types";
 
 export class ProjectNotFoundError extends Error { }
 export class DuplicateProjectNameError extends Error { }
@@ -33,6 +33,48 @@ export async function createProject(userId: string, input: CreateProjectInput): 
         }
         throw error;
     }
+}
+
+export async function getAllProjects(userId: string): Promise<ProjectDetail[]> {
+    return prisma.project.findMany({
+        where: { userId },
+        orderBy: { createdAt: "asc" },
+        select: projectDetailSelect,
+    });
+}
+
+export async function getProjectById(userId: string, projectId: string): Promise<ProjectDetail | null> {
+    return prisma.project.findFirst({
+        where: { id: projectId, userId },
+        select: projectDetailSelect,
+    });
+}
+
+export async function updateProject(userId: string, projectId: string, input: UpdateProjectInput): Promise<ProjectDetail> {
+    const existing = await prisma.project.findFirst({ where: { id: projectId, userId }, select: { id: true } });
+    if (!existing) throw new ProjectNotFoundError();
+
+    const data: Prisma.ProjectUpdateInput = {};
+    if (input.name !== undefined) data.name = input.name.trim();
+    if (input.goal !== undefined) data.goal = input.goal;
+
+    try {
+        return await prisma.project.update({
+            where: { id: projectId },
+            data,
+            select: projectDetailSelect,
+        });
+    } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+            throw new DuplicateProjectNameError();
+        }
+        throw error;
+    }
+}
+
+export async function deleteProject(userId: string, projectId: string): Promise<void> {
+    const result = await prisma.project.deleteMany({ where: { id: projectId, userId } });
+    if (result.count === 0) throw new ProjectNotFoundError();
 }
 
 export async function setInFocus(userId: string, projectId: string, inFocus: boolean): Promise<ProjectDetail> {
