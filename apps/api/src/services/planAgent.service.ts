@@ -40,10 +40,20 @@ export type AgentTask = {
     status: TaskStatus;
 };
 
+// A Project grouping the tasks scheduled under it. `goal` is omitted when the
+// Project has none; the tasks are nested so membership is structural, not an id
+// join the model has to reconstruct.
+export type AgentProject = {
+    name: string;
+    goal?: string;
+    isInFocus: boolean;
+    tasks: AgentTask[];
+};
+
 export type AgentInput = {
     now: string;
     blocks: AgentBlock[];
-    tasks: AgentTask[];
+    projects: AgentProject[];
 };
 
 export type Assignment = { taskId: string; blockId: string; blockOrder: number };
@@ -60,6 +70,13 @@ export type RawBlock = {
     energyLevel: EnergyLevel | null;
 };
 
+export type RawProject = {
+    id: string;
+    name: string;
+    goal: string | null;
+    isInFocus: boolean;
+};
+
 export type RawTask = {
     id: string;
     title: string;
@@ -71,6 +88,7 @@ export type RawTask = {
     notes: string | null;
     createdAt: Date;
     status: TaskStatus;
+    project: RawProject | null;
 };
 
 // ─── Helpers (independently testable) ────────────────────────────────────
@@ -86,8 +104,54 @@ export function remainingMinsOf(estimatedMins: number, progress: number | null):
     return Math.round(estimatedMins * (1 - (progress ?? 0) / 100));
 }
 
-// Shapes the agent input: only CONTAINER blocks are schedulable, and each task's
-// remaining work is pre-computed server-side as estimatedMins × (1 − progress/100).
+// Standalone tasks (no Project) are surfaced under this synthetic group so the
+// model sees one uniform shape; it is not a real Project and gets no goal.
+export const TODOS_GROUP_NAME = "Todos";
+
+function toAgentTask(t: RawTask): AgentTask {
+    return {
+        id: t.id,
+        title: t.title,
+        remainingMins: remainingMinsOf(t.estimatedMins, t.progress),
+        effort: t.effort,
+        priority: t.priority,
+        deadline: t.deadline ? t.deadline.toISOString() : null,
+        notes: t.notes,
+        createdAt: t.createdAt.toISOString(),
+        status: t.status,
+    };
+}
+
+// Only Projects with a scheduled task appear (an owned-but-unreferenced Project
+// is never sent); real Projects keep first-appearance order, and standalone
+// tasks collect into a trailing "Todos" group emitted only when one exists.
+function groupTasksByProject(tasks: RawTask[]): AgentProject[] {
+    const byProjectId = new Map<string, AgentProject>();
+    const todos: AgentTask[] = [];
+
+    for (const t of tasks) {
+        const agentTask = toAgentTask(t);
+        if (t.project === null) {
+            todos.push(agentTask);
+            continue;
+        }
+        const { id, name, goal, isInFocus } = t.project;
+        let group = byProjectId.get(id);
+        if (!group) {
+            // A blank goal is noise to the model, so treat it like an absent one.
+            group = { name, ...(goal !== null && goal.trim() !== "" && { goal }), isInFocus, tasks: [] };
+            byProjectId.set(id, group);
+        }
+        group.tasks.push(agentTask);
+    }
+
+    const groups = [...byProjectId.values()];
+    if (todos.length > 0) {
+        groups.push({ name: TODOS_GROUP_NAME, isInFocus: false, tasks: todos });
+    }
+    return groups;
+}
+
 export function buildAgentInput(blocks: RawBlock[], tasks: RawTask[], now: string): AgentInput {
     return {
         now,
@@ -100,17 +164,7 @@ export function buildAgentInput(blocks: RawBlock[], tasks: RawTask[], now: strin
                 endTime: b.endTime,
                 energyLevel: b.energyLevel,
             })),
-        tasks: tasks.map(t => ({
-            id: t.id,
-            title: t.title,
-            remainingMins: remainingMinsOf(t.estimatedMins, t.progress),
-            effort: t.effort,
-            priority: t.priority,
-            deadline: t.deadline ? t.deadline.toISOString() : null,
-            notes: t.notes,
-            createdAt: t.createdAt.toISOString(),
-            status: t.status,
-        })),
+        projects: groupTasksByProject(tasks),
     };
 }
 
@@ -305,16 +359,19 @@ const SYSTEM_PROMPT = `You are a scheduling agent for a daily planner. You assig
 Input:
 - now: the current instant as an ISO string. It is your anchor — judge how urgent a deadline is and how long a task has waited relative to now.
 - blocks: the CONTAINER blocks you may schedule into. Each has a startTime, endTime (24h "HH:mm"), and an energyLevel (HIGH, MEDIUM, LOW, or null).
-- tasks: each has a remainingMins (the work left to do), an effort (HIGH, MEDIUM, LOW, or null), a priority (HIGH, MEDIUM, LOW, or null), a deadline (ISO string or null), notes (free-text context from the user, possibly empty), a createdAt (ISO string — when the task was added, so an old createdAt means it has waited a long time), and a status.
+- projects: your tasks grouped by the project they belong to. Each project has a name, an optional goal (the outcome its tasks serve), an isInFocus flag, and its tasks nested inside. A trailing project named "Todos" holds standalone tasks that belong to no project — it is not a real project (no goal, never in focus). You schedule tasks by their id; the grouping is context you reason with, not something you output.
+- each task (nested under its project) has a remainingMins (the work left to do), an effort (HIGH, MEDIUM, LOW, or null), a priority (HIGH, MEDIUM, LOW, or null), a deadline (ISO string or null), notes (free-text context from the user, possibly empty), a createdAt (ISO string — when the task was added, so an old createdAt means it has waited a long time), and a status.
 
 Judging value:
-- Estimate each task's value by weighing all of its signals together: how close its deadline is relative to now, its priority, what its notes reveal about importance or context, and how long it has waited (tasks sitting in the backlog for a long time should not linger). Balance these signals holistically rather than following any strict ordering of them.
-- Schedule so the most valuable work gets a place. When not everything fits, the lower-value tasks are the ones left unscheduled.
+- Estimate each task's value by weighing all of its signals together: how close its deadline is relative to now, its priority, what its notes and its project's goal reveal about importance or context, whether its project is in focus, and how long it has waited (tasks sitting in the backlog for a long time should not linger). Balance these signals holistically rather than following any strict ordering of them.
+- A project's goal tells you what its tasks are ultimately for — use it to judge how much a task matters, not just what the task says on its own.
+- A task whose project is in focus is more valuable: apply this as a soft boost blended with the other signals, never as an override. Keep it within a priority level — the boost lifts a task among others of the same priority (and tasks with no priority), but focus alone never lifts a task above one of explicitly higher priority (a focused LOW-priority task does not outrank a non-focused MEDIUM or HIGH one on focus alone). A near deadline or a long wait can still elevate a lower-priority task as usual.
+- Compare value globally across every project, not just within a group. The most valuable work anywhere gets a place; when not everything fits, the lower-value tasks are the ones left unscheduled.
 
 Rules:
 - Only schedule tasks into the CONTAINER blocks you are given.
 - A task's remainingMins must fit entirely within a single block — task splitting across blocks is not supported.
-- Batch similar tasks (use the task title, notes, and block name for more context) in the same block to avoid context switching as much as possible, or match the task's effort to the block's energyLevel (e.g. HIGH-effort work in HIGH-energy blocks).
+- Batch related tasks into the same block to reduce context-switching, in this order of preference: first keep tasks from the same project together; then group tasks that look similar from their titles and notes (also the best you can do for the "Todos" group, whose tasks share no project); and last, only as a weak tiebreaker, prefer a block whose energyLevel matches a task's effort (e.g. HIGH-effort work in a HIGH-energy block). Energy fit is the least important of these — a gentle nudge, not a rule.
 - The total remainingMins assigned to a block must not exceed its capacity (endTime − startTime in minutes).
 - blockOrder is the 0-based position of a task within its block, reflecting the suggested order of execution.
 - If a task cannot fit into any block (its remainingMins exceeds every block's remaining capacity), return it in "unschedulable" with a short human-readable reason. Every task must appear in exactly one of "assignments" or "unschedulable".
@@ -403,6 +460,9 @@ export async function generateSchedule(
     deps: ScheduleDeps = defaultDeps,
 ): Promise<AgentResult> {
     const input = buildAgentInput(blocks, tasks, now);
+    // The capacity guardrail reasons over a flat task list; the project nesting is
+    // purely for the model, so flatten once and reuse across the re-plan loop.
+    const allTasks = input.projects.flatMap(p => p.tasks);
     const containerBlockIds = new Set(blocks.filter(b => b.type === "CONTAINER").map(b => b.id));
     const taskIds = new Set(tasks.map(t => t.id));
 
@@ -427,7 +487,7 @@ export async function generateSchedule(
 
         normalized = normalizeAssignments(parseAgentResult(toolUse.input), containerBlockIds, taskIds);
 
-        overflows = overflowsOf(input.blocks, input.tasks, normalized.assignments, CAPACITY_TOLERANCE_MINS);
+        overflows = overflowsOf(input.blocks, allTasks, normalized.assignments, CAPACITY_TOLERANCE_MINS);
         if (overflows.length === 0) return normalized;
         if (attempt >= MAX_REPLAN_ATTEMPTS) break;
 
@@ -444,19 +504,19 @@ export async function generateSchedule(
             content: [{
                 type: "tool_result",
                 tool_use_id: toolUse.toolUseId,
-                content: buildOverflowFeedback(input.blocks, input.tasks, normalized.assignments, CAPACITY_TOLERANCE_MINS),
+                content: buildOverflowFeedback(input.blocks, allTasks, normalized.assignments, CAPACITY_TOLERANCE_MINS),
             }],
         });
     }
 
     // Reached only via `break`, which always runs after `normalized` has been assigned.
     const finalSchedule = normalized as AgentResult;
-    const { assignments, evicted } = evictToFit(input.blocks, input.tasks, finalSchedule.assignments, CAPACITY_TOLERANCE_MINS);
+    const { assignments, evicted } = evictToFit(input.blocks, allTasks, finalSchedule.assignments, CAPACITY_TOLERANCE_MINS);
 
     // Overrun each floored block still carries past true capacity — now within tolerance
     // (may be ≤ 0). Surfaced in the warn log to show how much slack the floor leaned on.
     const overIds = new Set(overflows.map(o => o.blockId));
-    const committedAfter = committedMinsByBlock(input.tasks, assignments);
+    const committedAfter = committedMinsByBlock(allTasks, assignments);
     const residual = input.blocks
         .filter(b => overIds.has(b.id))
         .map(b => ({ blockId: b.id, overflow: (committedAfter.get(b.id) ?? 0) - capacityOf(b) }));

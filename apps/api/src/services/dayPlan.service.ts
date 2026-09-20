@@ -127,6 +127,8 @@ async function getSchedulableTasks(userId: string, planDate: string): Promise<Ra
         notes: true,
         createdAt: true,
         status: true,
+        // Eager-load the Project so buildAgentInput can nest tasks under it.
+        project: { select: { id: true, name: true, goal: true, isInFocus: true } },
     } as const;
 
     const [carriedOver, backlog] = await Promise.all([
