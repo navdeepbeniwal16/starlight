@@ -28,7 +28,7 @@ router.post("/", authenticate, async (req: Request, res: Response): Promise<void
         return;
     }
 
-    const { name, goal } = req.body as CreateProjectInput;
+    const { name, goal, notes } = req.body as CreateProjectInput;
 
     if (!name || typeof name !== "string" || name.trim().length === 0) {
         res.status(400).json({ success: false, error: "Name is required" });
@@ -36,7 +36,7 @@ router.post("/", authenticate, async (req: Request, res: Response): Promise<void
     }
 
     try {
-        const project = await createProject(req.user!.sub, { name, goal });
+        const project = await createProject(req.user!.sub, { name, goal, notes });
         res.status(201).json({ success: true, data: project });
     } catch (error) {
         if (error instanceof DuplicateProjectNameError) {
@@ -80,9 +80,9 @@ router.patch("/:id", authenticate, async (req: Request, res: Response): Promise<
         return;
     }
 
-    const { name, goal } = req.body as UpdateProjectInput;
+    const { name, goal, notes } = req.body as UpdateProjectInput;
 
-    const hasField = [name, goal].some(v => v !== undefined);
+    const hasField = [name, goal, notes].some(v => v !== undefined);
     if (!hasField) {
         res.status(400).json({ success: false, error: "At least one field is required" });
         return;
@@ -94,7 +94,7 @@ router.patch("/:id", authenticate, async (req: Request, res: Response): Promise<
     }
 
     try {
-        const project = await updateProject(req.user!.sub, req.params.id as string, { name, goal });
+        const project = await updateProject(req.user!.sub, req.params.id as string, { name, goal, notes });
         res.json({ success: true, data: project });
     } catch (error) {
         if (error instanceof ProjectNotFoundError) {

@@ -85,12 +85,13 @@ async function seedTask(title: string, overrides: Partial<{
     });
 }
 
-async function seedProject(name: string, overrides: Partial<{ goal: string; isInFocus: boolean }> = {}) {
+async function seedProject(name: string, overrides: Partial<{ goal: string; notes: string; isInFocus: boolean }> = {}) {
     return prisma.project.create({
         data: {
             userId,
             name,
             ...(overrides.goal !== undefined && { goal: overrides.goal }),
+            ...(overrides.notes !== undefined && { notes: overrides.notes }),
             ...(overrides.isInFocus !== undefined && { isInFocus: overrides.isInFocus }),
         },
     });
@@ -292,7 +293,7 @@ describe("generatePlanProposal", () => {
 
     it("nests scheduled tasks under their project and standalone tasks into Todos", async () => {
         await seedTemplate();
-        const project = await seedProject("Website revamp", { goal: "launch v2", isInFocus: true });
+        const project = await seedProject("Website revamp", { goal: "launch v2", notes: "ship before the conference", isInFocus: true });
         await seedTask("Design hero", { projectId: project.id });
         await seedTask("Buy milk");
         const agent = noopAgent();
@@ -301,11 +302,12 @@ describe("generatePlanProposal", () => {
 
         const projects = agent.calls[0].projects;
         const website = projects.find(p => p.name === "Website revamp")!;
-        expect(website).toMatchObject({ goal: "launch v2", isInFocus: true });
+        expect(website).toMatchObject({ goal: "launch v2", notes: "ship before the conference", isInFocus: true });
         expect(website.tasks.map(t => t.title)).toEqual(["Design hero"]);
         const todos = projects.find(p => p.name === "Todos")!;
         expect(todos).toMatchObject({ isInFocus: false });
         expect(todos).not.toHaveProperty("goal");
+        expect(todos).not.toHaveProperty("notes");
         expect(todos.tasks.map(t => t.title)).toEqual(["Buy milk"]);
     });
 });

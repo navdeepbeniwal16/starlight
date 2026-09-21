@@ -40,12 +40,13 @@ export type AgentTask = {
     status: TaskStatus;
 };
 
-// A Project grouping the tasks scheduled under it. `goal` is omitted when the
-// Project has none; the tasks are nested so membership is structural, not an id
-// join the model has to reconstruct.
+// A Project grouping the tasks scheduled under it. `goal` and `notes` are the
+// user's standing context and are each omitted when absent; the tasks are nested
+// so membership is structural, not an id join the model has to reconstruct.
 export type AgentProject = {
     name: string;
     goal?: string;
+    notes?: string;
     isInFocus: boolean;
     tasks: AgentTask[];
 };
@@ -74,6 +75,7 @@ export type RawProject = {
     id: string;
     name: string;
     goal: string | null;
+    notes: string | null;
     isInFocus: boolean;
 };
 
@@ -135,11 +137,17 @@ function groupTasksByProject(tasks: RawTask[]): AgentProject[] {
             todos.push(agentTask);
             continue;
         }
-        const { id, name, goal, isInFocus } = t.project;
+        const { id, name, goal, notes, isInFocus } = t.project;
         let group = byProjectId.get(id);
         if (!group) {
-            // A blank goal is noise to the model, so treat it like an absent one.
-            group = { name, ...(goal !== null && goal.trim() !== "" && { goal }), isInFocus, tasks: [] };
+            // A blank goal/notes is noise to the model, so treat it like an absent one.
+            group = {
+                name,
+                ...(goal !== null && goal.trim() !== "" && { goal }),
+                ...(notes !== null && notes.trim() !== "" && { notes }),
+                isInFocus,
+                tasks: [],
+            };
             byProjectId.set(id, group);
         }
         group.tasks.push(agentTask);
@@ -359,12 +367,12 @@ const SYSTEM_PROMPT = `You are a scheduling agent for a daily planner. You assig
 Input:
 - now: the current instant as an ISO string. It is your anchor — judge how urgent a deadline is and how long a task has waited relative to now.
 - blocks: the CONTAINER blocks you may schedule into. Each has a startTime, endTime (24h "HH:mm"), and an energyLevel (HIGH, MEDIUM, LOW, or null).
-- projects: your tasks grouped by the project they belong to. Each project has a name, an optional goal (the outcome its tasks serve), an isInFocus flag, and its tasks nested inside. A trailing project named "Todos" holds standalone tasks that belong to no project — it is not a real project (no goal, never in focus). You schedule tasks by their id; the grouping is context you reason with, not something you output.
+- projects: your tasks grouped by the project they belong to. Each project has a name, an optional goal (the outcome its tasks serve), optional notes (free-text standing context the user attached to the project), an isInFocus flag, and its tasks nested inside. A trailing project named "Todos" holds standalone tasks that belong to no project — it is not a real project (no goal or notes, never in focus). You schedule tasks by their id; the grouping is context you reason with, not something you output.
 - each task (nested under its project) has a remainingMins (the work left to do), an effort (HIGH, MEDIUM, LOW, or null), a priority (HIGH, MEDIUM, LOW, or null), a deadline (ISO string or null), notes (free-text context from the user, possibly empty), a createdAt (ISO string — when the task was added, so an old createdAt means it has waited a long time), and a status.
 
 Judging value:
 - Estimate each task's value by weighing all of its signals together: how close its deadline is relative to now, its priority, what its notes and its project's goal reveal about importance or context, whether its project is in focus, and how long it has waited (tasks sitting in the backlog for a long time should not linger). Balance these signals holistically rather than following any strict ordering of them.
-- A project's goal tells you what its tasks are ultimately for — use it to judge how much a task matters, not just what the task says on its own.
+- A project's goal tells you what its tasks are ultimately for, and its notes carry any further standing context the user attached — use both to judge how much a task matters, not just what the task says on its own. Treat notes as soft context that informs your judgement, never as hard rules.
 - A task whose project is in focus is more valuable: apply this as a soft boost blended with the other signals, never as an override. Keep it within a priority level — the boost lifts a task among others of the same priority (and tasks with no priority), but focus alone never lifts a task above one of explicitly higher priority (a focused LOW-priority task does not outrank a non-focused MEDIUM or HIGH one on focus alone). A near deadline or a long wait can still elevate a lower-priority task as usual.
 - Compare value globally across every project, not just within a group. The most valuable work anywhere gets a place; when not everything fits, the lower-value tasks are the ones left unscheduled.
 

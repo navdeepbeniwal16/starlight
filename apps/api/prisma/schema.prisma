@@ -111,6 +111,7 @@ model Project {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name      String   @db.Citext
   goal      String?
+  notes     String?
   isInFocus Boolean  @default(false)
   tasks     Task[]
   createdAt DateTime @default(now())

@@ -56,7 +56,7 @@ function task(overrides: Partial<RawTask> = {}): RawTask {
 }
 
 function proj(overrides: Partial<RawProject> = {}): RawProject {
-    return { id: "p1", name: "Project", goal: "ship it", isInFocus: false, ...overrides };
+    return { id: "p1", name: "Project", goal: "ship it", notes: null, isInFocus: false, ...overrides };
 }
 
 function taskIn(project: RawProject, overrides: Partial<RawTask> = {}): RawTask {
@@ -163,6 +163,30 @@ describe("buildAgentInput", () => {
         );
 
         expect(Object.fromEntries(input.projects.map(p => [p.name, "goal" in p]))).toEqual({ Empty: false, Ws: false });
+    });
+
+    it("includes project notes when present and omits them when blank or absent", () => {
+        const input = buildAgentInput(
+            [],
+            [
+                taskIn(proj({ id: "p-has", name: "Has", notes: "watch the vendor SLA" }), { id: "h1" }),
+                taskIn(proj({ id: "p-null", name: "Null", notes: null }), { id: "n1" }),
+                taskIn(proj({ id: "p-blank", name: "Blank", notes: "   " }), { id: "b1" }),
+            ],
+            NOW,
+        );
+
+        const byName = Object.fromEntries(input.projects.map(p => [p.name, p]));
+        expect(byName["Has"].notes).toBe("watch the vendor SLA");
+        expect(byName["Null"]).not.toHaveProperty("notes");
+        expect(byName["Blank"]).not.toHaveProperty("notes");
+    });
+
+    it("never puts notes on the Todos group", () => {
+        const input = buildAgentInput([], [task({ id: "loose" })], NOW);
+
+        expect(input.projects[0].name).toBe(TODOS_GROUP_NAME);
+        expect(input.projects[0]).not.toHaveProperty("notes");
     });
 
     it("includes every referenced project and passes isInFocus through", () => {

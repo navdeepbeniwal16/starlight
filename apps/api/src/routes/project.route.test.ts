@@ -63,6 +63,13 @@ describe("project routes", () => {
         );
     });
 
+    it("POST /projects persists notes", async () => {
+        const res = await request(app).post("/projects").set(auth()).send({ name: "Work", notes: "watch the vendor SLA" });
+
+        expect(res.status).toBe(201);
+        expect(res.body.data).toEqual(expect.objectContaining({ name: "Work", notes: "watch the vendor SLA" }));
+    });
+
     it("POST /projects rejects an empty name with 400", async () => {
         const res = await request(app).post("/projects").set(auth()).send({ name: "   " });
         expect(res.status).toBe(400);
@@ -100,6 +107,18 @@ describe("project routes", () => {
 
         expect(res.status).toBe(200);
         expect(res.body.data).toEqual(expect.objectContaining({ name: "New", goal: null }));
+    });
+
+    it("PATCH /projects/:id updates notes, then clears them with null", async () => {
+        const project = await prisma.project.create({ data: { userId, name: "P", notes: "old context" } });
+
+        const updated = await request(app).patch(`/projects/${project.id}`).set(auth()).send({ notes: "new context" });
+        expect(updated.status).toBe(200);
+        expect(updated.body.data.notes).toBe("new context");
+
+        const cleared = await request(app).patch(`/projects/${project.id}`).set(auth()).send({ notes: null });
+        expect(cleared.status).toBe(200);
+        expect(cleared.body.data.notes).toBeNull();
     });
 
     it("PATCH /projects/:id returns 404 for another user's project", async () => {
