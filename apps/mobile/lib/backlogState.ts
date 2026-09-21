@@ -96,14 +96,4 @@ export function bucketOf(buckets: BacklogBuckets, taskId: string): keyof Backlog
     return null;
 }
 
-// Token gate so out-of-order fetch responses can't clobber fresher state: only
-// the most recently issued token is current().
-export type Sequencer = { next: () => number; isCurrent: (token: number) => boolean };
-
-export function createSequencer(): Sequencer {
-    let latest = 0;
-    return {
-        next: () => ++latest,
-        isCurrent: (token: number) => token === latest,
-    };
-}
+export { createSequencer, type Sequencer } from "./sequencer";
