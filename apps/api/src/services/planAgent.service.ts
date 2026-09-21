@@ -40,9 +40,8 @@ export type AgentTask = {
     status: TaskStatus;
 };
 
-// A Project grouping the tasks scheduled under it. `goal` and `notes` are the
-// user's standing context and are each omitted when absent; the tasks are nested
-// so membership is structural, not an id join the model has to reconstruct.
+// A Project grouping the tasks scheduled under it, nested so membership is
+// structural — the model never has to join task ids back to a project.
 export type AgentProject = {
     name: string;
     goal?: string;
@@ -107,7 +106,7 @@ export function remainingMinsOf(estimatedMins: number, progress: number | null):
 }
 
 // Standalone tasks (no Project) are surfaced under this synthetic group so the
-// model sees one uniform shape; it is not a real Project and gets no goal.
+// model sees one uniform shape.
 export const TODOS_GROUP_NAME = "Todos";
 
 function toAgentTask(t: RawTask): AgentTask {
@@ -124,9 +123,7 @@ function toAgentTask(t: RawTask): AgentTask {
     };
 }
 
-// Only Projects with a scheduled task appear (an owned-but-unreferenced Project
-// is never sent); real Projects keep first-appearance order, and standalone
-// tasks collect into a trailing "Todos" group emitted only when one exists.
+// Only Projects with a scheduled task appear, kept in first-appearance order.
 function groupTasksByProject(tasks: RawTask[]): AgentProject[] {
     const byProjectId = new Map<string, AgentProject>();
     const todos: AgentTask[] = [];
