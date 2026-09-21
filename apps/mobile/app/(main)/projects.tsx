@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
     View,
     Text,
@@ -17,6 +17,7 @@ import type { Project } from "../../lib/api.types";
 import {
     MAX_IN_FOCUS,
     inFocusCount,
+    focusCapReached,
     focusToggleBlocked,
     applyCreated,
     replaceProject,
@@ -39,8 +40,9 @@ function FocusStar({ active, blocked, onPress }: { active: boolean; blocked: boo
             activeOpacity={0.6}
             style={styles.focusBtn}
             accessibilityRole="button"
-            accessibilityState={{ selected: active, disabled: blocked }}
+            accessibilityState={{ selected: active }}
             accessibilityLabel={active ? 'In focus' : 'Set in focus'}
+            accessibilityHint={blocked ? `Focus is full at ${MAX_IN_FOCUS}; turn one off first` : undefined}
         >
             <Ionicons
                 name={active ? 'star' : 'star-outline'}
@@ -102,9 +104,21 @@ export default function ProjectsScreen() {
     const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
     const [editing, setEditing] = useState<Project | null>(null);
 
-    // Only the most recently issued fetch may apply its result, so an out-of-order
-    // response can't clobber a fresher optimistic focus toggle.
+    // Only the most recently issued op may apply its result. Both fetches and focus
+    // toggles claim a token, so a slow in-flight refetch can't resolve later and
+    // clobber a fresher toggle (and vice-versa).
     const seq = useRef(createSequencer()).current;
+
+    // A synchronous mirror of `projects` so the focus guard and optimistic flips read
+    // the freshest list even across rapid taps that haven't re-rendered yet — this is
+    // what lets a swap (turn one off, then another on) not be falsely capped.
+    const projectsRef = useRef<Project[] | null>(null);
+    useEffect(() => { projectsRef.current = projects; }, [projects]);
+
+    const commit = useCallback((nextProjects: Project[]) => {
+        projectsRef.current = nextProjects;
+        setProjects(nextProjects);
+    }, []);
 
     const loadProjects = useCallback((showLoading: boolean) => {
         const token = seq.next();
@@ -113,28 +127,39 @@ export default function ProjectsScreen() {
             if (showLoading) setLoading(false);
             if (!seq.isCurrent(token)) return;
             if (!result.ok) { if (showLoading) setError(result.error); return; }
-            setProjects(result.data);
+            commit(result.data);
         });
-    }, [seq]);
+    }, [seq, commit]);
 
     useFocusEffect(useCallback(() => { loadProjects(true); }, [loadProjects]));
 
     async function handleToggleFocus(project: Project) {
-        if (!projects) return;
-        // Turning on while the cap is full: explain it rather than firing a doomed
-        // request. The counter and dimmed stars already signal the limit.
-        if (!project.isInFocus && focusToggleBlocked(projects, project.id)) {
+        const current = projectsRef.current;
+        if (!current) return;
+
+        // Read live focus state, not the render-time snapshot, so a rapid swap sees
+        // the capacity freed by the immediately preceding toggle.
+        const live = current.find(p => p.id === project.id) ?? project;
+        if (!live.isInFocus && focusToggleBlocked(current, project.id)) {
             Alert.alert('Focus limit reached', `You can focus up to ${MAX_IN_FOCUS} projects at once. Turn one off to focus another.`);
             return;
         }
-        const next = !project.isInFocus;
-        setProjects(prev => (prev ? setFocus(prev, project.id, next) : prev));
+
+        const next = !live.isInFocus;
+        commit(setFocus(current, project.id, next));
+
+        // Claim the latest token before awaiting, so an older refetch can't clobber
+        // this flip and a superseding op invalidates our own success apply below.
+        const token = seq.next();
         const result = await api.setProjectFocus(project.id, next);
+
         if (result.ok) {
-            setProjects(prev => (prev ? replaceProject(prev, result.data) : prev));
+            if (!seq.isCurrent(token)) return;   // a newer op owns the state now
+            commit(replaceProject(projectsRef.current ?? current, result.data));
         } else {
-            // Revert the optimistic flip; a 409 here means a race beat us to the cap.
-            setProjects(prev => (prev ? setFocus(prev, project.id, project.isInFocus) : prev));
+            // Always revert a failed flip, even if superseded, so the list never shows
+            // a focus the server rejected (e.g. a race lost the cap 409).
+            commit(setFocus(projectsRef.current ?? current, project.id, live.isInFocus));
             Alert.alert(next ? "Couldn't focus project" : "Couldn't unfocus project", result.error);
         }
     }
@@ -152,22 +177,20 @@ export default function ProjectsScreen() {
     }
 
     function handleSaved(saved: Project) {
-        setProjects(prev => {
-            if (!prev) return prev;
-            return modalMode === 'create' ? applyCreated(prev, saved) : replaceProject(prev, saved);
-        });
+        const current = projectsRef.current ?? [];
+        commit(modalMode === 'create' ? applyCreated(current, saved) : replaceProject(current, saved));
         setModalVisible(false);
         loadProjects(false);
     }
 
     function handleDeleted(projectId: string) {
-        setProjects(prev => (prev ? withoutProject(prev, projectId) : prev));
+        commit(withoutProject(projectsRef.current ?? [], projectId));
         setModalVisible(false);
         loadProjects(false);
     }
 
     const focusCount = projects ? inFocusCount(projects) : 0;
-    const atCap = focusCount >= MAX_IN_FOCUS;
+    const atCap = projects ? focusCapReached(projects) : false;
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
