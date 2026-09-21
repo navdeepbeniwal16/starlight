@@ -184,3 +184,25 @@ export type UpdateTaskInput = {
     progress?: number;
 };
 export type UpdateTaskResponse = ApiResult<TaskDetail>;
+
+export type Project = {
+    id: string;
+    name: string;
+    goal: string | null;
+    notes: string | null;
+    isInFocus: boolean;
+};
+
+export type GetProjectsResponse = ApiResult<Project[]>;
+export type ProjectResponse = ApiResult<Project>;
+
+export type CreateProjectInput = {
+    name: string;
+    goal?: string;
+};
+
+// null clears the goal; undefined leaves it unchanged.
+export type UpdateProjectInput = {
+    name?: string;
+    goal?: string | null;
+};
