@@ -1,33 +1,35 @@
 /**
- * PROTOTYPE (branch proto/sta-16-backlog-projects-merge) — this replaces the real
- * Backlog tab so the three merge options can be felt in the actual app: open the
- * Backlog tab on a simulator/device and cycle A/B/C with the floating bar (or ←/→
- * on web). The Projects tab is hidden in _layout.tsx, so the running app shows the
- * merged world with the real bottom tab bar.
+ * PROTOTYPE (branch proto/sta-16-backlog-projects-merge) — replaces the real Backlog
+ * tab so the merge can be felt in the app. Open Backlog on a simulator/device.
  *
- * Question: how should Projects fold into Backlog so they stop being two tabs?
- * (STA-16 — "intuitive over explicit".)
- *   A — Segmented tabs   : literal "Tasks | Projects" toggle inside one screen.
- *   B — Grouped list     : no tab; projects ARE the backlog's section headers.
- *   C — Filter pill rail : one task list, a horizontal rail of project lenses on top.
+ * Two toggleable views of the same tasks+projects (STA-16 — "intuitive over explicit"):
+ *   A — List view    : inner "Tasks | Projects" segments. Tasks grouped by lifecycle
+ *                      (carried over / scheduled / remaining / done) with a project chip;
+ *                      Projects = Todos first, then project cards with focus stars.
+ *   B — Groups view  : projects as collapsible sections, focus toggled on the header,
+ *                      an All / In-focus lens.
  *
- * Data is mock/in-memory — real backlog tasks carry no projectId yet, so grouping/
- * filtering by project can't run on live data until the API surfaces it (the open
- * question from the last round). Real theme tokens + real focus-cap logic (lib/
- * projectState); create/edit are stubbed to Alerts — the question is placement.
+ * Constant across both views (so users always know where things are): the header
+ * (title + view toggle + See all) and the "+ New" create FAB (New task / New project).
+ * Only the task/project content swaps.
+ *
+ * Data is mock/in-memory — real backlog tasks carry no projectId yet, so grouping by
+ * project can't run on live data until the API surfaces it. Real theme tokens + real
+ * focus-cap logic (lib/projectState); create/edit are stubbed to Alerts.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import {
     View,
     Text,
     StyleSheet,
     ScrollView,
     TouchableOpacity,
+    Pressable,
     Alert,
-    Platform,
 } from "react-native";
 import Animated, { FadeIn, LinearTransition } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, radius, spacing, shadow } from "../../lib/theme";
 import type { Project } from "../../lib/api.types";
@@ -39,17 +41,20 @@ import {
 } from "../../lib/projectState";
 
 // ── Mock data ────────────────────────────────────────────────────────────────
-// Shapes mirror lib/api.types (Project / BacklogTask) plus a projectId link that
-// the real backlog task doesn't carry yet — the whole point being explored.
+// Shapes mirror lib/api.types (Project / BacklogTask) plus a projectId link and a
+// lifecycle bucket that the real backlog task doesn't carry yet — the thing being explored.
 
 type PProject = Project; // reuse the real shape so projectState's cap helpers accept it
 type PStatus = "TODO" | "IN_PROGRESS" | "DONE";
+type Bucket = "carriedOver" | "scheduled" | "remaining" | "doneToday";
 type PTask = {
     id: string;
     title: string;
     status: PStatus;
     progress: number;
     projectId: string | null; // null → Todos
+    bucket: Bucket;
+    scheduledMeta?: string;
     deadline?: string;
 };
 
@@ -61,25 +66,31 @@ const SEED_PROJECTS: PProject[] = [
 ];
 
 const TASKS: PTask[] = [
-    { id: "t1", title: "Wire up onboarding flow", status: "IN_PROGRESS", progress: 60, projectId: "p1" },
-    { id: "t2", title: "Fix dark-mode contrast", status: "TODO", progress: 0, projectId: "p1" },
-    { id: "t3", title: "Cut TestFlight build 42", status: "TODO", progress: 0, projectId: "p1", deadline: "Sep 24" },
-    { id: "t4", title: "Sunday long run", status: "TODO", progress: 0, projectId: "p2" },
-    { id: "t5", title: "Meal prep for the week", status: "IN_PROGRESS", progress: 40, projectId: "p2" },
-    { id: "t6", title: "Finish 'Deep Work' ch. 5", status: "IN_PROGRESS", progress: 75, projectId: "p3" },
-    { id: "t7", title: "Start 'The Pragmatic Programmer'", status: "TODO", progress: 0, projectId: "p3" },
-    { id: "t8", title: "Renew car registration", status: "TODO", progress: 0, projectId: "p4", deadline: "Sep 30" },
-    { id: "t9", title: "Fix the leaking tap", status: "DONE", progress: 100, projectId: "p4" },
-    { id: "t10", title: "Reply to Sam's email", status: "TODO", progress: 0, projectId: null },
-    { id: "t11", title: "Book a dentist appointment", status: "TODO", progress: 0, projectId: null },
-    { id: "t12", title: "Pick up the parcel", status: "DONE", progress: 100, projectId: null },
+    { id: "t1", title: "Wire up onboarding flow", status: "IN_PROGRESS", progress: 60, projectId: "p1", bucket: "scheduled", scheduledMeta: "09:00 · Morning focus" },
+    { id: "t2", title: "Fix dark-mode contrast", status: "TODO", progress: 0, projectId: "p1", bucket: "remaining" },
+    { id: "t3", title: "Cut TestFlight build 42", status: "TODO", progress: 0, projectId: "p1", bucket: "remaining", deadline: "Sep 24" },
+    { id: "t4", title: "Sunday long run", status: "TODO", progress: 0, projectId: "p2", bucket: "carriedOver" },
+    { id: "t5", title: "Meal prep for the week", status: "IN_PROGRESS", progress: 40, projectId: "p2", bucket: "scheduled", scheduledMeta: "18:00 · Evening" },
+    { id: "t6", title: "Finish 'Deep Work' ch. 5", status: "IN_PROGRESS", progress: 75, projectId: "p3", bucket: "remaining" },
+    { id: "t7", title: "Start 'The Pragmatic Programmer'", status: "TODO", progress: 0, projectId: "p3", bucket: "remaining" },
+    { id: "t8", title: "Renew car registration", status: "TODO", progress: 0, projectId: "p4", bucket: "remaining", deadline: "Sep 30" },
+    { id: "t9", title: "Fix the leaking tap", status: "DONE", progress: 100, projectId: "p4", bucket: "doneToday" },
+    { id: "t10", title: "Reply to Sam's email", status: "TODO", progress: 0, projectId: null, bucket: "remaining" },
+    { id: "t11", title: "Book a dentist appointment", status: "TODO", progress: 0, projectId: null, bucket: "remaining" },
+    { id: "t12", title: "Pick up the parcel", status: "DONE", progress: 100, projectId: null, bucket: "doneToday" },
 ];
 
 const TODOS_ID = "__todos__";
 
-function tasksFor(projectId: string | null): PTask[] {
-    return TASKS.filter((t) => t.projectId === projectId);
-}
+const LIFECYCLE: Array<{ key: Bucket; label: string; desc: string; hint: string; open: boolean }> = [
+    { key: "carriedOver", label: "Carried over", desc: "Unfinished tasks carried over from your previous plan", hint: "Nothing carried over", open: true },
+    { key: "scheduled", label: "Scheduled today", desc: "Tasks planned into today's blocks", hint: "No plan for today yet", open: true },
+    { key: "remaining", label: "Remaining", desc: "Backlog tasks not yet scheduled", hint: "Backlog is clear", open: true },
+    { key: "doneToday", label: "Done today", desc: "Tasks you've completed today", hint: "Nothing completed yet", open: false },
+];
+
+const tasksFor = (projectId: string | null) => TASKS.filter((t) => t.projectId === projectId);
+const tasksInBucket = (bucket: Bucket) => TASKS.filter((t) => t.bucket === bucket);
 
 // ── Small shared pieces ──────────────────────────────────────────────────────
 
@@ -131,7 +142,11 @@ function TaskRow({ task, projectName }: { task: PTask; projectName?: string }) {
                     <View style={styles.badgeRow}>
                         <StatusBadge status={task.status} />
                         {projectName ? <ProjectChip name={projectName} /> : null}
-                        {task.deadline ? <Text style={styles.metaText}>Due {task.deadline}</Text> : null}
+                        {task.scheduledMeta ? (
+                            <Text style={styles.metaText}>{task.scheduledMeta}</Text>
+                        ) : task.deadline ? (
+                            <Text style={styles.metaText}>Due {task.deadline}</Text>
+                        ) : null}
                     </View>
                 </View>
                 <Text style={styles.progressPct}>{task.progress}%</Text>
@@ -179,14 +194,36 @@ function FocusCounter({ count }: { count: number }) {
     );
 }
 
-function Fab({ label, onPress }: { label: string; onPress: () => void }) {
+// Collapsible lifecycle section for the List view's Tasks segment.
+function LifecycleSection({
+    section,
+    projectName,
+}: {
+    section: (typeof LIFECYCLE)[number];
+    projectName: (id: string | null) => string | undefined;
+}) {
+    const [open, setOpen] = useState(section.open);
+    const list = tasksInBucket(section.key);
     return (
-        <View style={styles.fabWrap}>
-            <TouchableOpacity style={styles.fab} activeOpacity={0.85} onPress={onPress}>
-                <Ionicons name="add" size={18} color={colors.text.onAccent} />
-                <Text style={styles.fabText}>{label}</Text>
+        <Animated.View layout={LinearTransition.duration(240)} style={styles.zone}>
+            <TouchableOpacity style={styles.sectionHeaderRow} activeOpacity={0.6} onPress={() => setOpen((o) => !o)}>
+                <Ionicons name={open ? "chevron-down" : "chevron-forward"} size={13} color="rgba(122,115,106,0.6)" />
+                <Text style={styles.sectionLabel}>{section.label}</Text>
+                <Text style={styles.sectionCount}>{list.length}</Text>
             </TouchableOpacity>
-        </View>
+            <Text style={styles.sectionDescription}>{section.desc}</Text>
+            {open ? (
+                list.length === 0 ? (
+                    <Text style={styles.sectionHint}>{section.hint}</Text>
+                ) : (
+                    <View style={styles.cardGroup}>
+                        {list.map((t) => (
+                            <TaskRow key={t.id} task={t} projectName={projectName(t.projectId)} />
+                        ))}
+                    </View>
+                )
+            ) : null}
+        </Animated.View>
     );
 }
 
@@ -196,27 +233,15 @@ const stubEditProject = (name: string) =>
     Alert.alert("Prototype", `Edit "${name}" — rename, set goal, or delete (tasks return to Todos).`);
 const stubCreateTask = () => Alert.alert("Prototype", "The create-task form would open here.");
 
-// ── Variant A — Segmented "Tasks | Projects" tabs ────────────────────────────
-// The literal reading of the ask: one screen, an inner segmented control. Explicit
-// and familiar; project↔task link shown only as a chip on each task.
+// ── View A — List view (inner Tasks | Projects segments) ─────────────────────
 
-function VariantA({
-    projects,
-    onToggleFocus,
-}: {
-    projects: PProject[];
-    onToggleFocus: (id: string) => void;
-}) {
+function ViewA({ projects, onToggleFocus }: { projects: PProject[]; onToggleFocus: (id: string) => void }) {
     const [seg, setSeg] = useState<"tasks" | "projects">("tasks");
     const focusCount = inFocusCount(projects);
     const nameOf = (id: string | null) => projects.find((p) => p.id === id)?.name;
 
     return (
         <>
-            <View style={styles.header}>
-                <Text style={styles.headerTitle}>Backlog</Text>
-            </View>
-
             <View style={styles.segmentWrap}>
                 <View style={styles.segment}>
                     {(["tasks", "projects"] as const).map((key) => (
@@ -236,8 +261,8 @@ function VariantA({
 
             {seg === "tasks" ? (
                 <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-                    {TASKS.map((t) => (
-                        <TaskRow key={t.id} task={t} projectName={nameOf(t.projectId)} />
+                    {LIFECYCLE.map((s) => (
+                        <LifecycleSection key={s.key} section={s} projectName={nameOf} />
                     ))}
                 </ScrollView>
             ) : (
@@ -245,13 +270,22 @@ function VariantA({
                     <View style={styles.counterRow}>
                         <FocusCounter count={focusCount} />
                     </View>
+
+                    {/* Todos first — the common home for anything not under a project. */}
+                    <View style={[styles.projCard, styles.todosCard]}>
+                        <View style={styles.projCardBody}>
+                            <View style={styles.todosTitleRow}>
+                                <Ionicons name="file-tray-outline" size={16} color={colors.text.secondary} />
+                                <Text style={styles.projName}>Todos</Text>
+                                <Text style={styles.groupCount}>{tasksFor(null).length}</Text>
+                            </View>
+                            <Text style={styles.projGoalMuted}>Tasks not assigned to a project</Text>
+                        </View>
+                    </View>
+
                     {projects.map((p) => (
                         <View key={p.id} style={styles.projCard}>
-                            <TouchableOpacity
-                                style={styles.projCardBody}
-                                activeOpacity={0.7}
-                                onPress={() => stubEditProject(p.name)}
-                            >
+                            <TouchableOpacity style={styles.projCardBody} activeOpacity={0.7} onPress={() => stubEditProject(p.name)}>
                                 <Text style={styles.projName} numberOfLines={1}>
                                     {p.name}
                                 </Text>
@@ -266,38 +300,15 @@ function VariantA({
                             />
                         </View>
                     ))}
-                    <View style={[styles.projCard, styles.todosCard]}>
-                        <View style={styles.projCardBody}>
-                            <View style={styles.todosTitleRow}>
-                                <Ionicons name="file-tray-outline" size={16} color={colors.text.secondary} />
-                                <Text style={styles.projName}>Todos</Text>
-                            </View>
-                            <Text style={styles.projGoalMuted}>Tasks not assigned to a project</Text>
-                        </View>
-                    </View>
                 </ScrollView>
             )}
-
-            <Fab
-                label={seg === "tasks" ? "Task" : "Project"}
-                onPress={seg === "tasks" ? stubCreateTask : stubCreateProject}
-            />
         </>
     );
 }
 
-// ── Variant B — Grouped list, projects as collapsible section headers ────────
-// No tab. Projects ARE the structure of the backlog. Focus is toggled right on the
-// section header where the project's tasks live. A top "All / In focus" lens gives
-// focus a job. Most "intuitive over explicit".
+// ── View B — Groups view (projects as collapsible sections) ──────────────────
 
-function VariantB({
-    projects,
-    onToggleFocus,
-}: {
-    projects: PProject[];
-    onToggleFocus: (id: string) => void;
-}) {
+function ViewB({ projects, onToggleFocus }: { projects: PProject[]; onToggleFocus: (id: string) => void }) {
     const [lens, setLens] = useState<"all" | "focus">("all");
     const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
     const focusCount = inFocusCount(projects);
@@ -307,31 +318,25 @@ function VariantB({
 
     return (
         <>
-            <View style={styles.header}>
-                <Text style={styles.headerTitle}>Backlog</Text>
-                <FocusCounter count={focusCount} />
-            </View>
-
             <View style={styles.lensRow}>
-                {(["all", "focus"] as const).map((key) => (
-                    <TouchableOpacity
-                        key={key}
-                        style={[styles.lensPill, lens === key && styles.lensPillActive]}
-                        activeOpacity={0.7}
-                        onPress={() => setLens(key)}
-                    >
-                        {key === "focus" ? (
-                            <Ionicons
-                                name="star"
-                                size={11}
-                                color={lens === key ? colors.accent.strong : colors.text.secondary}
-                            />
-                        ) : null}
-                        <Text style={[styles.lensText, lens === key && styles.lensTextActive]}>
-                            {key === "all" ? "All projects" : "In focus"}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
+                <View style={styles.lensPills}>
+                    {(["all", "focus"] as const).map((key) => (
+                        <TouchableOpacity
+                            key={key}
+                            style={[styles.lensPill, lens === key && styles.lensPillActive]}
+                            activeOpacity={0.7}
+                            onPress={() => setLens(key)}
+                        >
+                            {key === "focus" ? (
+                                <Ionicons name="star" size={11} color={lens === key ? colors.accent.strong : colors.text.secondary} />
+                            ) : null}
+                            <Text style={[styles.lensText, lens === key && styles.lensTextActive]}>
+                                {key === "all" ? "All projects" : "In focus"}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+                <FocusCounter count={focusCount} />
             </View>
 
             <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
@@ -341,16 +346,8 @@ function VariantB({
                     return (
                         <Animated.View key={p.id} layout={LinearTransition.duration(240)} style={styles.groupCard}>
                             <View style={styles.groupHeader}>
-                                <TouchableOpacity
-                                    style={styles.groupHeaderMain}
-                                    activeOpacity={0.6}
-                                    onPress={() => toggle(p.id)}
-                                >
-                                    <Ionicons
-                                        name={isOpen ? "chevron-down" : "chevron-forward"}
-                                        size={14}
-                                        color="rgba(122,115,106,0.7)"
-                                    />
+                                <TouchableOpacity style={styles.groupHeaderMain} activeOpacity={0.6} onPress={() => toggle(p.id)}>
+                                    <Ionicons name={isOpen ? "chevron-down" : "chevron-forward"} size={14} color="rgba(122,115,106,0.7)" />
                                     <View style={styles.groupTitleCol}>
                                         <View style={styles.groupTitleRow}>
                                             <Text style={styles.groupName} numberOfLines={1}>
@@ -386,20 +383,12 @@ function VariantB({
                     );
                 })}
 
-                {/* Todos always last; never focusable. Hidden by the "In focus" lens. */}
+                {/* Todos stays last in this view (per feedback, B is unchanged here). */}
                 {lens === "all" ? (
                     <Animated.View layout={LinearTransition.duration(240)} style={[styles.groupCard, styles.todosGroup]}>
                         <View style={styles.groupHeader}>
-                            <TouchableOpacity
-                                style={styles.groupHeaderMain}
-                                activeOpacity={0.6}
-                                onPress={() => toggle(TODOS_ID)}
-                            >
-                                <Ionicons
-                                    name={collapsed[TODOS_ID] ? "chevron-forward" : "chevron-down"}
-                                    size={14}
-                                    color="rgba(122,115,106,0.7)"
-                                />
+                            <TouchableOpacity style={styles.groupHeaderMain} activeOpacity={0.6} onPress={() => toggle(TODOS_ID)}>
+                                <Ionicons name={collapsed[TODOS_ID] ? "chevron-forward" : "chevron-down"} size={14} color="rgba(122,115,106,0.7)" />
                                 <View style={styles.groupTitleCol}>
                                     <View style={styles.groupTitleRow}>
                                         <Ionicons name="file-tray-outline" size={14} color={colors.text.secondary} />
@@ -418,227 +407,114 @@ function VariantB({
                         ) : null}
                     </Animated.View>
                 ) : null}
-
-                <TouchableOpacity style={styles.newProjectRow} activeOpacity={0.7} onPress={stubCreateProject}>
-                    <Ionicons name="add" size={16} color={colors.accent.strong} />
-                    <Text style={styles.newProjectText}>New project</Text>
-                </TouchableOpacity>
             </ScrollView>
-
-            <Fab label="Task" onPress={stubCreateTask} />
         </>
     );
 }
 
-// ── Variant C — Filter pill rail, one task list, projects as lenses ──────────
-// Task-centric. A horizontal rail selects which lens filters the single list.
-// Default lens is "In Focus" (union of focused projects). Stars on project pills
-// toggle focus in place; "Manage" reaches rename/delete/goal.
+// ── Shared header controls ───────────────────────────────────────────────────
 
-function VariantC({
-    projects,
-    onToggleFocus,
-}: {
-    projects: PProject[];
-    onToggleFocus: (id: string) => void;
-}) {
-    const [sel, setSel] = useState<string>("focus"); // 'focus' | 'all' | TODOS_ID | projectId
-    const focusCount = inFocusCount(projects);
-    const nameOf = (id: string | null) => projects.find((p) => p.id === id)?.name;
-
-    const visibleTasks = useMemo(() => {
-        if (sel === "all") return TASKS;
-        if (sel === TODOS_ID) return tasksFor(null);
-        if (sel === "focus") {
-            const ids = new Set(projects.filter((p) => p.isInFocus).map((p) => p.id));
-            return TASKS.filter((t) => t.projectId && ids.has(t.projectId));
-        }
-        return tasksFor(sel);
-    }, [sel, projects]);
-
+// Top-right toggle between the two views — the real, shipping control (the floating
+// dev bar is gone). Sits next to See all.
+function ViewToggle({ view, onChange }: { view: "A" | "B"; onChange: (v: "A" | "B") => void }) {
     return (
-        <>
-            <View style={styles.header}>
-                <Text style={styles.headerTitle}>Backlog</Text>
-                <TouchableOpacity style={styles.manageBtn} activeOpacity={0.6} onPress={stubCreateProject}>
-                    <Ionicons name="options-outline" size={14} color={colors.accent.strong} />
-                    <Text style={styles.manageText}>Manage</Text>
-                </TouchableOpacity>
-            </View>
-
-            <View style={styles.railWrap}>
-                <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.rail}
-                >
+        <View style={styles.viewToggle}>
+            {(
+                [
+                    { key: "A", icon: "list" },
+                    { key: "B", icon: "albums" },
+                ] as const
+            ).map(({ key, icon }) => {
+                const active = view === key;
+                return (
                     <TouchableOpacity
-                        style={[styles.railPill, sel === "focus" && styles.railPillActive]}
+                        key={key}
+                        style={[styles.viewToggleBtn, active && styles.viewToggleBtnActive]}
                         activeOpacity={0.7}
-                        onPress={() => setSel("focus")}
+                        onPress={() => onChange(key)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}
+                        accessibilityLabel={key === "A" ? "List view" : "Grouped view"}
                     >
-                        <Ionicons
-                            name="star"
-                            size={12}
-                            color={sel === "focus" ? colors.text.onAccent : colors.accent.strong}
-                        />
-                        <Text style={[styles.railText, sel === "focus" && styles.railTextActive]}>
-                            In Focus · {focusCount}/{MAX_IN_FOCUS}
-                        </Text>
+                        <Ionicons name={icon} size={16} color={active ? colors.accent.strong : colors.text.secondary} />
                     </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={[styles.railPill, sel === "all" && styles.railPillActive]}
-                        activeOpacity={0.7}
-                        onPress={() => setSel("all")}
-                    >
-                        <Text style={[styles.railText, sel === "all" && styles.railTextActive]}>All</Text>
-                    </TouchableOpacity>
-
-                    {projects.map((p) => {
-                        const active = sel === p.id;
-                        const blocked = !p.isInFocus && focusToggleBlocked(projects, p.id);
-                        return (
-                            <View key={p.id} style={[styles.railPill, styles.railPillProject, active && styles.railPillActive]}>
-                                <TouchableOpacity onPress={() => onToggleFocus(p.id)} hitSlop={8} style={styles.railStar}>
-                                    <Ionicons
-                                        name={p.isInFocus ? "star" : "star-outline"}
-                                        size={13}
-                                        color={
-                                            active
-                                                ? colors.text.onAccent
-                                                : p.isInFocus
-                                                ? colors.accent.strong
-                                                : blocked
-                                                ? colors.text.muted
-                                                : colors.text.secondary
-                                        }
-                                    />
-                                </TouchableOpacity>
-                                <TouchableOpacity onPress={() => setSel(p.id)} activeOpacity={0.7}>
-                                    <Text style={[styles.railText, active && styles.railTextActive]} numberOfLines={1}>
-                                        {p.name}
-                                    </Text>
-                                </TouchableOpacity>
-                            </View>
-                        );
-                    })}
-
-                    <TouchableOpacity
-                        style={[styles.railPill, sel === TODOS_ID && styles.railPillActive]}
-                        activeOpacity={0.7}
-                        onPress={() => setSel(TODOS_ID)}
-                    >
-                        <Ionicons
-                            name="file-tray-outline"
-                            size={12}
-                            color={sel === TODOS_ID ? colors.text.onAccent : colors.text.secondary}
-                        />
-                        <Text style={[styles.railText, sel === TODOS_ID && styles.railTextActive]}>Todos</Text>
-                    </TouchableOpacity>
-                </ScrollView>
-            </View>
-
-            <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-                {sel === "focus" && focusCount === 0 ? (
-                    <Text style={styles.emptyHint}>
-                        No projects in focus. Tap a ☆ on the rail to focus up to {MAX_IN_FOCUS}.
-                    </Text>
-                ) : null}
-                {visibleTasks.map((t) => (
-                    <TaskRow
-                        key={t.id}
-                        task={t}
-                        projectName={sel === "focus" || sel === "all" ? nameOf(t.projectId) : undefined}
-                    />
-                ))}
-                {visibleTasks.length === 0 && sel !== "focus" ? (
-                    <Text style={styles.emptyHint}>Nothing here yet.</Text>
-                ) : null}
-            </ScrollView>
-
-            <Fab label="Task" onPress={stubCreateTask} />
-        </>
-    );
-}
-
-// ── Variant switcher (prototype scaffolding) ─────────────────────────────────
-
-const VARIANTS = [
-    { key: "A", name: "Segmented tabs" },
-    { key: "B", name: "Grouped list" },
-    { key: "C", name: "Filter rail" },
-] as const;
-
-function Switcher({ current, onChange }: { current: string; onChange: (k: string) => void }) {
-    if (process.env.NODE_ENV === "production") return null;
-    const idx = Math.max(0, VARIANTS.findIndex((v) => v.key === current));
-    const cur = VARIANTS[idx];
-    const go = (delta: number) => onChange(VARIANTS[(idx + delta + VARIANTS.length) % VARIANTS.length].key);
-
-    return (
-        <View style={styles.switcher} pointerEvents="box-none">
-            <View style={styles.switcherBar}>
-                <TouchableOpacity onPress={() => go(-1)} style={styles.switcherArrow} hitSlop={10}>
-                    <Ionicons name="chevron-back" size={18} color="#fff" />
-                </TouchableOpacity>
-                <Text style={styles.switcherLabel}>
-                    {cur.key} · {cur.name}
-                </Text>
-                <TouchableOpacity onPress={() => go(1)} style={styles.switcherArrow} hitSlop={10}>
-                    <Ionicons name="chevron-forward" size={18} color="#fff" />
-                </TouchableOpacity>
-            </View>
+                );
+            })}
         </View>
     );
 }
 
+// One create entry point, identical in both views, so the buttons never move. Expands
+// to New task / New project.
+function CreateFab({ onNewTask, onNewProject }: { onNewTask: () => void; onNewProject: () => void }) {
+    const [open, setOpen] = useState(false);
+    const pick = (fn: () => void) => {
+        setOpen(false);
+        fn();
+    };
+    return (
+        <>
+            {open ? <Pressable style={styles.fabBackdrop} onPress={() => setOpen(false)} /> : null}
+            <View style={styles.fabWrap}>
+                {open ? (
+                    <Animated.View entering={FadeIn.duration(120)} style={styles.fabActions}>
+                        <TouchableOpacity style={styles.fabAction} activeOpacity={0.85} onPress={() => pick(onNewProject)}>
+                            <Ionicons name="folder-outline" size={16} color={colors.text.primary} />
+                            <Text style={styles.fabActionText}>New project</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.fabAction} activeOpacity={0.85} onPress={() => pick(onNewTask)}>
+                            <Ionicons name="checkbox-outline" size={16} color={colors.text.primary} />
+                            <Text style={styles.fabActionText}>New task</Text>
+                        </TouchableOpacity>
+                    </Animated.View>
+                ) : null}
+                <TouchableOpacity style={styles.fab} activeOpacity={0.85} onPress={() => setOpen((o) => !o)}>
+                    <Ionicons name={open ? "close" : "add"} size={18} color={colors.text.onAccent} />
+                    <Text style={styles.fabText}>{open ? "Close" : "New"}</Text>
+                </TouchableOpacity>
+            </View>
+        </>
+    );
+}
+
 export default function BacklogScreen() {
-    const [variant, setVariant] = useState("A");
+    const router = useRouter();
+    const [view, setView] = useState<"A" | "B">("A");
     const [projects, setProjects] = useState<PProject[]>(SEED_PROJECTS);
 
-    // Real cap logic (lib/projectState): turning ON past the cap is blocked and
-    // surfaced as the 3/3 counter going full, not a raw error; swapping OFF→ON is free.
+    // Real cap logic (lib/projectState): turning ON past the cap is blocked and surfaced
+    // as the counter going full, not a raw error; swapping OFF→ON is free.
     const onToggleFocus = useCallback((id: string) => {
         setProjects((prev) => {
             const target = prev.find((p) => p.id === id);
             if (target && !target.isInFocus && focusToggleBlocked(prev, id)) {
-                Alert.alert(
-                    "Focus is full",
-                    `You can focus up to ${MAX_IN_FOCUS} projects. Turn one off to focus another.`,
-                );
+                Alert.alert("Focus is full", `You can focus up to ${MAX_IN_FOCUS} projects. Turn one off to focus another.`);
                 return prev;
             }
             return setFocus(prev, id, !target?.isInFocus);
         });
     }, []);
 
-    // Web-only keyboard cycling; ignored while typing in a field.
-    useEffect(() => {
-        if (Platform.OS !== "web" || typeof window === "undefined") return;
-        const onKey = (e: KeyboardEvent) => {
-            const el = e.target as HTMLElement | null;
-            const tag = el?.tagName;
-            if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
-            if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-            const idx = Math.max(0, VARIANTS.findIndex((v) => v.key === variant));
-            const delta = e.key === "ArrowRight" ? 1 : -1;
-            setVariant(VARIANTS[(idx + delta + VARIANTS.length) % VARIANTS.length].key);
-        };
-        window.addEventListener("keydown", onKey);
-        return () => window.removeEventListener("keydown", onKey);
-    }, [variant]);
-
     return (
         <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
-            {variant === "B" ? (
-                <VariantB projects={projects} onToggleFocus={onToggleFocus} />
-            ) : variant === "C" ? (
-                <VariantC projects={projects} onToggleFocus={onToggleFocus} />
+            <View style={styles.header}>
+                <Text style={styles.headerTitle}>Backlog</Text>
+                <View style={styles.headerRight}>
+                    <ViewToggle view={view} onChange={setView} />
+                    <TouchableOpacity style={styles.seeAllLink} activeOpacity={0.6} onPress={() => router.push("/tasks")}>
+                        <Text style={styles.seeAllText}>See all</Text>
+                        <Ionicons name="chevron-forward" size={14} color={colors.accent.strong} />
+                    </TouchableOpacity>
+                </View>
+            </View>
+
+            {view === "A" ? (
+                <ViewA projects={projects} onToggleFocus={onToggleFocus} />
             ) : (
-                <VariantA projects={projects} onToggleFocus={onToggleFocus} />
+                <ViewB projects={projects} onToggleFocus={onToggleFocus} />
             )}
-            <Switcher current={variant} onChange={setVariant} />
+
+            <CreateFab onNewTask={stubCreateTask} onNewProject={stubCreateProject} />
         </SafeAreaView>
     );
 }
@@ -659,6 +535,13 @@ const styles = StyleSheet.create({
         borderBottomColor: colors.border.hairline,
     },
     headerTitle: { fontSize: 18, fontWeight: "600", color: colors.text.primary, letterSpacing: -0.3 },
+    headerRight: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+    seeAllLink: { flexDirection: "row", alignItems: "center", gap: 2 },
+    seeAllText: { fontSize: 14, fontWeight: "500", color: colors.accent.strong, letterSpacing: -0.15 },
+
+    viewToggle: { flexDirection: "row", backgroundColor: colors.surface.sunken, borderRadius: radius.pill, padding: 2 },
+    viewToggleBtn: { width: 34, height: 28, justifyContent: "center", alignItems: "center", borderRadius: radius.pill },
+    viewToggleBtnActive: { backgroundColor: colors.accent.tint },
 
     list: { padding: spacing.lg, gap: spacing.sm + 2, paddingBottom: 120 },
     counterRow: { flexDirection: "row", justifyContent: "flex-end", marginBottom: spacing.xs },
@@ -670,6 +553,15 @@ const styles = StyleSheet.create({
         marginVertical: spacing.lg,
         paddingHorizontal: spacing.xl,
     },
+
+    // Lifecycle sections (List view · Tasks)
+    zone: { gap: 10 },
+    sectionHeaderRow: { flexDirection: "row", alignItems: "center", gap: 6, minHeight: 32 },
+    sectionLabel: { fontSize: 11, color: "rgba(122,115,106,0.5)", letterSpacing: 0.5, textTransform: "uppercase" },
+    sectionCount: { fontSize: 11, color: "rgba(122,115,106,0.75)", fontWeight: "600", fontVariant: ["tabular-nums"] },
+    sectionDescription: { fontSize: 12, color: "rgba(122,115,106,0.7)", marginLeft: 19, letterSpacing: -0.1 },
+    sectionHint: { fontSize: 12, color: "rgba(122,115,106,0.45)", fontStyle: "italic", marginLeft: 19 },
+    cardGroup: { gap: 8 },
 
     // Task card
     taskCard: {
@@ -688,12 +580,7 @@ const styles = StyleSheet.create({
     taskTitle: { fontSize: 14, fontWeight: "500", color: colors.text.primary, letterSpacing: -0.15 },
     taskTitleDone: { color: colors.text.secondary },
     badgeRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 6 },
-    progressPct: {
-        fontSize: 11,
-        fontWeight: "600",
-        color: colors.text.secondary,
-        fontVariant: ["tabular-nums"],
-    },
+    progressPct: { fontSize: 11, fontWeight: "600", color: colors.text.secondary, fontVariant: ["tabular-nums"] },
 
     badge: { borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 },
     badgeText: { fontSize: 11, fontWeight: "500" },
@@ -729,28 +616,18 @@ const styles = StyleSheet.create({
         backgroundColor: colors.surface.sunken,
     },
     focusCounterFull: { backgroundColor: colors.accent.tint },
-    focusCounterText: {
-        fontSize: 12,
-        fontWeight: "500",
-        color: colors.text.secondary,
-        fontVariant: ["tabular-nums"],
-    },
+    focusCounterText: { fontSize: 12, fontWeight: "500", color: colors.text.secondary, fontVariant: ["tabular-nums"] },
     focusCounterTextFull: { color: colors.accent.strong },
 
-    // Variant A — segmented control
+    // List view · Tasks|Projects segmented control
     segmentWrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
-    segment: {
-        flexDirection: "row",
-        backgroundColor: colors.surface.sunken,
-        borderRadius: radius.pill,
-        padding: 3,
-    },
+    segment: { flexDirection: "row", backgroundColor: colors.surface.sunken, borderRadius: radius.pill, padding: 3 },
     segmentBtn: { flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: radius.pill },
     segmentBtnActive: { backgroundColor: colors.surface.raised, ...shadow.soft },
     segmentText: { fontSize: 14, fontWeight: "500", color: colors.text.secondary },
     segmentTextActive: { color: colors.text.primary },
 
-    // Variant A — project cards
+    // List view · Projects cards
     projCard: {
         backgroundColor: colors.surface.raised,
         borderWidth: 1,
@@ -769,8 +646,15 @@ const styles = StyleSheet.create({
     projGoal: { fontSize: 13, color: colors.text.secondary, lineHeight: 18 },
     projGoalMuted: { fontSize: 13, color: colors.text.muted, fontStyle: "italic" },
 
-    // Variant B — lens pills + grouped sections
-    lensRow: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingTop: spacing.md },
+    // Groups view · lens row + sections
+    lensRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        paddingHorizontal: spacing.lg,
+        paddingTop: spacing.md,
+    },
+    lensPills: { flexDirection: "row", gap: spacing.sm },
     lensPill: {
         flexDirection: "row",
         alignItems: "center",
@@ -798,46 +682,28 @@ const styles = StyleSheet.create({
     groupTitleCol: { flex: 1, gap: 2 },
     groupTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
     groupName: { fontSize: 15, fontWeight: "600", color: colors.text.primary, letterSpacing: -0.2 },
-    groupCount: {
-        fontSize: 11,
-        fontWeight: "600",
-        color: "rgba(122,115,106,0.75)",
-        fontVariant: ["tabular-nums"],
-    },
+    groupCount: { fontSize: 11, fontWeight: "600", color: "rgba(122,115,106,0.75)", fontVariant: ["tabular-nums"] },
     groupGoal: { fontSize: 12, color: colors.text.secondary },
     groupEdit: { width: 28, height: 28, justifyContent: "center", alignItems: "center" },
     groupTasks: { gap: spacing.sm, marginTop: spacing.xs },
-    newProjectRow: {
+
+    // Create FAB (shared, both views)
+    fabBackdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+    fabWrap: { position: "absolute", bottom: 16, right: 16, alignItems: "flex-end", gap: spacing.sm },
+    fabActions: { alignItems: "flex-end", gap: spacing.sm },
+    fabAction: {
         flexDirection: "row",
         alignItems: "center",
-        justifyContent: "center",
-        gap: spacing.xs,
-        paddingVertical: spacing.md,
+        gap: 6,
+        height: 38,
+        paddingHorizontal: 14,
+        borderRadius: radius.xl,
+        backgroundColor: colors.surface.raised,
+        borderWidth: 1,
+        borderColor: colors.border.hairline,
+        ...shadow.soft,
     },
-    newProjectText: { fontSize: 14, fontWeight: "500", color: colors.accent.strong },
-
-    // Variant C — rail
-    manageBtn: { flexDirection: "row", alignItems: "center", gap: 3 },
-    manageText: { fontSize: 14, fontWeight: "500", color: colors.accent.strong, letterSpacing: -0.15 },
-    railWrap: { borderBottomWidth: 1, borderBottomColor: colors.border.hairline },
-    rail: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md, gap: spacing.sm },
-    railPill: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 5,
-        paddingHorizontal: spacing.md,
-        paddingVertical: 7,
-        borderRadius: radius.pill,
-        backgroundColor: colors.surface.sunken,
-    },
-    railPillProject: { paddingLeft: spacing.sm },
-    railPillActive: { backgroundColor: colors.accent.default },
-    railStar: { padding: 2 },
-    railText: { fontSize: 13, fontWeight: "500", color: colors.text.secondary, maxWidth: 150 },
-    railTextActive: { color: colors.text.onAccent },
-
-    // FAB
-    fabWrap: { position: "absolute", bottom: 16, right: 16 },
+    fabActionText: { fontSize: 14, fontWeight: "500", color: colors.text.primary, letterSpacing: -0.2 },
     fab: {
         flexDirection: "row",
         alignItems: "center",
@@ -850,30 +716,4 @@ const styles = StyleSheet.create({
         ...shadow.soft,
     },
     fabText: { fontSize: 14, fontWeight: "500", color: colors.text.onAccent, letterSpacing: -0.2 },
-
-    // Prototype switcher — deliberately un-app-like so it reads as scaffolding.
-    switcher: { position: "absolute", left: 0, right: 0, bottom: 20, alignItems: "center" },
-    switcherBar: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: spacing.sm,
-        backgroundColor: "#2a2621",
-        paddingHorizontal: spacing.sm,
-        paddingVertical: 6,
-        borderRadius: radius.pill,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.25,
-        shadowRadius: 12,
-        elevation: 8,
-    },
-    switcherArrow: { width: 30, height: 30, justifyContent: "center", alignItems: "center" },
-    switcherLabel: {
-        fontSize: 13,
-        fontWeight: "600",
-        color: "#fff",
-        minWidth: 130,
-        textAlign: "center",
-        fontVariant: ["tabular-nums"],
-    },
 });
