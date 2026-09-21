@@ -52,15 +52,6 @@ export default function MainLayout() {
                 }}
             />
             <Tabs.Screen
-                name="projects"
-                options={{
-                    title: 'Projects',
-                    tabBarIcon: ({ color, focused }) => (
-                        <Ionicons name={focused ? 'folder' : 'folder-outline'} size={24} color={color} />
-                    ),
-                }}
-            />
-            <Tabs.Screen
                 name="settings"
                 options={{
                     title: 'Settings',
