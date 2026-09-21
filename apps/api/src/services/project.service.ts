@@ -13,6 +13,7 @@ const projectDetailSelect = {
     id: true,
     name: true,
     goal: true,
+    notes: true,
     isInFocus: true,
 } as const;
 
@@ -23,6 +24,7 @@ export async function createProject(userId: string, input: CreateProjectInput): 
                 userId,
                 name: input.name.trim(),
                 ...(input.goal && { goal: input.goal }),
+                ...(input.notes && { notes: input.notes }),
             },
             select: projectDetailSelect,
         });
@@ -57,6 +59,7 @@ export async function updateProject(userId: string, projectId: string, input: Up
     const data: Prisma.ProjectUpdateInput = {};
     if (input.name !== undefined) data.name = input.name.trim();
     if (input.goal !== undefined) data.goal = input.goal;
+    if (input.notes !== undefined) data.notes = input.notes;
 
     try {
         return await prisma.project.update({
