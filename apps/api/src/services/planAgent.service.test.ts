@@ -10,12 +10,14 @@ import {
     CAPACITY_TOLERANCE_MINS,
     MAX_REPLAN_ATTEMPTS,
     FLOOR_EVICTION_REASON,
+    TODOS_GROUP_NAME,
     type AgentResult,
     type AgentBlock,
     type AgentTask,
     type Assignment,
     type RawBlock,
     type RawTask,
+    type RawProject,
     type AgentInput,
 } from "./planAgent.service";
 import type { Anthropic } from "@anthropic-ai/sdk";
@@ -48,8 +50,17 @@ function task(overrides: Partial<RawTask> = {}): RawTask {
         notes: null,
         createdAt: new Date("2026-06-01T00:00:00.000Z"),
         status: "TODO",
+        project: null,
         ...overrides,
     };
+}
+
+function proj(overrides: Partial<RawProject> = {}): RawProject {
+    return { id: "p1", name: "Project", goal: "ship it", notes: null, isInFocus: false, ...overrides };
+}
+
+function taskIn(project: RawProject, overrides: Partial<RawTask> = {}): RawTask {
+    return task({ project, ...overrides });
 }
 
 describe("buildAgentInput", () => {
@@ -81,7 +92,7 @@ describe("buildAgentInput", () => {
             ],
             NOW,
         );
-        const byId = Object.fromEntries(input.tasks.map(t => [t.id, t.remainingMins]));
+        const byId = Object.fromEntries(input.projects.flatMap(p => p.tasks).map(t => [t.id, t.remainingMins]));
         expect(byId).toEqual({ none: 60, zero: 60, half: 30, most: 23, done: 0 });
     });
 
@@ -95,7 +106,7 @@ describe("buildAgentInput", () => {
             ],
             NOW,
         );
-        const byId = Object.fromEntries(input.tasks.map(t => [t.id, t.deadline]));
+        const byId = Object.fromEntries(input.projects.flatMap(p => p.tasks).map(t => [t.id, t.deadline]));
         expect(byId).toEqual({ with: "2026-06-25T09:00:00.000Z", without: null });
     });
 
@@ -109,11 +120,119 @@ describe("buildAgentInput", () => {
             ],
             NOW,
         );
-        const byId = Object.fromEntries(input.tasks.map(t => [t.id, { createdAt: t.createdAt, notes: t.notes }]));
+        const byId = Object.fromEntries(input.projects.flatMap(p => p.tasks).map(t => [t.id, { createdAt: t.createdAt, notes: t.notes }]));
         expect(byId).toEqual({
             with: { createdAt: "2026-05-01T00:00:00.000Z", notes: "call the vendor first" },
             without: { createdAt: "2026-06-01T00:00:00.000Z", notes: null },
         });
+    });
+
+    it("nests tasks under their project and dedupes into one group per project", () => {
+        const alpha = proj({ id: "p-alpha", name: "Alpha", goal: "win" });
+        const input = buildAgentInput([], [taskIn(alpha, { id: "a1" }), taskIn(alpha, { id: "a2" })], NOW);
+
+        expect(input.projects).toHaveLength(1);
+        expect(input.projects[0]).toMatchObject({ name: "Alpha", goal: "win", isInFocus: false });
+        expect(input.projects[0].tasks.map(t => t.id)).toEqual(["a1", "a2"]);
+    });
+
+    it("puts standalone tasks in a trailing Todos group, absent from real groups", () => {
+        const alpha = proj({ id: "p-alpha", name: "Alpha" });
+        const input = buildAgentInput([], [taskIn(alpha, { id: "a1" }), task({ id: "loose" })], NOW);
+
+        expect(input.projects.find(p => p.name === TODOS_GROUP_NAME)!.tasks.map(t => t.id)).toEqual(["loose"]);
+        expect(input.projects.find(p => p.name === "Alpha")!.tasks.map(t => t.id)).toEqual(["a1"]);
+    });
+
+    it("omits goal when the project has none but still emits the group", () => {
+        const input = buildAgentInput([], [taskIn(proj({ name: "Alpha", goal: null }))], NOW);
+
+        expect(input.projects).toHaveLength(1);
+        expect(input.projects[0].name).toBe("Alpha");
+        expect(input.projects[0]).not.toHaveProperty("goal");
+    });
+
+    it("treats a blank goal (empty or whitespace) like an absent one", () => {
+        const input = buildAgentInput(
+            [],
+            [
+                taskIn(proj({ id: "p-empty", name: "Empty", goal: "" }), { id: "e1" }),
+                taskIn(proj({ id: "p-ws", name: "Ws", goal: "   " }), { id: "w1" }),
+            ],
+            NOW,
+        );
+
+        expect(Object.fromEntries(input.projects.map(p => [p.name, "goal" in p]))).toEqual({ Empty: false, Ws: false });
+    });
+
+    it("includes project notes when present and omits them when blank or absent", () => {
+        const input = buildAgentInput(
+            [],
+            [
+                taskIn(proj({ id: "p-has", name: "Has", notes: "watch the vendor SLA" }), { id: "h1" }),
+                taskIn(proj({ id: "p-null", name: "Null", notes: null }), { id: "n1" }),
+                taskIn(proj({ id: "p-blank", name: "Blank", notes: "   " }), { id: "b1" }),
+            ],
+            NOW,
+        );
+
+        const byName = Object.fromEntries(input.projects.map(p => [p.name, p]));
+        expect(byName["Has"].notes).toBe("watch the vendor SLA");
+        expect(byName["Null"]).not.toHaveProperty("notes");
+        expect(byName["Blank"]).not.toHaveProperty("notes");
+    });
+
+    it("never puts notes on the Todos group", () => {
+        const input = buildAgentInput([], [task({ id: "loose" })], NOW);
+
+        expect(input.projects[0].name).toBe(TODOS_GROUP_NAME);
+        expect(input.projects[0]).not.toHaveProperty("notes");
+    });
+
+    it("includes every referenced project and passes isInFocus through", () => {
+        const alpha = proj({ id: "p-alpha", name: "Alpha", isInFocus: true });
+        const beta = proj({ id: "p-beta", name: "Beta", isInFocus: false });
+        const input = buildAgentInput([], [taskIn(alpha, { id: "a1" }), taskIn(beta, { id: "b1" })], NOW);
+
+        expect(Object.fromEntries(input.projects.map(p => [p.name, p.isInFocus]))).toEqual({ Alpha: true, Beta: false });
+    });
+
+    it("orders real projects by first appearance and puts Todos last", () => {
+        const beta = proj({ id: "p-beta", name: "Beta" });
+        const alpha = proj({ id: "p-alpha", name: "Alpha" });
+        const input = buildAgentInput(
+            [],
+            [
+                task({ id: "loose" }),
+                taskIn(beta, { id: "b1" }),
+                taskIn(alpha, { id: "a1" }),
+                taskIn(beta, { id: "b2" }), // a re-appearing project must not reorder
+            ],
+            NOW,
+        );
+
+        expect(input.projects.map(p => p.name)).toEqual(["Beta", "Alpha", TODOS_GROUP_NAME]);
+    });
+
+    it("emits no Todos group when every task has a project", () => {
+        const input = buildAgentInput([], [taskIn(proj({ name: "Alpha" }))], NOW);
+        expect(input.projects.map(p => p.name)).toEqual(["Alpha"]);
+    });
+
+    it("emits only the Todos group when no task has a project", () => {
+        const input = buildAgentInput([], [task({ id: "t1" }), task({ id: "t2" })], NOW);
+        expect(input.projects.map(p => p.name)).toEqual([TODOS_GROUP_NAME]);
+    });
+
+    it("nests only task fields — no project fields leak onto the nested task", () => {
+        const input = buildAgentInput([], [taskIn(proj({ name: "Alpha" }), { id: "a1" })], NOW);
+        const agentTask = input.projects[0].tasks[0];
+
+        expect(agentTask).not.toHaveProperty("projectId");
+        expect(agentTask).not.toHaveProperty("project");
+        expect(Object.keys(agentTask).sort()).toEqual(
+            ["createdAt", "deadline", "effort", "id", "notes", "priority", "remainingMins", "status", "title"],
+        );
     });
 });
 
@@ -357,7 +476,7 @@ describe("generateSchedule", () => {
 
         expect(captured!.now).toBe(NOW);
         expect(captured!.blocks.map(b => b.id)).toEqual(["c1"]);
-        expect(captured!.tasks[0]).toMatchObject({ id: "t1", remainingMins: 60 });
+        expect(captured!.projects.flatMap(p => p.tasks)[0]).toMatchObject({ id: "t1", remainingMins: 60 });
     });
 
     it("happy path: a fitting schedule returns in a single call, no floor", async () => {

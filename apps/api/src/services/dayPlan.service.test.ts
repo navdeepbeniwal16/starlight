@@ -67,6 +67,7 @@ async function seedTask(title: string, overrides: Partial<{
     blockOrder: number;
     notes: string;
     createdAt: Date;
+    projectId: string;
 }> = {}) {
     return prisma.task.create({
         data: {
@@ -79,6 +80,19 @@ async function seedTask(title: string, overrides: Partial<{
             ...(overrides.createdAt !== undefined && { createdAt: overrides.createdAt }),
             ...(overrides.plannedBlockId !== undefined && { plannedBlockId: overrides.plannedBlockId }),
             ...(overrides.blockOrder !== undefined && { blockOrder: overrides.blockOrder }),
+            ...(overrides.projectId !== undefined && { projectId: overrides.projectId }),
+        },
+    });
+}
+
+async function seedProject(name: string, overrides: Partial<{ goal: string; notes: string; isInFocus: boolean }> = {}) {
+    return prisma.project.create({
+        data: {
+            userId,
+            name,
+            ...(overrides.goal !== undefined && { goal: overrides.goal }),
+            ...(overrides.notes !== undefined && { notes: overrides.notes }),
+            ...(overrides.isInFocus !== undefined && { isInFocus: overrides.isInFocus }),
         },
     });
 }
@@ -108,6 +122,7 @@ async function seedActivePlan(date: string, blocks: { type?: "CONTAINER" | "ANCH
 
 async function cleanup() {
     await prisma.task.deleteMany({ where: { userId } });
+    await prisma.project.deleteMany({ where: { userId } });
     const plans = await prisma.dayPlan.findMany({ where: { userId }, select: { id: true } });
     await prisma.plannedBlock.deleteMany({ where: { dayPlanId: { in: plans.map(p => p.id) } } });
     await prisma.dayPlan.deleteMany({ where: { userId } });
@@ -253,7 +268,7 @@ describe("generatePlanProposal", () => {
         await generatePlanProposal(userId, DATE, "10:00", NOW, agent.deps);
 
         // The carried-over task was offered to the agent…
-        expect(agent.calls[0].tasks.map(t => t.id)).toContain(scheduled.id);
+        expect(agent.calls[0].projects.flatMap(p => p.tasks).map(t => t.id)).toContain(scheduled.id);
         // …but its live placement is untouched: generate must be non-destructive.
         const after = await prisma.task.findUnique({ where: { id: scheduled.id } });
         expect(after!.plannedBlockId).toBe(futureBlock.id);
@@ -271,9 +286,29 @@ describe("generatePlanProposal", () => {
         await generatePlanProposal(userId, DATE, "08:00", NOW, agent.deps);
 
         expect(agent.calls[0].now).toBe(NOW);
-        const sent = agent.calls[0].tasks.find(x => x.id === t.id)!;
+        const sent = agent.calls[0].projects.flatMap(p => p.tasks).find(x => x.id === t.id)!;
         expect(sent.notes).toBe("call the vendor first");
         expect(sent.createdAt).toBe(createdAt.toISOString());
+    });
+
+    it("nests scheduled tasks under their project and standalone tasks into Todos", async () => {
+        await seedTemplate();
+        const project = await seedProject("Website revamp", { goal: "launch v2", notes: "ship before the conference", isInFocus: true });
+        await seedTask("Design hero", { projectId: project.id });
+        await seedTask("Buy milk");
+        const agent = noopAgent();
+
+        await generatePlanProposal(userId, DATE, "08:00", NOW, agent.deps);
+
+        const projects = agent.calls[0].projects;
+        const website = projects.find(p => p.name === "Website revamp")!;
+        expect(website).toMatchObject({ goal: "launch v2", notes: "ship before the conference", isInFocus: true });
+        expect(website.tasks.map(t => t.title)).toEqual(["Design hero"]);
+        const todos = projects.find(p => p.name === "Todos")!;
+        expect(todos).toMatchObject({ isInFocus: false });
+        expect(todos).not.toHaveProperty("goal");
+        expect(todos).not.toHaveProperty("notes");
+        expect(todos.tasks.map(t => t.title)).toEqual(["Buy milk"]);
     });
 });
 
