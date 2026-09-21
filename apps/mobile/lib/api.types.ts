@@ -160,6 +160,7 @@ export type CreateTaskInput = {
     deadline?: string;   // ISO datetime string
     progress?: number;   // 0–100
     notes?: string;
+    projectId?: string;  // omitted = Todos (unassigned)
 };
 
 export type CreateTaskResponse = ApiResult<BacklogTask>;
@@ -186,6 +187,7 @@ export type UpdateTaskInput = {
     effort?: EnergyLevel | null;
     deadline?: string | null;
     progress?: number;
+    projectId?: string | null;  // null clears to Todos; undefined leaves it unchanged
 };
 export type UpdateTaskResponse = ApiResult<TaskDetail>;
 
