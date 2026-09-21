@@ -9,6 +9,8 @@ export type BacklogTask = {
     deadline: Date | null;
     progress: number | null;
     estimatedMins: number;
+    projectId?: string | null;
+    projectName?: string | null;
 };
 
 export type ScheduledTask = BacklogTask & {

@@ -124,6 +124,10 @@ export type BacklogTask = {
     deadline: string | null;  // ISO datetime string (YYYY-MM-DDT00:00:00.000Z)
     progress: number | null;  // 0–100
     estimatedMins: number;
+    // Present on the backlog + all-tasks projections so the Backlog can group / chip
+    // tasks by project; absent on lighter projections (plan review) that reuse this shape.
+    projectId?: string | null;
+    projectName?: string | null;
 };
 
 export type ScheduledTask = BacklogTask & {
@@ -184,3 +188,25 @@ export type UpdateTaskInput = {
     progress?: number;
 };
 export type UpdateTaskResponse = ApiResult<TaskDetail>;
+
+export type Project = {
+    id: string;
+    name: string;
+    goal: string | null;
+    notes: string | null;
+    isInFocus: boolean;
+};
+
+export type GetProjectsResponse = ApiResult<Project[]>;
+export type ProjectResponse = ApiResult<Project>;
+
+export type CreateProjectInput = {
+    name: string;
+    goal?: string;
+};
+
+// null clears the goal; undefined leaves it unchanged.
+export type UpdateProjectInput = {
+    name?: string;
+    goal?: string | null;
+};

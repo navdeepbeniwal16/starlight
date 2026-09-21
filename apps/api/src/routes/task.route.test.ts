@@ -82,6 +82,24 @@ describe("task routes", () => {
         );
     });
 
+    it("GET /tasks/backlog threads projectId + projectName through the buckets", async () => {
+        const linked = await prisma.task.create({
+            data: { userId, title: "Linked", estimatedMins: 20, projectId: ownedProjectId },
+        });
+
+        const res = await request(app).get("/tasks/backlog").set(auth());
+        expect(res.status).toBe(200);
+
+        const remaining = res.body.data.remaining as Array<{ id: string; projectId: string | null; projectName: string | null }>;
+        const withProject = remaining.find(t => t.id === linked.id);
+        expect(withProject).toMatchObject({ projectId: ownedProjectId, projectName: "Owned" });
+
+        const unassigned = remaining.find(t => t.id === taskId);
+        expect(unassigned).toMatchObject({ projectId: null, projectName: null });
+
+        await prisma.task.delete({ where: { id: linked.id } });
+    });
+
     it("GET /tasks/:id returns a single task", async () => {
         const res = await request(app).get(`/tasks/${taskId}`).set(auth());
 
