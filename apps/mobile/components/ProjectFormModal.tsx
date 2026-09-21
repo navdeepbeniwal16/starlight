@@ -51,6 +51,7 @@ export default function ProjectFormModal({ visible, mode, project, onClose, onSa
     const busy = submitting || deleting;
 
     async function handleSubmit() {
+        if (busy) return;
         const trimmedName = name.trim();
         if (!trimmedName) {
             setNameError('Name is required');
@@ -77,7 +78,7 @@ export default function ProjectFormModal({ visible, mode, project, onClose, onSa
     }
 
     function handleDelete() {
-        if (!project) return;
+        if (!project || busy) return;
         Alert.alert(
             'Delete project?',
             `"${project.name}" will be removed. Its tasks stay and return to Todos.`,
