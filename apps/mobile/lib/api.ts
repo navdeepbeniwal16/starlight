@@ -1,4 +1,4 @@
-import { ApiResult, BlockInput, ConfirmAssignment, ConfirmPlanResponse, CreateDayTemplateResponse, CreateTaskInput, CreateTaskResponse, GeneratePlanResponse, GetAllTasksResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, GetReviewTasksResponse, GetTaskDetailResponse, OnboardingResponse, UpdateDayTemplateResponse, UpdateTaskInput, UpdateTaskResponse } from "./api.types";
+import { ApiResult, BlockInput, ConfirmAssignment, ConfirmPlanResponse, CreateDayTemplateResponse, CreateProjectInput, CreateTaskInput, CreateTaskResponse, GeneratePlanResponse, GetAllTasksResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, GetProjectsResponse, GetReviewTasksResponse, GetTaskDetailResponse, OnboardingResponse, ProjectResponse, UpdateDayTemplateResponse, UpdateProjectInput, UpdateTaskInput, UpdateTaskResponse } from "./api.types";
 import { getToken } from "./clerk";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
@@ -324,6 +324,101 @@ export const api = {
         return { ok: false, error: (responseJson as { error?: string }).error ?? `HTTP ${response.status}` };
       }
 
+      return { ok: true, data: null };
+    } catch (error) {
+      return { ok: false, error: 'Network error. Please check your connection.' };
+    }
+  },
+
+  getProjects: async (): Promise<GetProjectsResponse> => {
+    const token = await getToken();
+    if (!token) return { ok: false, error: 'No token found' };
+    try {
+      const response = await fetch(`${API_URL}/projects`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const responseJson = await response.json();
+      if (!response.ok) {
+        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
+      }
+      return { ok: true, data: responseJson.data };
+    } catch (error) {
+      return { ok: false, error: 'Network error. Please check your connection.' };
+    }
+  },
+
+  createProject: async (input: CreateProjectInput): Promise<ProjectResponse> => {
+    const token = await getToken();
+    if (!token) return { ok: false, error: 'No token found' };
+    try {
+      const response = await fetch(`${API_URL}/projects`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      const responseJson = await response.json();
+      if (!response.ok) {
+        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
+      }
+      return { ok: true, data: responseJson.data };
+    } catch (error) {
+      return { ok: false, error: 'Network error. Please check your connection.' };
+    }
+  },
+
+  updateProject: async (projectId: string, input: UpdateProjectInput): Promise<ProjectResponse> => {
+    const token = await getToken();
+    if (!token) return { ok: false, error: 'No token found' };
+    try {
+      const response = await fetch(`${API_URL}/projects/${projectId}`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      const responseJson = await response.json();
+      if (!response.ok) {
+        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
+      }
+      return { ok: true, data: responseJson.data };
+    } catch (error) {
+      return { ok: false, error: 'Network error. Please check your connection.' };
+    }
+  },
+
+  // Toggles a project's in-focus flag. The max-3 cap is enforced server-side and
+  // surfaces as a 409, so the client's own guard is a UX affordance, not the source of truth.
+  setProjectFocus: async (projectId: string, inFocus: boolean): Promise<ProjectResponse> => {
+    const token = await getToken();
+    if (!token) return { ok: false, error: 'No token found' };
+    try {
+      const response = await fetch(`${API_URL}/projects/${projectId}/focus`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inFocus }),
+      });
+      const responseJson = await response.json();
+      if (!response.ok) {
+        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
+      }
+      return { ok: true, data: responseJson.data };
+    } catch (error) {
+      return { ok: false, error: 'Network error. Please check your connection.' };
+    }
+  },
+
+  deleteProject: async (projectId: string): Promise<ApiResult<null>> => {
+    const token = await getToken();
+    if (!token) return { ok: false, error: 'No token found' };
+    try {
+      const response = await fetch(`${API_URL}/projects/${projectId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        const responseJson = await response.json().catch(() => ({}));
+        return { ok: false, error: (responseJson as { error?: string }).error ?? `HTTP ${response.status}` };
+      }
       return { ok: true, data: null };
     } catch (error) {
       return { ok: false, error: 'Network error. Please check your connection.' };
