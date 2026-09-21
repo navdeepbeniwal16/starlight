@@ -13,11 +13,11 @@ import { useLocalSearchParams, useRouter, useNavigation } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
 import { colors, radius } from "../../lib/theme";
-import type { TaskDetail, EnergyLevel, UpdateTaskInput } from "../../lib/api.types";
+import type { TaskDetail, EnergyLevel, Project, UpdateTaskInput } from "../../lib/api.types";
 import { KeyboardScreen } from "../../components/KeyboardScreen";
 import {
     ESTIMATE_OPTIONS, PROGRESS_PRESETS,
-    FieldRow, ProgressSlider, DeadlineExpanded,
+    FieldRow, ProgressSlider, DeadlineExpanded, ProjectField,
     getEstimateLabel, formatDeadlineValue, effortDotColor,
     defaultTime,
     tf,
@@ -25,7 +25,7 @@ import {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-type FieldKey = 'estimate' | 'effort' | 'deadline' | 'progress';
+type FieldKey = 'estimate' | 'project' | 'effort' | 'deadline' | 'progress';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 function deadlineToParts(iso: string): { day: Date; time: Date } {
@@ -52,6 +52,8 @@ export default function TaskDetailScreen() {
     const [notes, setNotes] = useState('');
     const [estimatedMins, setEstimatedMins] = useState(15);
     const [effort, setEffort] = useState<EnergyLevel | null>(null);
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [projectId, setProjectId] = useState<string | null>(null);
     const [deadlineDay, setDeadlineDay] = useState<Date | null>(null);
     const [deadlineTime, setDeadlineTime] = useState<Date>(defaultTime());
     const [tempDay, setTempDay] = useState<Date>(() => new Date());
@@ -77,6 +79,7 @@ export default function TaskDetailScreen() {
         setNotes(t.notes ?? '');
         setEstimatedMins(t.estimatedMins);
         setEffort(t.effort);
+        setProjectId(t.projectId ?? null);
         setProgress(t.progress ?? 0);
         if (t.deadline) {
             const { day, time } = deadlineToParts(t.deadline);
@@ -107,6 +110,18 @@ export default function TaskDetailScreen() {
         });
         return () => { active = false; };
     }, [taskId, syncFromTask]);
+
+    // ─── Project picker options ────────────────────────────────────────────────
+
+    // The picker's options; independent of the task, so a failed load just leaves the
+    // current assignment reassignable to Todos rather than blocking the screen.
+    useEffect(() => {
+        let active = true;
+        api.getProjects().then(result => {
+            if (active && result.ok) setProjects(result.data);
+        });
+        return () => { active = false; };
+    }, []);
 
     // ─── Disable swipe-back while slider is active ────────────────────────────
 
@@ -170,6 +185,12 @@ export default function TaskDetailScreen() {
         setEffort(e);
         setActiveField(null);
         save({ effort: e });
+    }
+
+    function handleProjectSelect(id: string | null) {
+        setProjectId(id);
+        setActiveField(null);
+        save({ projectId: id });
     }
 
     function handleDeadlineConfirm() {
@@ -332,6 +353,16 @@ export default function TaskDetailScreen() {
                                 ))}
                             </View>
                         )}
+
+                        <View style={s.sep} />
+
+                        <ProjectField
+                            projects={projects}
+                            selectedId={projectId}
+                            isOpen={activeField === 'project'}
+                            onToggle={() => toggleField('project')}
+                            onSelect={handleProjectSelect}
+                        />
 
                         <View style={s.sep} />
 

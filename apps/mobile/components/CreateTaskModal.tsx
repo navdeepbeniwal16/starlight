@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
     Modal,
     View,
@@ -12,16 +12,16 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardProvider, KeyboardToolbar, KeyboardAwareScrollView, type KeyboardAwareScrollViewRef } from "react-native-keyboard-controller";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../lib/api";
-import type { BacklogTask, EnergyLevel } from "../lib/api.types";
+import type { BacklogTask, EnergyLevel, Project } from "../lib/api.types";
 import {
     ESTIMATE_OPTIONS, PROGRESS_PRESETS,
-    FieldRow, ProgressSlider, DeadlineExpanded,
+    FieldRow, ProgressSlider, DeadlineExpanded, ProjectField,
     getEstimateLabel, formatDeadlineValue, effortDotColor,
     defaultTime,
     tf,
 } from "./TaskFields";
 
-type FieldKey = 'estimate' | 'effort' | 'deadline' | 'progress';
+type FieldKey = 'estimate' | 'project' | 'effort' | 'deadline' | 'progress';
 
 type Props = { visible: boolean; onClose: () => void; onCreated: (task: BacklogTask) => void; };
 
@@ -35,6 +35,8 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
     const [notes, setNotes] = useState('');
     const [estimatedMins, setEstimatedMins] = useState<number | null>(null);
     const [effort, setEffort] = useState<EnergyLevel | null>(null);
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [projectId, setProjectId] = useState<string | null>(null);
     const [deadlineDay, setDeadlineDay] = useState<Date | null>(null);
     const [deadlineTime, setDeadlineTime] = useState<Date>(defaultTime);
     const [tempDay, setTempDay] = useState<Date>(() => new Date());
@@ -45,9 +47,20 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
     const [estimateError, setEstimateError] = useState(false);
     const [submitError, setSubmitError] = useState<string | null>(null);
 
+    // Refresh the picker's options each time the sheet opens. A failed load leaves the
+    // picker offering Todos alone — assignment is optional, so it never blocks creating.
+    useEffect(() => {
+        if (!visible) return;
+        let active = true;
+        api.getProjects().then(result => {
+            if (active && result.ok) setProjects(result.data);
+        });
+        return () => { active = false; };
+    }, [visible]);
+
     function resetForm() {
         setActiveField('estimate'); setTitle(''); setNotes('');
-        setEstimatedMins(null); setEffort(null);
+        setEstimatedMins(null); setEffort(null); setProjectId(null);
         setDeadlineDay(null); setDeadlineTime(defaultTime()); setTempDay(new Date()); setShowTimePicker(false);
         setProgress(0);
         setSubmitting(false); setTitleError(false); setEstimateError(false); setSubmitError(null);
@@ -87,6 +100,7 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
             ...(deadline && { deadline }),
             progress,
             ...(notes.trim() && { notes: notes.trim() }),
+            ...(projectId && { projectId }),
         });
 
         setSubmitting(false);
@@ -156,6 +170,16 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                                     ))}
                                 </View>
                             )}
+
+                            <View style={s.sep} />
+
+                            <ProjectField
+                                projects={projects}
+                                selectedId={projectId}
+                                isOpen={activeField === 'project'}
+                                onToggle={() => toggleField('project')}
+                                onSelect={(id) => { setProjectId(id); setActiveField(null); }}
+                            />
 
                             <View style={s.sep} />
 

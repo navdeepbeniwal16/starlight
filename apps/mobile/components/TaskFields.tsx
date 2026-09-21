@@ -8,7 +8,8 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import type { EnergyLevel } from "../lib/api.types";
+import type { EnergyLevel, Project } from "../lib/api.types";
+import { projectPickerOptions, selectedProjectLabel } from "../lib/projectPicker";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -270,6 +271,43 @@ export function FieldRow({ label, subLabel, value, isOpen, onPress, hasError }: 
                 <Ionicons name={isOpen ? 'chevron-down' : 'chevron-forward'} size={13} color="rgba(122,115,106,0.4)" />
             </View>
         </TouchableOpacity>
+    );
+}
+
+// ─── ProjectField ─────────────────────────────────────────────────────────────
+
+export function ProjectField({ projects, selectedId, isOpen, onToggle, onSelect }: {
+    projects: Project[];
+    selectedId: string | null;
+    isOpen: boolean;
+    onToggle: () => void;
+    onSelect: (id: string | null) => void;
+}) {
+    return (
+        <>
+            <FieldRow
+                label="Project"
+                value={selectedProjectLabel(projects, selectedId)}
+                isOpen={isOpen}
+                onPress={onToggle}
+            />
+            {isOpen && (
+                <View style={tf.pills}>
+                    {projectPickerOptions(projects).map(o => {
+                        const on = o.id === selectedId;
+                        return (
+                            <TouchableOpacity
+                                key={o.id ?? '__todos__'}
+                                style={[tf.pill, on && tf.pillOn]}
+                                onPress={() => onSelect(o.id)}
+                            >
+                                <Text style={[tf.pillTxt, on && tf.pillTxtOn]}>{o.label}</Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </View>
+            )}
+        </>
     );
 }
 
