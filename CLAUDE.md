@@ -2,11 +2,11 @@
 
 ### Issue tracker
 
-Issues are tracked in a Notion database ("User Stories") via the `claude.ai Notion` MCP. No PR triage surface. See `docs/agents/issue-tracker.md`.
+Issues are tracked in Linear — team `STA` ("Starlight App") — via the `linear-server` MCP. No PR triage surface. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-Notion `Status` field: `Draft` = needs-triage, `Ready` = ready-for-agent/human, `Icebox` = wontfix. `needs-info` is skipped (solo project). See `docs/agents/triage-labels.md`.
+Linear workflow status: `Backlog` = needs-triage, `Todo` = ready-for-agent/human, `Canceled` = wontfix. `needs-info` is skipped. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 

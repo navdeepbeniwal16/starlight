@@ -1,39 +1,56 @@
-# Issue Tracker: Notion
+# Issue Tracker: Linear
 
-Issues for this project are tracked in a Notion database called **User Stories**, inside the "⭐ Starlight - AI Planner" workspace.
+Issues for this project are tracked in **Linear**, team **Starlight App** (key `STA`).
 
 ## Access
 
-- **Database URL**: https://app.notion.com/p/40a7ae8774c34f99acc0f814ecf8d701
-- **Data source ID**: `collection://02166409-78d7-46f6-bced-08fdf5b4a64a`
-- **MCP server**: `claude.ai Notion` — use `notion-fetch`, `notion-search`, `notion-create-pages`, `notion-update-page`
+- **Team URL**: https://linear.app/starlight-app/team/STA
+- **Team key**: `STA` — issues are identified as `STA-1`, `STA-2`, …
+- **MCP server**: `linear-server` — key tools: `list_issues`, `get_issue`, `save_issue`
+  (create **and** update), `list_projects`, `get_project`, `list_issue_statuses`,
+  `list_issue_labels`
 
-## Schema
+## Workflow statuses
 
-| Property | Type    | Values                                                                                              |
-|----------|---------|-----------------------------------------------------------------------------------------------------|
-| `Story`  | title   | The story or task name                                                                              |
-| `ID`     | text    | Custom identifier                                                                                   |
-| `Feature`| select  | Authentication, Onboarding, Day Template, Date & Session Awareness, Backlog, Generated Day Plan, Basic Editing |
-| `Priority`| select | High, Medium, Low                                                                                   |
-| `Status` | select  | Draft, Ready, In Progress, Testing, Done, Icebox                                                   |
-| `Type`   | select  | User Story, Task                                                                                    |
-| `Notes`  | text    | Free-form notes                                                                                     |
+`Backlog` → `Todo` → `In Progress` → `In Review` → `Done`, plus `Canceled` and
+`Duplicate`. See `docs/agents/triage-labels.md` for how the skills' canonical triage
+roles map onto these statuses.
+
+## Categorization
+
+- **Priority** — Linear's built-in field: `Urgent`, `High`, `Medium`, `Low`, `No priority`.
+- **Area labels** — `api`, `mobile`, `database`, `infra`, `planner`.
+- **Type labels** — `Feature`, `Bug`, `Improvement`
+
+## Projects
+
+Larger multi-issue efforts are grouped under Linear **Projects**:
+
+- **Projects — task grouping** — group Tasks under a reusable goal + in-focus flag.
+- **Migrate authentication to Clerk** — move identity/sessions off hand-rolled JWT/bcrypt.
 
 ## Operations
 
-**Read issues** — fetch the database URL or use `notion-search` for keyword lookup:
+**Read issues** — `list_issues` (filter by `team`, `status`, `label`, `project`, or
+assignee), or `get_issue` by identifier:
+
 ```
-notion-fetch: https://app.notion.com/p/40a7ae8774c34f99acc0f814ecf8d701
+list_issues: team = "STA", status = "Todo"
+get_issue: STA-14
 ```
 
-**Create an issue** — `notion-create-pages` with the data source as parent:
+**Create or update an issue** — `save_issue` handles both. At minimum supply `team` and
+`title`; set `status`, `labels`, `priority`, and `project` as appropriate:
+
 ```
-parent.data_source_id: "02166409-78d7-46f6-bced-08fdf5b4a64a"
-Required properties: Story (title), Status, Type
+save_issue: team = "STA", title = "…", status = "Backlog", labels = ["api"]
 ```
 
-**Update an issue** — `notion-update-page` with the page URL or ID.
+## Branch & PR linkage
+
+One issue → one short-lived branch → one pull request. Branch names carry the Linear
+identifier (e.g. `sta-14-…`) so Linear auto-links the branch and PR to the issue and
+advances its status through `In Progress` / `In Review` / `Done`.
 
 ## No PR triage surface
 
