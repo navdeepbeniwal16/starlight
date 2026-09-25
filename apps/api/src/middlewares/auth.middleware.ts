@@ -1,28 +1,23 @@
 import { Request, Response, NextFunction } from "express";
-import { verifyToken } from "../lib/jwt";
-import { JsonWebTokenError } from "jsonwebtoken";
+import { getAuth } from "@clerk/express";
+import { resolveLocalUser } from "../services/user.service";
 
-export function authenticate(req: Request, res: Response, next: NextFunction) : void {
-    const authHeader = req.headers.authorization;
+export async function authenticate(req: Request, res: Response, next: NextFunction): Promise<void> {
+    // Verified from cached JWKS by clerkMiddleware — no per-request call to Clerk.
+    const { userId: clerkUserId } = getAuth(req);
 
-    if(!authHeader?.startsWith("Bearer ")) {
-        res.status(401).json({error: "Missing or invalid authorization token"});
+    if (!clerkUserId) {
+        res.status(401).json({ error: "Missing or invalid authorization token" });
         return;
     }
 
-    const token = authHeader.slice(7);
-
     try {
-        const payload = verifyToken(token);
-        req.user = { sub: payload.sub as string, email: payload.email as string};
-        res.locals["userId"] = payload.sub;
+        const user = await resolveLocalUser(clerkUserId);
+
+        req.user = { sub: user.id };
+        res.locals["userId"] = user.id;
         next();
     } catch (error) {
-        if(error instanceof JsonWebTokenError) {
-            res.status(401).json({error: "Invalid or expired token"});
-            return;
-        } else {
-            next(error);
-        }
+        next(error);
     }
 }

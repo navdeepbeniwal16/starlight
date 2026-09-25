@@ -26,6 +26,7 @@ import { api } from "../lib/api";
 import type { ConfirmAssignment, PlanProposal } from "../lib/api.types";
 import { usePlanningStore } from "../stores/planning.store";
 import { useOnboardingTasksStore } from "../stores/onboardingTasks.store";
+import { useSessionStore } from "../stores/session.store";
 import { formatTime, toMins } from "../lib/time";
 
 // ─── Local board model ────────────────────────────────────────────────────────
@@ -307,7 +308,8 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
             // Stamp completion server-side before tearing down, so any future
             // sign-in (this device or another) resolves straight to Today.
             if (isOnboarding) {
-                await api.completeOnboarding();
+                const done = await api.completeOnboarding();
+                if (done.ok) useSessionStore.getState().setOnboardedAt(done.data.onboardedAt);
                 useOnboardingTasksStore.getState().reset();
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

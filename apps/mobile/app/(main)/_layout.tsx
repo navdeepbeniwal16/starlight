@@ -1,25 +1,17 @@
-import { Tabs, useRouter } from "expo-router";
-import { useEffect, useRef } from "react";
+import { Redirect, Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useAuthStore } from "../../stores/auth.store";
+import { useAuth } from "@clerk/expo";
 import { colors } from "../../lib/theme";
 
 export default function MainLayout() {
-    const router = useRouter();
     const insets = useSafeAreaInsets();
-    const user = useAuthStore(state => state.user);
-    const prevUserRef = useRef(user);
+    const { isLoaded, isSignedIn } = useAuth();
 
-    useEffect(() => {
-        // Only redirect when user transitions from set → null (i.e. after logout).
-        // Skipping the initial-mount case avoids a spurious redirect if this layout
-        // somehow renders before app/index.tsx has finished calling setAuth.
-        if (prevUserRef.current !== null && user === null) {
-            router.replace('/(auth)/login');
-        }
-        prevUserRef.current = user;
-    }, [user, router]);
+    if (!isLoaded) return null;
+    // Declarative sign-out: when logout clears the Clerk session this guard
+    // redirects to auth — no imperative navigation on the logout button.
+    if (!isSignedIn) return <Redirect href="/(auth)/login" />;
 
     return (
         <Tabs

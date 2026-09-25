@@ -1,14 +1,16 @@
 import { useRouter } from 'expo-router';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image } from 'react-native';
-import { useAuthStore } from '../../stores/auth.store';
+import { useSignIn } from '@clerk/expo';
 import { useRef, useState } from 'react';
-import { api } from '../../lib/api';
+import { runClerkPasswordFlow } from '../../lib/clerkAuth';
 import { KeyboardScreen } from '../../components/KeyboardScreen';
+import { OAuthButtons } from '../../components/OAuthButtons';
+import { PasswordInput } from '../../components/PasswordInput';
 import { colors, radius, spacing } from '../../lib/theme';
 
 export default function LoginScreen() {
     const router = useRouter();
-    const setAuth = useAuthStore((state) => state.setAuth);
+    const { signIn } = useSignIn();
 
     const passwordRef = useRef<TextInput>(null);
 
@@ -27,16 +29,19 @@ export default function LoginScreen() {
         }
 
         setIsLoading(true);
-        const result = await api.login({email: trimmedEmail, password});
-        setIsLoading(false);
-
-        if(!result.ok) {
-            setError(result.error);
-            return;
+        try {
+            // On success finalize() activates the session and the (auth) guard
+            // redirects to the gate — no imperative navigation here.
+            const message = await runClerkPasswordFlow({
+                attempt: () => signIn.password({ identifier: trimmedEmail, password }),
+                isComplete: () => signIn.status === 'complete',
+                finalize: () => signIn.finalize(),
+                incompleteMessage: 'Additional verification is required to sign in.',
+            });
+            if (message) setError(message);
+        } finally {
+            setIsLoading(false);
         }
-
-        await setAuth(result.data.user, result.data.token);
-        router.replace(result.data.user.onboardedAt ? '/(main)' : '/(onboarding)/welcome');
     }
 
     return (
@@ -48,6 +53,8 @@ export default function LoginScreen() {
                     <Text style={styles.tagline}>Live each day with intention</Text>
                 </View>
             </View>
+
+            <OAuthButtons onError={setError} />
 
             <View style={styles.form}>
                 <View style={styles.fieldContainer}>
@@ -68,14 +75,12 @@ export default function LoginScreen() {
 
                 <View style={styles.fieldContainer}>
                     <Text style={styles.label}>Password</Text>
-                    <TextInput
+                    <PasswordInput
                         ref={passwordRef}
                         value={password}
                         onChangeText={setPassword}
                         style={styles.input}
                         placeholder="Enter your password"
-                        placeholderTextColor={colors.text.muted}
-                        secureTextEntry
                         returnKeyType="done"
                         onSubmitEditing={handleLogin}
                     />
@@ -111,15 +116,16 @@ const styles = StyleSheet.create({
         flexGrow: 1,
         justifyContent: 'center',
         paddingHorizontal: 24,
-        gap: 44,
+        paddingVertical: 32,
+        gap: 28,
     },
     header: {
         alignItems: 'center',
         gap: spacing.xs,
     },
     logo: {
-        width: 96,
-        height: 96,
+        width: 64,
+        height: 64,
     },
     wordmark: {
         alignItems: 'center',
@@ -140,7 +146,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
     },
     form: {
-        gap: spacing.xl,
+        gap: spacing.lg,
     },
     fieldContainer: {
         gap: spacing.sm,

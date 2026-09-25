@@ -1,27 +1,39 @@
 import request from "supertest";
+import type { Request, Response, NextFunction } from "express";
 import app from "../app";
 import { prisma } from "../lib/prisma";
-import { signToken } from "../lib/jwt";
 
-const TEST_EMAIL = "test-task-route@starlight.test";
+const TEST_CLERK_ID = "user_test_task_route";
 
-async function seedUser(email: string) {
+let mockUserId = "";
+jest.mock("../middlewares/auth.middleware", () => ({
+    authenticate: (req: Request, res: Response, next: NextFunction): void => {
+        if (!req.headers.authorization) {
+            res.status(401).json({ error: "Missing or invalid authorization token" });
+            return;
+        }
+        req.user = { sub: mockUserId };
+        res.locals["userId"] = mockUserId;
+        next();
+    },
+}));
+
+async function seedUser(clerkUserId: string) {
     return prisma.user.upsert({
-        where: { email },
+        where: { clerkUserId },
         update: {},
-        create: { email, passwordHash: "not-a-real-hash", firstName: "Test", lastName: "User" },
+        create: { clerkUserId },
     });
 }
 
 describe("task routes", () => {
     let userId: string;
-    let token: string;
     let taskId: string;
 
     beforeAll(async () => {
-        const user = await seedUser(TEST_EMAIL);
+        const user = await seedUser(TEST_CLERK_ID);
         userId = user.id;
-        token = signToken({ sub: userId, email: TEST_EMAIL });
+        mockUserId = userId;
         await prisma.task.deleteMany({ where: { userId } });
         const task = await prisma.task.create({ data: { userId, title: "Route task", estimatedMins: 30 } });
         taskId = task.id;
@@ -33,7 +45,7 @@ describe("task routes", () => {
         await prisma.$disconnect();
     });
 
-    const auth = () => ({ Authorization: `Bearer ${token}` });
+    const auth = () => ({ Authorization: "Bearer test-token" });
 
     it("GET /tasks returns a paginated page", async () => {
         const res = await request(app).get("/tasks").set(auth());

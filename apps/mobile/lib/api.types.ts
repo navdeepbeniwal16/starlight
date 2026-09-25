@@ -1,26 +1,12 @@
 export type ApiResult<T> = { ok: true, data: T } | { ok: false, error: string, status?: number, code?: string };
 
-export type AuthUser = {
-    id: string;
-    email: string;
-    firstName: string;
-    lastName: string;
+// Identity (name, email) now lives in Clerk and is read via useUser(); only the
+// onboarding flag stays server-side, keyed to the local user row.
+export type OnboardingState = {
     onboardedAt: string | null;
 };
 
-export type SignupResponse = ApiResult<{
-    token: string;
-    user: AuthUser;
-}>;
-
-export type LoginResponse = ApiResult<{
-    token: string;
-    user: AuthUser;
-}>;
-
-export type MeResponse = ApiResult<AuthUser>;
-
-export type CompleteOnboardingResponse = ApiResult<AuthUser>;
+export type OnboardingResponse = ApiResult<OnboardingState>;
 
 export type BlockType = 'CONTAINER' | 'ANCHOR';
 export type EnergyLevel = 'HIGH' | 'MEDIUM' | 'LOW';

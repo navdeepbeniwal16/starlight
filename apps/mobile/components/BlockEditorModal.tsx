@@ -15,7 +15,7 @@ import {
     BLOCK_TYPES, ENERGY_LEVELS, BLOCK_TYPE_LABELS, BLOCK_TYPE_DESCRIPTIONS, ENERGY_LABELS,
     validateBlockDraft, blockDraftErrorMessage, toBlockInput,
 } from "../lib/templateBlocks";
-import { computeGaps, MIN_GAP_MINUTES } from "../lib/templateDraft";
+import { computeGaps, MIN_GAP_MINUTES, computeOverlapPlan, describeOverlapPlan, type OverlapChange } from "../lib/templateDraft";
 import { colors, radius, spacing, shadow } from "../lib/theme";
 import { tf, effortDotColor } from "./TaskFields";
 
@@ -50,6 +50,7 @@ export function BlockEditorModal({
     initialValues,
     onSave,
     onDelete,
+    onResolveOverlap,
     wakeTime,
     sleepTime,
     saveLabel = 'Save',
@@ -62,6 +63,7 @@ export function BlockEditorModal({
     initialValues?: Partial<BlockInput>;
     onSave?: (block: BlockInput) => void;
     onDelete?: () => void;
+    onResolveOverlap?: (block: BlockInput, changes: OverlapChange[]) => void;
     wakeTime: string | null;
     sleepTime: string | null;
     saveLabel?: string;
@@ -124,6 +126,8 @@ export function BlockEditorModal({
     const [error, setError] = useState<string | null>(null);
     const [pickerTarget, setPickerTarget] = useState<PickerTarget>(null);
     const [pickerValue, setPickerValue] = useState(new Date());
+    // A resolution awaiting confirmation: seating this block means trimming/removing neighbours.
+    const [pendingPlan, setPendingPlan] = useState<{ block: BlockInput; changes: OverlapChange[] } | null>(null);
 
     useEffect(() => {
         if (visible) {
@@ -134,6 +138,7 @@ export function BlockEditorModal({
             setEnergyLevel(initialValues?.energyLevel ?? 'HIGH');
             setError(null);
             setPickerTarget(null);
+            setPendingPlan(null);
 
             // Sheet stays mounted between opens; rewind the strip's kept offset.
             chipScrollX.current = 0;
@@ -150,6 +155,7 @@ export function BlockEditorModal({
         setEnergyLevel('HIGH');
         setError(null);
         setPickerTarget(null);
+        setPendingPlan(null);
     };
 
     const handleClose = () => {
@@ -169,15 +175,35 @@ export function BlockEditorModal({
             const value = toHHmm(date);
             if (pickerTarget === 'start') setStartTime(value);
             else if (pickerTarget === 'end') setEndTime(value);
+            setPendingPlan(null);
         }
     };
 
     const handleSubmit = () => {
+        const excludeIndex = isEditMode ? editIndex : undefined;
         const validationError = validateBlockDraft(
             { type, name, startTime, endTime, energyLevel },
-            { wakeTime, sleepTime, existingBlocks, excludeIndex: isEditMode ? editIndex : undefined },
+            { wakeTime, sleepTime, existingBlocks, excludeIndex },
         );
-        if (validationError) {
+
+        // An overlap always resolves — the active edit wins — so instead of rejecting it we
+        // stage the neighbour changes for a confirm. OVERLAP is validation's last check, so
+        // reaching it means every other field is already valid and times are present.
+        if (validationError?.code === 'OVERLAP') {
+            const plan = computeOverlapPlan(
+                { wakeTime: wakeTime ?? '00:00', sleepTime: sleepTime ?? '00:00', blocks: existingBlocks },
+                { startTime: startTime!, endTime: endTime! },
+                excludeIndex,
+            );
+            if (plan.kind === 'adjust') {
+                setError(null);
+                setPendingPlan({
+                    block: toBlockInput({ type, name, startTime: startTime!, endTime: endTime!, energyLevel }),
+                    changes: plan.changes,
+                });
+                return;
+            }
+        } else if (validationError) {
             setError(blockDraftErrorMessage(validationError));
             return;
         }
@@ -191,6 +217,12 @@ export function BlockEditorModal({
         } else {
             onAdd?.(block);
         }
+    };
+
+    const confirmFix = () => {
+        if (!pendingPlan) return;
+        onResolveOverlap?.(pendingPlan.block, pendingPlan.changes);
+        handleClose();
     };
 
     return (
@@ -316,6 +348,7 @@ export function BlockEditorModal({
                                                                 onPress={() => {
                                                                     setStartTime(range.startTime);
                                                                     setEndTime(range.endTime);
+                                                                    setPendingPlan(null);
                                                                 }}
                                                                 activeOpacity={0.8}
                                                             >
@@ -373,21 +406,37 @@ export function BlockEditorModal({
 
                             {/* Pinned footer: keeps the actions in a fixed spot instead of shifting with the Energy section, which only shows for containers. */}
                             <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
-                                {error && <Text style={styles.errorText}>{error}</Text>}
-                                <TouchableOpacity style={styles.addButton} onPress={handleSubmit} activeOpacity={0.8}>
-                                    <Text style={styles.addButtonText}>{isEditMode ? saveLabel : 'Add Block'}</Text>
-                                </TouchableOpacity>
-                                {isEditMode && onDelete && (
-                                    <TouchableOpacity
-                                        style={styles.deleteButton}
-                                        onPress={() => {
-                                            onDelete();
-                                            handleClose();
-                                        }}
-                                        activeOpacity={0.8}
-                                    >
-                                        <Text style={styles.deleteButtonText}>Delete block</Text>
-                                    </TouchableOpacity>
+                                {pendingPlan ? (
+                                    <>
+                                        <Text style={styles.confirmText}>
+                                            {describeOverlapPlan(pendingPlan.changes)} Do you want to proceed?
+                                        </Text>
+                                        <TouchableOpacity style={styles.addButton} onPress={confirmFix} activeOpacity={0.8}>
+                                            <Text style={styles.addButtonText}>Proceed</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity style={styles.deleteButton} onPress={() => setPendingPlan(null)} activeOpacity={0.8}>
+                                            <Text style={styles.cancelText}>Cancel</Text>
+                                        </TouchableOpacity>
+                                    </>
+                                ) : (
+                                    <>
+                                        {error && <Text style={styles.errorText}>{error}</Text>}
+                                        <TouchableOpacity style={styles.addButton} onPress={handleSubmit} activeOpacity={0.8}>
+                                            <Text style={styles.addButtonText}>{isEditMode ? saveLabel : 'Add Block'}</Text>
+                                        </TouchableOpacity>
+                                        {isEditMode && onDelete && (
+                                            <TouchableOpacity
+                                                style={styles.deleteButton}
+                                                onPress={() => {
+                                                    onDelete();
+                                                    handleClose();
+                                                }}
+                                                activeOpacity={0.8}
+                                            >
+                                                <Text style={styles.deleteButtonText}>Delete block</Text>
+                                            </TouchableOpacity>
+                                        )}
+                                    </>
                                 )}
                             </View>
 
@@ -492,6 +541,8 @@ const styles = StyleSheet.create({
     addButtonText: { fontSize: 15, fontWeight: '500', color: colors.surface.page, letterSpacing: -0.1 },
     deleteButton: { height: 48, borderRadius: radius.lg, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
     deleteButtonText: { fontSize: 15, fontWeight: '500', color: colors.danger.default, letterSpacing: -0.23 },
+    confirmText: { fontSize: 13, color: colors.text.secondary, textAlign: 'center', lineHeight: 19, marginBottom: spacing.md },
+    cancelText: { fontSize: 15, fontWeight: '500', color: colors.text.secondary, letterSpacing: -0.23 },
 
     pickerOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.scrim },
     pickerSheet: { backgroundColor: '#fff', borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, paddingBottom: 40 },

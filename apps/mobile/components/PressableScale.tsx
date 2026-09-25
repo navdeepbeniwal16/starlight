@@ -18,6 +18,7 @@ export function PressableScale({
     onPress,
     disabled,
     style,
+    containerStyle,
     hitSlop,
     activeScale = 0.96,
     static: isStatic = false,
@@ -26,6 +27,9 @@ export function PressableScale({
     onPress?: () => void;
     disabled?: boolean;
     style?: StyleProp<ViewStyle>;
+    // Applied to the outer Pressable — pass layout (e.g. flex) here, since `style` lands on
+    // an inner view that can't stretch its content-sized parent on its own.
+    containerStyle?: StyleProp<ViewStyle>;
     hitSlop?: PressableProps['hitSlop'];
     activeScale?: number;
     static?: boolean;
@@ -42,6 +46,7 @@ export function PressableScale({
             onPress={onPress}
             disabled={disabled}
             hitSlop={hitSlop}
+            style={containerStyle}
             onPressIn={isStatic ? undefined : () => animate(activeScale)}
             onPressOut={isStatic ? undefined : () => animate(1)}
         >

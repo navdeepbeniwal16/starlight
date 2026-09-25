@@ -49,6 +49,14 @@ describe("validateBlockDraft", () => {
         expect(validateBlockDraft(draft({ startTime: '18:00', endTime: '17:00' }), CTX)).toEqual({ code: 'END_BEFORE_START' });
     });
 
+    it("rejects a block shorter than the minimum duration", () => {
+        expect(validateBlockDraft(draft({ startTime: '17:00', endTime: '17:03' }), CTX)).toEqual({ code: 'TOO_SHORT' });
+    });
+
+    it("accepts a block exactly at the minimum duration", () => {
+        expect(validateBlockDraft(draft({ startTime: '17:00', endTime: '17:05' }), CTX)).toBeNull();
+    });
+
     it("rejects a start before wake time and carries the boundary", () => {
         expect(validateBlockDraft(draft({ startTime: '06:00', endTime: '06:30' }), CTX)).toEqual({ code: 'BEFORE_WAKE', boundary: '07:00' });
     });

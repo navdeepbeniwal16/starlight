@@ -10,6 +10,7 @@ import Animated, {
     FadeInDown,
     FadeOut,
     useSharedValue,
+    useAnimatedRef,
     useAnimatedStyle,
     useAnimatedScrollHandler,
     interpolate,
@@ -18,31 +19,31 @@ import Animated, {
 import { api } from "../lib/api";
 import { colors, radius, spacing, shadow } from "../lib/theme";
 import type { BlockInput } from "../lib/api.types";
-import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, buildTimeline } from "../lib/templateDraft";
-import { formatDuration, durationMins } from "../lib/time";
+import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, blockTypeTotals, POINTS_PER_HOUR, type OverlapChange } from "../lib/templateDraft";
+import { formatDuration, toMins } from "../lib/time";
+import { BLOCK_TYPE_LABELS, BLOCK_TYPE_LEGEND_HINTS } from "../lib/templateBlocks";
 import { useTemplateStore } from "../stores/template.store";
 import { BlockEditorModal } from "../components/BlockEditorModal";
 import { TemplateTimeline } from "../components/TemplateTimeline";
 import { TemplateValidationBanner } from "../components/TemplateValidationBanner";
+import { UndoSnackbar, useUndoableEdit } from "../components/UndoSnackbar";
 import { PressableScale } from "../components/PressableScale";
 
-// What the block modal is open on: editing a block in place, or adding one into a gap.
-type EditorTarget =
-    | { mode: 'edit'; index: number }
-    | { mode: 'add'; startTime: string; endTime: string };
+// What the block editor is open on: an existing block by index, or a new block seeded into a
+// tapped free slot.
+type Editor = { mode: 'edit'; index: number } | { mode: 'create'; startTime: string; endTime: string };
 
 export default function DayTemplateScreen() {
     const router = useRouter();
     const navigation = useNavigation();
     const insets = useSafeAreaInsets();
 
-    const { baseline, draft, blockKeys, hydrate, setWakeSleep, updateBlock, addBlock, removeBlock, commit, reset, clear } = useTemplateStore();
+    const { baseline, draft, blockKeys, hydrate, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap, commit, reset, clear } = useTemplateStore();
+    const { undoLabel, offerUndo, undo } = useUndoableEdit();
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    // The block modal's target: an existing block by index, a gap's range to add into,
-    // or null when closed. A single state keeps the two modes mutually exclusive.
-    const [editor, setEditor] = useState<EditorTarget | null>(null);
+    const [editor, setEditor] = useState<Editor | null>(null);
     const [saving, setSaving] = useState(false);
     const [saveError, setSaveError] = useState<string | null>(null);
     const [savedVisible, setSavedVisible] = useState(false);
@@ -50,9 +51,6 @@ export default function DayTemplateScreen() {
     // Measured so the scroll can reserve exactly the dirty-state footer's height,
     // keeping the last row (sleep) reachable above it rather than hidden behind.
     const [footerHeight, setFooterHeight] = useState(0);
-    // The draft row to flash after an add or edit lands, keyed by the block's start time.
-    // The nonce lets re-touching the same row retrigger the flash.
-    const [flashFor, setFlashFor] = useState<{ key: string; nonce: number }>({ key: '', nonce: 0 });
 
     const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -119,11 +117,22 @@ export default function DayTemplateScreen() {
         setWakeSleep(wake, sleep);
     }
 
+    function handleCreateRange(startTime: string, endTime: string) {
+        setEditor({ mode: 'create', startTime, endTime });
+    }
+
     function handleEditorSubmit(block: BlockInput) {
         if (!editor) return;
         if (editor.mode === 'edit') updateBlock(editor.index, block);
         else addBlock(block);
-        setFlashFor((f) => ({ key: `block-${block.startTime}`, nonce: f.nonce + 1 }));
+        setSaveError(null);
+        setEditor(null);
+    }
+
+    // Confirmed an overlap resolution: apply the neighbour trims/removals and seat the block together.
+    function handleResolveOverlap(block: BlockInput, changes: OverlapChange[]) {
+        if (!editor) return;
+        resolveOverlap({ index: editor.mode === 'edit' ? editor.index : null, block }, changes);
         setSaveError(null);
         setEditor(null);
     }
@@ -164,15 +173,7 @@ export default function DayTemplateScreen() {
         );
     }
 
-    const rows = useMemo(() => buildTimeline(draft), [draft]);
-
-    const totals = useMemo(() => {
-        const sum = (type: BlockInput['type']) =>
-            (draft?.blocks ?? [])
-                .filter((b) => b.type === type)
-                .reduce((mins, b) => mins + durationMins(b.startTime, b.endTime), 0);
-        return { container: sum('CONTAINER'), anchor: sum('ANCHOR') };
-    }, [draft]);
+    const totals = useMemo(() => blockTypeTotals(draft), [draft]);
 
     // Skip the bounds check while wake and sleep are inverted; the window is meaningless then.
     const wakeBeforeSleep = isWakeBeforeSleep(draft);
@@ -182,8 +183,19 @@ export default function DayTemplateScreen() {
     );
     const outOfBoundsIndexes = useMemo(() => new Set(outOfBounds.map((o) => o.index)), [outOfBounds]);
 
+    // A block ending after sleep overflows below the grid via absolute positioning, which RN
+    // leaves out of the scroll's content height — so reserve that overflow as extra bottom padding,
+    // otherwise the tail (and its "after sleep" note) hides under the absolute Save/Cancel footer.
+    const bottomOverflow = useMemo(() => {
+        if (!draft) return 0;
+        const sleep = toMins(draft.sleepTime);
+        const maxEnd = draft.blocks.reduce((m, b) => Math.max(m, toMins(b.endTime)), sleep);
+        return ((maxEnd - sleep) / 60) * POINTS_PER_HOUR;
+    }, [draft]);
+
     const canSave = dirty && valid && !saving;
 
+    const scrollRef = useAnimatedRef<Animated.ScrollView>();
     const scrollY = useSharedValue(0);
     const scrollHandler = useAnimatedScrollHandler((e) => { scrollY.value = e.contentOffset.y; });
     const scrollEdgeStyle = useAnimatedStyle(() => ({
@@ -202,7 +214,7 @@ export default function DayTemplateScreen() {
                         <Ionicons name="close" size={22} color={colors.text.primary} />
                     </TouchableOpacity>
                 </View>
-                <Text style={styles.headerSubtitle}>Add, move, or resize your time blocks.</Text>
+                <Text style={styles.headerSubtitle}>Adjust your wake and sleep times, or reshape the blocks in between.</Text>
             </View>
 
             {loading && (
@@ -224,8 +236,9 @@ export default function DayTemplateScreen() {
                 <Animated.View style={styles.contentFill} entering={entering ? FadeIn.duration(240) : undefined}>
                     <Animated.View pointerEvents="none" style={[styles.scrollEdge, scrollEdgeStyle]} />
                     <Animated.ScrollView
+                        ref={scrollRef}
                         style={styles.scroll}
-                        contentContainerStyle={[styles.content, dirty && { paddingBottom: (footerHeight || 160) + spacing.md }]}
+                        contentContainerStyle={[styles.content, dirty && { paddingBottom: (footerHeight || 160) + spacing.md + bottomOverflow }]}
                         showsVerticalScrollIndicator={false}
                         onScroll={scrollHandler}
                         scrollEventThrottle={16}
@@ -235,31 +248,52 @@ export default function DayTemplateScreen() {
                             entering={entering ? FadeInDown.duration(300) : undefined}
                         >
                             <View style={styles.legendItem}>
-                                <View style={[styles.legendSwatch, styles.legendSwatchContainer]} />
-                                <Text style={styles.legendText}>Container</Text>
+                                <View style={styles.legendLabelGroup}>
+                                    <View style={[styles.legendSwatch, styles.legendSwatchContainer]} />
+                                    <Text style={styles.legendText} numberOfLines={1}>
+                                        {BLOCK_TYPE_LABELS['CONTAINER']} <Text style={styles.legendDesc}>({BLOCK_TYPE_LEGEND_HINTS['CONTAINER']})</Text>
+                                    </Text>
+                                </View>
                                 <Text style={styles.legendTotal}>{formatDuration(totals.container)}</Text>
                             </View>
                             <View style={styles.legendItem}>
-                                <View style={[styles.legendSwatch, styles.legendSwatchAnchor]} />
-                                <Text style={styles.legendText}>Anchor</Text>
+                                <View style={styles.legendLabelGroup}>
+                                    <View style={[styles.legendSwatch, styles.legendSwatchAnchor]} />
+                                    <Text style={styles.legendText} numberOfLines={1}>
+                                        {BLOCK_TYPE_LABELS['ANCHOR']} <Text style={styles.legendDesc}>({BLOCK_TYPE_LEGEND_HINTS['ANCHOR']})</Text>
+                                    </Text>
+                                </View>
                                 <Text style={styles.legendTotal}>{formatDuration(totals.anchor)}</Text>
                             </View>
                         </Animated.View>
 
+                        <Text style={styles.hintStrip} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                            <Text style={styles.hintKey}>Tap space</Text>
+                            {' add · '}
+                            <Text style={styles.hintKey}>Tap</Text>
+                            {' edit · '}
+                            <Text style={styles.hintKey}>Hold edge</Text>
+                            {' resize · '}
+                            <Text style={styles.hintKey}>Hold</Text>
+                            {' move'}
+                        </Text>
+
                         <TemplateValidationBanner draft={draft} />
 
                         <TemplateTimeline
-                            rows={rows}
+                            style={styles.timeline}
+                            blocks={draft.blocks}
                             wakeTime={draft.wakeTime}
                             sleepTime={draft.sleepTime}
                             blockKeys={blockKeys}
                             entering={entering}
-                            flashFor={flashFor}
                             outOfBoundsIndexes={outOfBoundsIndexes}
+                            scrollRef={scrollRef}
                             onWakeChange={(w) => handleWakeSleep(w, draft.sleepTime)}
                             onSleepChange={(s) => handleWakeSleep(draft.wakeTime, s)}
                             onEditBlock={(index) => setEditor({ mode: 'edit', index })}
-                            onAddInGap={(startTime, endTime) => setEditor({ mode: 'add', startTime, endTime })}
+                            onCreateRange={handleCreateRange}
+                            onLiveEdit={(snapshot, label) => { setSaveError(null); offerUndo(snapshot, label); }}
                         />
                     </Animated.ScrollView>
 
@@ -305,6 +339,8 @@ export default function DayTemplateScreen() {
                 </Animated.View>
             )}
 
+            {undoLabel && <UndoSnackbar label={undoLabel} onUndo={undo} bottom={(footerHeight || 140) + spacing.sm} />}
+
             <BlockEditorModal
                 visible={editor !== null}
                 onClose={() => setEditor(null)}
@@ -313,13 +349,14 @@ export default function DayTemplateScreen() {
                 initialValues={
                     editor?.mode === 'edit'
                         ? draft?.blocks[editor.index]
-                        : editor?.mode === 'add'
+                        : editor?.mode === 'create'
                             ? { startTime: editor.startTime, endTime: editor.endTime }
                             : undefined
                 }
                 onSave={handleEditorSubmit}
                 onAdd={handleEditorSubmit}
                 onDelete={handleBlockDelete}
+                onResolveOverlap={handleResolveOverlap}
                 saveLabel="Done"
                 wakeTime={draft?.wakeTime ?? null}
                 sleepTime={draft?.sleepTime ?? null}
@@ -358,14 +395,19 @@ const styles = StyleSheet.create({
     contentFill: { flex: 1 },
     scroll: { flex: 1 },
     content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
+    timeline: { paddingTop: spacing.lg, paddingBottom: spacing.lg },
 
-    legend: { flexDirection: 'row', gap: spacing.lg, paddingHorizontal: spacing.xs, marginTop: spacing.md },
-    legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    legend: { gap: spacing.sm, backgroundColor: colors.surface.sunken, borderRadius: radius.md, paddingVertical: 10, paddingHorizontal: 12, marginTop: spacing.md },
+    legendItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+    legendLabelGroup: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
     legendSwatch: { width: 12, height: 12, borderRadius: 3, backgroundColor: colors.surface.block },
     legendSwatchContainer: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.16)', borderStyle: 'dashed' },
     legendSwatchAnchor: { borderWidth: 1, borderColor: colors.border.hairline },
-    legendText: { fontSize: 12, color: colors.text.secondary, letterSpacing: -0.1 },
+    legendText: { fontSize: 12, fontWeight: '600', color: colors.text.primary, letterSpacing: -0.1, flexShrink: 1 },
     legendTotal: { fontSize: 12, color: colors.text.muted, letterSpacing: -0.1, fontVariant: ['tabular-nums'] },
+    legendDesc: { fontWeight: '400', fontStyle: 'italic', color: colors.text.secondary },
+    hintStrip: { fontSize: 12, color: colors.text.muted, letterSpacing: -0.2, textAlign: 'center' },
+    hintKey: { fontWeight: '600', color: colors.text.primary },
 
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: spacing.lg },
     errorText: { fontSize: 14, color: colors.text.secondary, textAlign: 'center' },

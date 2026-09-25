@@ -1,23 +1,23 @@
 import { useRouter } from 'expo-router';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image } from 'react-native';
-import { useAuthStore } from '../../stores/auth.store';
+import { useSignUp } from '@clerk/expo';
 import { useRef, useState } from 'react';
-import { api } from '../../lib/api';
+import { runClerkPasswordFlow } from '../../lib/clerkAuth';
 import { KeyboardScreen } from '../../components/KeyboardScreen';
+import { OAuthButtons } from '../../components/OAuthButtons';
+import { PasswordInput } from '../../components/PasswordInput';
 import { colors, radius, spacing } from '../../lib/theme';
 
 export default function SignupScreen() {
     const router = useRouter();
-    const setAuth = useAuthStore((state) => state.setAuth);
+    const { signUp } = useSignUp();
 
     const emailRef = useRef<TextInput>(null);
     const passwordRef = useRef<TextInput>(null);
-    const confirmRef = useRef<TextInput>(null);
 
     const [fullName, setFullName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
 
@@ -26,13 +26,8 @@ export default function SignupScreen() {
 
         const trimmedName = fullName.trim();
         const trimmedEmail = email.trim();
-        if(!trimmedName || !trimmedEmail || !password || !confirmPassword) {
+        if(!trimmedName || !trimmedEmail || !password) {
             setError('All fields are required');
-            return;
-        }
-
-        if(password !== confirmPassword) {
-            setError('Passwords do not match');
             return;
         }
 
@@ -46,16 +41,20 @@ export default function SignupScreen() {
         }
 
         setIsLoading(true);
-        const result = await api.signup({email: trimmedEmail, password, firstName, lastName});
-        setIsLoading(false);
-
-        if(!result.ok) {
-            setError(result.error);
-            return;
+        try {
+            // Instant sign-up: the dev instance requires no email verification, so a
+            // successful password sign-up completes and finalizes straight away. A
+            // brand-new account has no onboardedAt, so the gate lands on onboarding.
+            const message = await runClerkPasswordFlow({
+                attempt: () => signUp.password({ emailAddress: trimmedEmail, password, firstName, lastName }),
+                isComplete: () => signUp.status === 'complete',
+                finalize: () => signUp.finalize(),
+                incompleteMessage: 'Could not complete sign up. Please try again.',
+            });
+            if (message) setError(message);
+        } finally {
+            setIsLoading(false);
         }
-
-        await setAuth(result.data.user, result.data.token);
-        router.replace('/(onboarding)');
     }
 
     return (
@@ -67,6 +66,8 @@ export default function SignupScreen() {
                     <Text style={styles.tagline}>Live each day with intention</Text>
                 </View>
             </View>
+
+            <OAuthButtons onError={setError} />
 
             <View style={styles.form}>
                 <View style={styles.fieldContainer}>
@@ -102,30 +103,12 @@ export default function SignupScreen() {
 
                 <View style={styles.fieldContainer}>
                     <Text style={styles.label}>Password</Text>
-                    <TextInput
+                    <PasswordInput
                         ref={passwordRef}
                         value={password}
                         onChangeText={setPassword}
                         style={styles.input}
                         placeholder="Enter your password"
-                        placeholderTextColor={colors.text.muted}
-                        secureTextEntry
-                        returnKeyType="next"
-                        onSubmitEditing={() => confirmRef.current?.focus()}
-                        blurOnSubmit={false}
-                    />
-                </View>
-
-                <View style={styles.fieldContainer}>
-                    <Text style={styles.label}>Confirm Password</Text>
-                    <TextInput
-                        ref={confirmRef}
-                        value={confirmPassword}
-                        onChangeText={setConfirmPassword}
-                        style={styles.input}
-                        placeholder="Re-enter your password"
-                        placeholderTextColor={colors.text.muted}
-                        secureTextEntry
                         returnKeyType="done"
                         onSubmitEditing={handleSignup}
                     />
@@ -161,15 +144,16 @@ const styles = StyleSheet.create({
         flexGrow: 1,
         justifyContent: 'center',
         paddingHorizontal: 24,
-        gap: 44,
+        paddingVertical: 32,
+        gap: 28,
     },
     header: {
         alignItems: 'center',
         gap: spacing.xs,
     },
     logo: {
-        width: 96,
-        height: 96,
+        width: 64,
+        height: 64,
     },
     wordmark: {
         alignItems: 'center',
@@ -190,7 +174,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
     },
     form: {
-        gap: spacing.xl,
+        gap: spacing.lg,
     },
     fieldContainer: {
         gap: spacing.sm,

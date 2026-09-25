@@ -50,6 +50,13 @@ export function formatTime(hhMm: string): string {
     return `${time} ${period}`;
 }
 
+// Compact label for a whole-hour ruler tick, e.g. "8 AM", "12 PM".
+export function formatHourLabel(hhMm: string): string {
+    const [h] = hhMm.split(':').map(Number);
+    const period = h >= 12 ? 'PM' : 'AM';
+    return `${h % 12 || 12} ${period}`;
+}
+
 export function formatTimeRange(startHhMm: string, endHhMm: string): string {
     const start = parseDisplayTime(startHhMm);
     const end = parseDisplayTime(endHhMm);

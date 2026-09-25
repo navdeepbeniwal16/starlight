@@ -2,10 +2,11 @@ import "dotenv/config";
 import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
 import helmet from "helmet";
+import { clerkMiddleware } from "@clerk/express";
 import pinoHttp from "pino-http";
 import logger from "./lib/logger";
 import healthRouter from "./routes/health";
-import authRouter from "./routes/auth.route";
+import meRouter from "./routes/me.route";
 import appConfigRouter from "./routes/app";
 import dayTemplateRouter from "./routes/dayTemplate.route";
 import dayPlanRouter from "./routes/dayPlan.route";
@@ -16,6 +17,7 @@ const app = express();
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
+app.use(clerkMiddleware());
 
 app.use(
   pinoHttp({
@@ -53,7 +55,7 @@ app.use((_req, res, next) => {
 });
 
 app.use("/health", healthRouter);
-app.use("/auth", authRouter);
+app.use("/me", meRouter);
 app.use("/app", appConfigRouter);
 app.use("/day-template", dayTemplateRouter);
 app.use("/day-plan", dayPlanRouter);
