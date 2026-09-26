@@ -30,6 +30,7 @@ export default function ProjectFormModal({ visible, mode, project, onClose, onSa
 
     const [name, setName] = useState('');
     const [goal, setGoal] = useState('');
+    const [notes, setNotes] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [nameError, setNameError] = useState<string | null>(null);
@@ -41,6 +42,7 @@ export default function ProjectFormModal({ visible, mode, project, onClose, onSa
         if (!visible) return;
         setName(project?.name ?? '');
         setGoal(project?.goal ?? '');
+        setNotes(project?.notes ?? '');
         setSubmitting(false);
         setDeleting(false);
         setNameError(null);
@@ -62,9 +64,16 @@ export default function ProjectFormModal({ visible, mode, project, onClose, onSa
         setNameError(null);
 
         const trimmedGoal = goal.trim();
+        const trimmedNotes = notes.trim();
+        // On edit, send explicit null for empty fields so clearing persists; on
+        // create, omit them so the payload stays minimal.
         const result = isEdit && project
-            ? await api.updateProject(project.id, { name: trimmedName, goal: trimmedGoal || null })
-            : await api.createProject({ name: trimmedName, ...(trimmedGoal && { goal: trimmedGoal }) });
+            ? await api.updateProject(project.id, { name: trimmedName, goal: trimmedGoal || null, notes: trimmedNotes || null })
+            : await api.createProject({
+                name: trimmedName,
+                ...(trimmedGoal && { goal: trimmedGoal }),
+                ...(trimmedNotes && { notes: trimmedNotes }),
+            });
 
         setSubmitting(false);
         if (result.ok) {
@@ -129,14 +138,27 @@ export default function ProjectFormModal({ visible, mode, project, onClose, onSa
                         />
                         {nameError && <Text style={s.inlineError}>{nameError}</Text>}
 
-                        <View style={s.goalCard}>
-                            <Text style={s.goalLabel}>Goal</Text>
+                        <View style={s.fieldCard}>
+                            <Text style={s.fieldLabel}>Goal</Text>
                             <TextInput
-                                style={s.goalInput}
+                                style={s.fieldInput}
                                 placeholder="What is this project working towards? (optional)"
                                 placeholderTextColor={colors.text.muted}
                                 value={goal}
                                 onChangeText={setGoal}
+                                multiline
+                                textAlignVertical="top"
+                            />
+                        </View>
+
+                        <View style={s.fieldCard}>
+                            <Text style={s.fieldLabel}>Notes</Text>
+                            <TextInput
+                                style={s.fieldInput}
+                                placeholder="Standing context for the planner — links, constraints, reminders (optional)"
+                                placeholderTextColor={colors.text.muted}
+                                value={notes}
+                                onChangeText={setNotes}
                                 multiline
                                 textAlignVertical="top"
                             />
@@ -190,13 +212,13 @@ const s = StyleSheet.create({
     nameInputError: { borderBottomWidth: 1, borderBottomColor: colors.danger.border },
     inlineError: { fontSize: 12, color: colors.danger.default, marginTop: -spacing.lg, marginBottom: spacing.md },
 
-    goalCard: {
+    fieldCard: {
         backgroundColor: colors.surface.raised, borderWidth: 1,
         borderColor: colors.border.hairline, borderRadius: radius.lg,
         paddingHorizontal: spacing.lg, paddingVertical: spacing.md, marginBottom: spacing.lg,
     },
-    goalLabel: { fontSize: 14, fontWeight: '500', color: colors.text.secondary, letterSpacing: -0.15, marginBottom: spacing.sm },
-    goalInput: { fontSize: 14, color: colors.text.primary, minHeight: 72, lineHeight: 20, padding: 0 },
+    fieldLabel: { fontSize: 14, fontWeight: '500', color: colors.text.secondary, letterSpacing: -0.15, marginBottom: spacing.sm },
+    fieldInput: { fontSize: 14, color: colors.text.primary, minHeight: 72, lineHeight: 20, padding: 0 },
 
     submitError: { fontSize: 12, color: colors.danger.default, textAlign: 'center', marginBottom: spacing.sm },
 

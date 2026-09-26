@@ -23,7 +23,20 @@ const backlogTaskSelect = {
     deadline: true,
     progress: true,
     estimatedMins: true,
+    projectId: true,
+    project: { select: { name: true } },
 } as const;
+
+function toBacklogTask<T extends { project: { name: string } | null }>(
+    row: T,
+): Omit<T, 'project'> & { projectName: string | null } {
+    const { project, ...rest } = row;
+    return { ...rest, projectName: project?.name ?? null };
+}
+
+// Detail carries the same project link as the backlog projections so the edit
+// screen's picker can seed from and reflect the persisted assignment.
+const taskDetailSelect = { ...backlogTaskSelect, notes: true, effort: true } as const;
 
 const PRIORITY_ORDER: Record<Priority, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
 
@@ -95,17 +108,18 @@ export async function getBacklog(userId: string, date: string, utcOffsetMins?: n
         .sort((a, b) =>
             a.plannedBlock!.startTime.localeCompare(b.plannedBlock!.startTime)
             || (a.blockOrder ?? 0) - (b.blockOrder ?? 0))
-        .map(({ plannedBlock, blockOrder: _blockOrder, ...task }) => ({
+        .map(({ plannedBlock, blockOrder: _blockOrder, project, ...task }) => ({
             ...task,
+            projectName: project?.name ?? null,
             blockStartTime: plannedBlock!.startTime,
             blockName: plannedBlock!.name,
         }));
 
     return {
-        carriedOver: carriedOver.sort(byDeadlineThenPriority),
+        carriedOver: carriedOver.map(toBacklogTask).sort(byDeadlineThenPriority),
         scheduled,
-        remaining: remaining.sort(byDeadlineThenPriority),
-        doneToday: doneToday.sort(byDeadlineThenPriority),
+        remaining: remaining.map(toBacklogTask).sort(byDeadlineThenPriority),
+        doneToday: doneToday.map(toBacklogTask).sort(byDeadlineThenPriority),
     };
 }
 
@@ -128,7 +142,7 @@ export async function getAllTasks(
     });
 
     const hasMore = rows.length > limit;
-    const items = hasMore ? rows.slice(0, limit) : rows;
+    const items = (hasMore ? rows.slice(0, limit) : rows).map(toBacklogTask);
     return { items, nextCursor: hasMore ? items[items.length - 1]!.id : null };
 }
 
@@ -183,20 +197,11 @@ export async function createTask(userId: string, input: CreateTaskInput): Promis
 }
 
 export async function getTaskById(userId: string, taskId: string): Promise<TaskDetail | null> {
-    return prisma.task.findFirst({
+    const row = await prisma.task.findFirst({
         where: { id: taskId, userId },
-        select: {
-            id: true,
-            title: true,
-            status: true,
-            priority: true,
-            deadline: true,
-            progress: true,
-            estimatedMins: true,
-            notes: true,
-            effort: true,
-        },
+        select: taskDetailSelect,
     });
+    return row ? toBacklogTask(row) : null;
 }
 
 export async function deleteTask(userId: string, taskId: string): Promise<void> {
@@ -243,19 +248,10 @@ export async function updateTask(userId: string, taskId: string, input: UpdateTa
         }
     }
 
-    return prisma.task.update({
+    const row = await prisma.task.update({
         where: { id: taskId },
         data,
-        select: {
-            id: true,
-            title: true,
-            status: true,
-            priority: true,
-            deadline: true,
-            progress: true,
-            estimatedMins: true,
-            notes: true,
-            effort: true,
-        },
+        select: taskDetailSelect,
     });
+    return toBacklogTask(row);
 }

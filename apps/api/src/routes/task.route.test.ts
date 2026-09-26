@@ -82,11 +82,40 @@ describe("task routes", () => {
         );
     });
 
+    it("GET /tasks/backlog threads projectId + projectName through the buckets", async () => {
+        const linked = await prisma.task.create({
+            data: { userId, title: "Linked", estimatedMins: 20, projectId: ownedProjectId },
+        });
+
+        const res = await request(app).get("/tasks/backlog").set(auth());
+        expect(res.status).toBe(200);
+
+        const remaining = res.body.data.remaining as Array<{ id: string; projectId: string | null; projectName: string | null }>;
+        const withProject = remaining.find(t => t.id === linked.id);
+        expect(withProject).toMatchObject({ projectId: ownedProjectId, projectName: "Owned" });
+
+        const unassigned = remaining.find(t => t.id === taskId);
+        expect(unassigned).toMatchObject({ projectId: null, projectName: null });
+
+        await prisma.task.delete({ where: { id: linked.id } });
+    });
+
     it("GET /tasks/:id returns a single task", async () => {
         const res = await request(app).get(`/tasks/${taskId}`).set(auth());
 
         expect(res.status).toBe(200);
         expect(res.body.data.id).toBe(taskId);
+    });
+
+    it("GET /tasks/:id carries the project link so the edit picker can seed from it", async () => {
+        const task = await prisma.task.create({
+            data: { userId, title: "Detail linked", estimatedMins: 15, projectId: ownedProjectId },
+        });
+
+        const res = await request(app).get(`/tasks/${task.id}`).set(auth());
+
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ projectId: ownedProjectId, projectName: "Owned" });
     });
 
     it("rejects an unauthenticated request", async () => {
@@ -122,6 +151,7 @@ describe("task routes", () => {
             const res = await request(app).patch(`/tasks/${task.id}`).set(auth()).send({ projectId: ownedProjectId });
 
             expect(res.status).toBe(200);
+            expect(res.body.data).toMatchObject({ projectId: ownedProjectId, projectName: "Owned" });
             const after = await prisma.task.findUnique({ where: { id: task.id } });
             expect(after?.projectId).toBe(ownedProjectId);
         });
@@ -132,6 +162,7 @@ describe("task routes", () => {
             const res = await request(app).patch(`/tasks/${task.id}`).set(auth()).send({ projectId: null });
 
             expect(res.status).toBe(200);
+            expect(res.body.data).toMatchObject({ projectId: null, projectName: null });
             const after = await prisma.task.findUnique({ where: { id: task.id } });
             expect(after?.projectId).toBeNull();
         });

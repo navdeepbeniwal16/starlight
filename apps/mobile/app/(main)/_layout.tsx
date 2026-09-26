@@ -51,19 +51,6 @@ export default function MainLayout() {
                     ),
                 }}
             />
-            {/* PROTOTYPE (proto/sta-16-backlog-projects-merge): Projects is merged into
-                the Backlog tab, so its standalone tab is hidden. `href: null` keeps the
-                route valid while removing it from the bar. Restore this block to undo. */}
-            <Tabs.Screen
-                name="projects"
-                options={{
-                    href: null,
-                    title: 'Projects',
-                    tabBarIcon: ({ color, focused }) => (
-                        <Ionicons name={focused ? 'folder' : 'folder-outline'} size={24} color={color} />
-                    ),
-                }}
-            />
             <Tabs.Screen
                 name="settings"
                 options={{
