@@ -9,6 +9,8 @@ export type BacklogTask = {
     deadline: Date | null;
     progress: number | null;
     estimatedMins: number;
+    projectId?: string | null;
+    projectName?: string | null;
 };
 
 export type ScheduledTask = BacklogTask & {
@@ -39,6 +41,8 @@ export type TaskDetail = {
     estimatedMins: number;
     notes: string | null;
     effort: EnergyLevel | null;
+    projectId?: string | null;
+    projectName?: string | null;
 };
 
 export type CreateTaskInput = {
@@ -49,6 +53,7 @@ export type CreateTaskInput = {
     deadline?: string;   // ISO datetime string
     progress?: number;   // 0–100
     notes?: string;
+    projectId?: string;
 };
 
 export type UpdateTaskInput = {
@@ -59,4 +64,5 @@ export type UpdateTaskInput = {
     effort?: EnergyLevel | null;
     deadline?: string | null;  // null = clear deadline
     progress?: number;
+    projectId?: string | null;  // null = detach to Todos
 };

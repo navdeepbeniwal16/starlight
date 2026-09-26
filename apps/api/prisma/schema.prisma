@@ -1,9 +1,11 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
+  provider   = "postgresql"
+  extensions = [citext]
 }
 
 model User {
@@ -15,6 +17,7 @@ model User {
   dayTemplate  DayTemplate?
   dayPlans     DayPlan[]
   tasks        Task[]
+  projects     Project[]
 }
 
 model DayTemplate {
@@ -96,8 +99,25 @@ model Task {
   progress       Int?
   notes          String?
   effort         EnergyLevel?
+  projectId      String?
+  project        Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
+}
+
+model Project {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String   @db.Citext
+  goal      String?
+  notes     String?
+  isInFocus Boolean  @default(false)
+  tasks     Task[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, name])
 }
 
 enum DayPlanStatus {

@@ -4,6 +4,7 @@ import app from "../app";
 import { prisma } from "../lib/prisma";
 
 const TEST_CLERK_ID = "user_test_task_route";
+const OTHER_CLERK_ID = "user_test_task_route_other";
 
 let mockUserId = "";
 jest.mock("../middlewares/auth.middleware", () => ({
@@ -28,20 +29,28 @@ async function seedUser(clerkUserId: string) {
 
 describe("task routes", () => {
     let userId: string;
+    let otherUserId: string;
     let taskId: string;
+    let ownedProjectId: string;
+    let foreignProjectId: string;
 
     beforeAll(async () => {
-        const user = await seedUser(TEST_CLERK_ID);
-        userId = user.id;
+        userId = (await seedUser(TEST_CLERK_ID)).id;
+        otherUserId = (await seedUser(OTHER_CLERK_ID)).id;
         mockUserId = userId;
-        await prisma.task.deleteMany({ where: { userId } });
-        const task = await prisma.task.create({ data: { userId, title: "Route task", estimatedMins: 30 } });
-        taskId = task.id;
+
+        await prisma.task.deleteMany({ where: { userId: { in: [userId, otherUserId] } } });
+        await prisma.project.deleteMany({ where: { userId: { in: [userId, otherUserId] } } });
+
+        taskId = (await prisma.task.create({ data: { userId, title: "Route task", estimatedMins: 30 } })).id;
+        ownedProjectId = (await prisma.project.create({ data: { userId, name: "Owned" } })).id;
+        foreignProjectId = (await prisma.project.create({ data: { userId: otherUserId, name: "Foreign" } })).id;
     });
 
     afterAll(async () => {
-        await prisma.task.deleteMany({ where: { userId } });
-        await prisma.user.delete({ where: { id: userId } });
+        await prisma.task.deleteMany({ where: { userId: { in: [userId, otherUserId] } } });
+        await prisma.project.deleteMany({ where: { userId: { in: [userId, otherUserId] } } });
+        await prisma.user.deleteMany({ where: { id: { in: [userId, otherUserId] } } });
         await prisma.$disconnect();
     });
 
@@ -73,6 +82,24 @@ describe("task routes", () => {
         );
     });
 
+    it("GET /tasks/backlog threads projectId + projectName through the buckets", async () => {
+        const linked = await prisma.task.create({
+            data: { userId, title: "Linked", estimatedMins: 20, projectId: ownedProjectId },
+        });
+
+        const res = await request(app).get("/tasks/backlog").set(auth());
+        expect(res.status).toBe(200);
+
+        const remaining = res.body.data.remaining as Array<{ id: string; projectId: string | null; projectName: string | null }>;
+        const withProject = remaining.find(t => t.id === linked.id);
+        expect(withProject).toMatchObject({ projectId: ownedProjectId, projectName: "Owned" });
+
+        const unassigned = remaining.find(t => t.id === taskId);
+        expect(unassigned).toMatchObject({ projectId: null, projectName: null });
+
+        await prisma.task.delete({ where: { id: linked.id } });
+    });
+
     it("GET /tasks/:id returns a single task", async () => {
         const res = await request(app).get(`/tasks/${taskId}`).set(auth());
 
@@ -80,9 +107,72 @@ describe("task routes", () => {
         expect(res.body.data.id).toBe(taskId);
     });
 
+    it("GET /tasks/:id carries the project link so the edit picker can seed from it", async () => {
+        const task = await prisma.task.create({
+            data: { userId, title: "Detail linked", estimatedMins: 15, projectId: ownedProjectId },
+        });
+
+        const res = await request(app).get(`/tasks/${task.id}`).set(auth());
+
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ projectId: ownedProjectId, projectName: "Owned" });
+    });
+
     it("rejects an unauthenticated request", async () => {
         const res = await request(app).get("/tasks");
 
         expect(res.status).toBe(401);
+    });
+
+    describe("projectId assignment", () => {
+        it("POST /tasks attaches an owned projectId", async () => {
+            const res = await request(app)
+                .post("/tasks")
+                .set(auth())
+                .send({ title: "With project", estimatedMins: 15, projectId: ownedProjectId });
+
+            expect(res.status).toBe(201);
+            const created = await prisma.task.findUnique({ where: { id: res.body.data.id } });
+            expect(created?.projectId).toBe(ownedProjectId);
+        });
+
+        it("POST /tasks with another user's projectId returns 404", async () => {
+            const res = await request(app)
+                .post("/tasks")
+                .set(auth())
+                .send({ title: "IDOR", estimatedMins: 15, projectId: foreignProjectId });
+
+            expect(res.status).toBe(404);
+        });
+
+        it("PATCH /tasks/:id attaches an owned projectId", async () => {
+            const task = await prisma.task.create({ data: { userId, title: "Attach", estimatedMins: 15 } });
+
+            const res = await request(app).patch(`/tasks/${task.id}`).set(auth()).send({ projectId: ownedProjectId });
+
+            expect(res.status).toBe(200);
+            expect(res.body.data).toMatchObject({ projectId: ownedProjectId, projectName: "Owned" });
+            const after = await prisma.task.findUnique({ where: { id: task.id } });
+            expect(after?.projectId).toBe(ownedProjectId);
+        });
+
+        it("PATCH /tasks/:id with projectId null detaches to Todos", async () => {
+            const task = await prisma.task.create({ data: { userId, title: "Detach", estimatedMins: 15, projectId: ownedProjectId } });
+
+            const res = await request(app).patch(`/tasks/${task.id}`).set(auth()).send({ projectId: null });
+
+            expect(res.status).toBe(200);
+            expect(res.body.data).toMatchObject({ projectId: null, projectName: null });
+            const after = await prisma.task.findUnique({ where: { id: task.id } });
+            expect(after?.projectId).toBeNull();
+        });
+
+        it("PATCH /tasks/:id with another user's projectId returns 404", async () => {
+            const task = await prisma.task.create({ data: { userId, title: "IDOR patch", estimatedMins: 15 } });
+
+            const res = await request(app).patch(`/tasks/${task.id}`).set(auth()).send({ projectId: foreignProjectId });
+
+            expect(res.status).toBe(404);
+        });
     });
 });

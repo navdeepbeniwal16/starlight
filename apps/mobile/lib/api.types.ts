@@ -124,6 +124,8 @@ export type BacklogTask = {
     deadline: string | null;  // ISO datetime string (YYYY-MM-DDT00:00:00.000Z)
     progress: number | null;  // 0–100
     estimatedMins: number;
+    projectId?: string | null;
+    projectName?: string | null;
 };
 
 export type ScheduledTask = BacklogTask & {
@@ -156,6 +158,7 @@ export type CreateTaskInput = {
     deadline?: string;   // ISO datetime string
     progress?: number;   // 0–100
     notes?: string;
+    projectId?: string;  // omitted = Todos (unassigned)
 };
 
 export type CreateTaskResponse = ApiResult<BacklogTask>;
@@ -182,5 +185,30 @@ export type UpdateTaskInput = {
     effort?: EnergyLevel | null;
     deadline?: string | null;
     progress?: number;
+    projectId?: string | null;  // null clears to Todos; undefined leaves it unchanged
 };
 export type UpdateTaskResponse = ApiResult<TaskDetail>;
+
+export type Project = {
+    id: string;
+    name: string;
+    goal: string | null;
+    notes: string | null;
+    isInFocus: boolean;
+};
+
+export type GetProjectsResponse = ApiResult<Project[]>;
+export type ProjectResponse = ApiResult<Project>;
+
+export type CreateProjectInput = {
+    name: string;
+    goal?: string;
+    notes?: string;
+};
+
+// null clears the field; undefined leaves it unchanged.
+export type UpdateProjectInput = {
+    name?: string;
+    goal?: string | null;
+    notes?: string | null;
+};

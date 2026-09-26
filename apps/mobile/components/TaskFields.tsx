@@ -8,7 +8,8 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import type { EnergyLevel } from "../lib/api.types";
+import type { EnergyLevel, Project } from "../lib/api.types";
+import { projectPickerOptions, selectedProjectLabel } from "../lib/projectPicker";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -255,10 +256,10 @@ export function ProgressSlider({ value, onChange, onRelease }: {
 
 // ─── FieldRow ─────────────────────────────────────────────────────────────────
 
-export function FieldRow({ label, subLabel, value, isOpen, onPress, hasError }: {
-    label: string; subLabel?: string; value: string; isOpen: boolean; onPress: () => void; hasError?: boolean;
+export function FieldRow({ label, subLabel, value, isOpen, onPress, hasError, unset }: {
+    label: string; subLabel?: string; value: string; isOpen: boolean; onPress: () => void; hasError?: boolean; unset?: boolean;
 }) {
-    const isSet = value !== 'Not set';
+    const isSet = !unset && value !== 'Not set';
     return (
         <TouchableOpacity style={tf.fieldRow} onPress={onPress} activeOpacity={0.7}>
             <View>
@@ -270,6 +271,45 @@ export function FieldRow({ label, subLabel, value, isOpen, onPress, hasError }: 
                 <Ionicons name={isOpen ? 'chevron-down' : 'chevron-forward'} size={13} color="rgba(122,115,106,0.4)" />
             </View>
         </TouchableOpacity>
+    );
+}
+
+// ─── ProjectField ─────────────────────────────────────────────────────────────
+
+export function ProjectField({ projects, selectedId, isOpen, onToggle, onSelect }: {
+    projects: Project[];
+    selectedId: string | null;
+    isOpen: boolean;
+    onToggle: () => void;
+    onSelect: (id: string | null) => void;
+}) {
+    const assigned = projects.some(p => p.id === selectedId);
+    return (
+        <>
+            <FieldRow
+                label="Project"
+                value={selectedProjectLabel(projects, selectedId)}
+                unset={!assigned}
+                isOpen={isOpen}
+                onPress={onToggle}
+            />
+            {isOpen && (
+                <View style={tf.pills}>
+                    {projectPickerOptions(projects).map(o => {
+                        const on = o.id === selectedId;
+                        return (
+                            <TouchableOpacity
+                                key={o.id ?? '__none__'}
+                                style={[tf.pill, on && tf.pillOn]}
+                                onPress={() => onSelect(o.id)}
+                            >
+                                <Text style={[tf.pillTxt, on && tf.pillTxtOn]}>{o.label}</Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </View>
+            )}
+        </>
     );
 }
 
