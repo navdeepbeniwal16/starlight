@@ -155,7 +155,7 @@ export default function ProjectFormModal({ visible, mode, project, onClose, onSa
                             <Text style={s.fieldLabel}>Notes</Text>
                             <TextInput
                                 style={s.fieldInput}
-                                placeholder="Standing context for the planner — links, constraints, reminders (optional)"
+                                placeholder="What else should the planner keep in mind when scheduling tasks inside this project? (optional)"
                                 placeholderTextColor={colors.text.muted}
                                 value={notes}
                                 onChangeText={setNotes}

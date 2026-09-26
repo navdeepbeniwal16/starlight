@@ -52,10 +52,10 @@ const SECTION_LAYOUT = LinearTransition.duration(260).easing(EASE.factory());
 type SectionKey = keyof BacklogBuckets;
 
 const SECTIONS: Array<{ key: SectionKey; label: string; description: string; hint: string; defaultOpen: boolean }> = [
-    { key: 'carriedOver', label: 'Carried over',    description: 'Unfinished tasks carried over from your previous plan', hint: 'Nothing carried over',  defaultOpen: true },
-    { key: 'scheduled',   label: 'Scheduled today', description: "Tasks planned into today's blocks",                     hint: 'No plan for today yet', defaultOpen: true },
-    { key: 'remaining',   label: 'Remaining',       description: 'Backlog tasks not yet scheduled',                       hint: 'Backlog is clear',      defaultOpen: false },
-    { key: 'doneToday',   label: 'Done today',      description: "Tasks you've completed today",                          hint: 'Nothing completed yet', defaultOpen: false },
+    { key: 'carriedOver', label: 'Carried over', description: 'Unfinished tasks carried over from your previous plan', hint: 'Nothing carried over', defaultOpen: true },
+    { key: 'scheduled', label: 'Scheduled today', description: "Tasks planned into today's blocks", hint: 'No plan for today yet', defaultOpen: true },
+    { key: 'remaining', label: 'Remaining', description: 'Backlog tasks not yet scheduled', hint: 'Backlog is clear', defaultOpen: false },
+    { key: 'doneToday', label: 'Done today', description: "Tasks you've completed today", hint: 'Nothing completed yet', defaultOpen: false },
 ];
 
 const DEFAULT_OPEN = Object.fromEntries(
@@ -66,7 +66,7 @@ const TODOS_KEY = '__todos__';
 
 function formatDeadline(isoString: string): string {
     const d = new Date(isoString);
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     // Deadlines are stored at UTC midnight; read in UTC so the date doesn't shift a day back west of UTC.
     return `Due ${months[d.getUTCMonth()]} ${d.getUTCDate()}`;
 }
@@ -194,27 +194,27 @@ function TaskCard({ task, scheduledMeta, projectName, index, justArrived, onPres
             exiting={FadeOut.duration(120)}
             layout={SECTION_LAYOUT}
         >
-          <Animated.View style={popStyle}>
-            <ScaleOnPress onPress={onPress} style={[styles.taskCard, isDone && styles.taskCardDone]}>
-                <Animated.View pointerEvents="none" style={[styles.arrivalWash, washStyle]} />
-                <DoneToggle task={task} onToggled={onToggled} />
-                <View style={styles.taskCardContent}>
-                    <Text style={[styles.taskTitle, isDone && styles.taskTitleDone]} numberOfLines={2}>
-                        {task.title}
-                    </Text>
-                    <View style={styles.badgeRow}>
-                        <StatusBadge status={task.status} />
-                        {projectName ? <ProjectChip name={projectName} /> : null}
-                        {scheduledMeta ? (
-                            <Text style={styles.metaText}>{scheduledMeta}</Text>
-                        ) : task.deadline && (
-                            <Text style={styles.metaText}>{formatDeadline(task.deadline)}</Text>
-                        )}
+            <Animated.View style={popStyle}>
+                <ScaleOnPress onPress={onPress} style={[styles.taskCard, isDone && styles.taskCardDone]}>
+                    <Animated.View pointerEvents="none" style={[styles.arrivalWash, washStyle]} />
+                    <DoneToggle task={task} onToggled={onToggled} />
+                    <View style={styles.taskCardContent}>
+                        <Text style={[styles.taskTitle, isDone && styles.taskTitleDone]} numberOfLines={2}>
+                            {task.title}
+                        </Text>
+                        <View style={styles.badgeRow}>
+                            <StatusBadge status={task.status} />
+                            {projectName ? <ProjectChip name={projectName} /> : null}
+                            {scheduledMeta ? (
+                                <Text style={styles.metaText}>{scheduledMeta}</Text>
+                            ) : task.deadline && (
+                                <Text style={styles.metaText}>{formatDeadline(task.deadline)}</Text>
+                            )}
+                        </View>
                     </View>
-                </View>
-                <CircularProgress progress={task.progress ?? 0} />
-            </ScaleOnPress>
-          </Animated.View>
+                    <CircularProgress progress={task.progress ?? 0} />
+                </ScaleOnPress>
+            </Animated.View>
         </Animated.View>
     );
 }
@@ -315,7 +315,7 @@ function FocusStar({ active, blocked, size = 22, onPress }: {
             <Ionicons
                 name={active ? 'star' : 'star-outline'}
                 size={size}
-                color={active ? colors.accent.strong : blocked ? colors.text.muted : colors.text.secondary}
+                color={active ? colors.accent.default : blocked ? colors.text.muted : colors.text.secondary}
             />
         </TouchableOpacity>
     );
@@ -350,6 +350,10 @@ function ListView({ buckets, projects, open, arrivedTaskId, receivedSection, onT
     const [seg, setSeg] = useState<'tasks' | 'projects'>('tasks');
     const focusCount = inFocusCount(projects);
     const taskCount = SECTIONS.reduce((sum, s) => sum + buckets[s.key].length, 0);
+    // Per-project counts from the same grouping the Groups view uses, so both surfaces agree.
+    const taskCountById = new Map<string, number>(
+        groupBacklogByProject(buckets, projects).groups.map(g => [g.project.id, g.tasks.length] as const),
+    );
 
     return (
         <>
@@ -435,18 +439,21 @@ function ListView({ buckets, projects, open, arrivedTaskId, receivedSection, onT
                     {projects.map((project, i) => (
                         <Animated.View key={project.id} entering={FadeIn.duration(180).delay(Math.min(i * 30, 240))} layout={SECTION_LAYOUT}>
                             <View style={styles.projCard}>
-                                <ScaleOnPress onPress={() => onEditProject(project)} style={styles.projCardBody}>
-                                    <Text style={styles.projName} numberOfLines={1}>{project.name}</Text>
-                                    <Text style={project.goal ? styles.projGoal : styles.projGoalMuted} numberOfLines={2}>
-                                        {project.goal ?? 'No goal set'}
-                                    </Text>
-                                    {project.notes ? (
-                                        <Text style={styles.projNotes} numberOfLines={2}>{project.notes}</Text>
-                                    ) : null}
-                                </ScaleOnPress>
+                                <View style={styles.projCardBodyWrap}>
+                                    <ScaleOnPress onPress={() => onEditProject(project)} style={styles.projCardBody}>
+                                        <View style={styles.projTitleRow}>
+                                            <Text style={styles.projName} numberOfLines={1}>{project.name}</Text>
+                                            <Text style={styles.groupCount}>{taskCountById.get(project.id) ?? 0}</Text>
+                                        </View>
+                                        <Text style={project.goal ? styles.projGoal : styles.projGoalMuted} numberOfLines={2}>
+                                            {project.goal ?? 'No goal set'}
+                                        </Text>
+                                    </ScaleOnPress>
+                                </View>
                                 <FocusStar
                                     active={project.isInFocus}
                                     blocked={!project.isInFocus && focusToggleBlocked(projects, project.id)}
+                                    size={20}
                                     onPress={() => onToggleFocus(project)}
                                 />
                             </View>
@@ -627,7 +634,7 @@ function CreateFab({ onNewTask, onNewProject }: { onNewTask: () => void; onNewPr
                     </Animated.View>
                 ) : null}
                 <ScaleOnPress onPress={() => setOpen(o => !o)} style={styles.fab}>
-                    <Ionicons name={open ? 'close' : 'add'} size={18} color={colors.text.onAccent} />
+                    <Ionicons name={open ? 'close' : 'add'} size={18} color={colors.text.primary} />
                     <Text style={styles.fabText}>{open ? 'Close' : 'New'}</Text>
                 </ScaleOnPress>
             </View>
@@ -1009,14 +1016,15 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.md + 1,
         paddingVertical: spacing.md,
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         gap: spacing.md,
     },
-    projCardBody: { flex: 1, gap: spacing.xs },
-    projName: { fontSize: 15, fontWeight: '500', color: colors.text.primary, letterSpacing: -0.15 },
+    projCardBodyWrap: { flex: 1 },
+    projCardBody: { gap: spacing.xs },
+    projTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    projName: { fontSize: 15, fontWeight: '500', color: colors.text.primary, letterSpacing: -0.15, flexShrink: 1 },
     projGoal: { fontSize: 13, color: colors.text.secondary, lineHeight: 18 },
     projGoalMuted: { fontSize: 13, color: colors.text.muted, fontStyle: 'italic' },
-    projNotes: { fontSize: 12, color: colors.text.muted, lineHeight: 17 },
 
     lensRow: {
         flexDirection: 'row',
@@ -1082,9 +1090,13 @@ const styles = StyleSheet.create({
         height: 40,
         paddingHorizontal: 14,
         borderRadius: radius.xl,
-        backgroundColor: colors.accent.default,
+        backgroundColor: '#ffffff',
         justifyContent: 'center',
-        ...shadow.soft,
+        shadowColor: '#2a2621',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.12,
+        shadowRadius: 8,
+        elevation: 4,
     },
-    fabText: { fontSize: 14, fontWeight: '500', color: colors.text.onAccent, letterSpacing: -0.2 },
+    fabText: { fontSize: 14, fontWeight: '500', color: colors.text.primary, letterSpacing: -0.2 },
 });
