@@ -114,7 +114,7 @@ export default function TaskDetailScreen() {
     // ─── Project picker options ────────────────────────────────────────────────
 
     // The picker's options; independent of the task, so a failed load just leaves the
-    // current assignment reassignable to Todos rather than blocking the screen.
+    // current assignment clearable rather than blocking the screen.
     useEffect(() => {
         let active = true;
         api.getProjects().then(result => {

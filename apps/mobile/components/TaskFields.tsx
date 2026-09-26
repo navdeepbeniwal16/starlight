@@ -256,10 +256,10 @@ export function ProgressSlider({ value, onChange, onRelease }: {
 
 // ─── FieldRow ─────────────────────────────────────────────────────────────────
 
-export function FieldRow({ label, subLabel, value, isOpen, onPress, hasError }: {
-    label: string; subLabel?: string; value: string; isOpen: boolean; onPress: () => void; hasError?: boolean;
+export function FieldRow({ label, subLabel, value, isOpen, onPress, hasError, unset }: {
+    label: string; subLabel?: string; value: string; isOpen: boolean; onPress: () => void; hasError?: boolean; unset?: boolean;
 }) {
-    const isSet = value !== 'Not set';
+    const isSet = !unset && value !== 'Not set';
     return (
         <TouchableOpacity style={tf.fieldRow} onPress={onPress} activeOpacity={0.7}>
             <View>
@@ -283,11 +283,13 @@ export function ProjectField({ projects, selectedId, isOpen, onToggle, onSelect 
     onToggle: () => void;
     onSelect: (id: string | null) => void;
 }) {
+    const assigned = projects.some(p => p.id === selectedId);
     return (
         <>
             <FieldRow
                 label="Project"
                 value={selectedProjectLabel(projects, selectedId)}
+                unset={!assigned}
                 isOpen={isOpen}
                 onPress={onToggle}
             />
@@ -297,7 +299,7 @@ export function ProjectField({ projects, selectedId, isOpen, onToggle, onSelect 
                         const on = o.id === selectedId;
                         return (
                             <TouchableOpacity
-                                key={o.id ?? '__todos__'}
+                                key={o.id ?? '__none__'}
                                 style={[tf.pill, on && tf.pillOn]}
                                 onPress={() => onSelect(o.id)}
                             >

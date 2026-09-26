@@ -48,7 +48,7 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
     const [submitError, setSubmitError] = useState<string | null>(null);
 
     // Refresh the picker's options each time the sheet opens. A failed load leaves the
-    // picker offering Todos alone — assignment is optional, so it never blocks creating.
+    // picker offering only the None clear option — assignment is optional, so it never blocks creating.
     useEffect(() => {
         if (!visible) return;
         let active = true;

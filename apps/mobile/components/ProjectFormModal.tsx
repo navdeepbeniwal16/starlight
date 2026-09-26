@@ -90,7 +90,7 @@ export default function ProjectFormModal({ visible, mode, project, onClose, onSa
         if (!project || busy) return;
         Alert.alert(
             'Delete project?',
-            `"${project.name}" will be removed. Its tasks stay and return to Todos.`,
+            `"${project.name}" will be removed. Its tasks stay and become unassigned.`,
             [
                 { text: 'Cancel', style: 'cancel' },
                 {

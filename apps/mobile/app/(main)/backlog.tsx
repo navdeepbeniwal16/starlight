@@ -36,7 +36,7 @@ import {
     withoutProject,
     setFocus,
 } from "../../lib/projectState";
-import { groupBacklogByProject, todosCount } from "../../lib/projectGrouping";
+import { groupBacklogByProject } from "../../lib/projectGrouping";
 import CreateTaskModal from "../../components/CreateTaskModal";
 import ProjectFormModal from "../../components/ProjectFormModal";
 import CircularProgress from "../../components/CircularProgress";
@@ -431,20 +431,6 @@ function ListView({ buckets, projects, open, arrivedTaskId, receivedSection, onT
                     <View style={styles.counterRow}>
                         <FocusCounter count={focusCount} />
                     </View>
-
-                    {/* Todos first — the common home for anything not under a project. */}
-                    <Animated.View layout={SECTION_LAYOUT}>
-                        <View style={[styles.projCard, styles.todosCard]}>
-                            <View style={styles.projCardBody}>
-                                <View style={styles.todosTitleRow}>
-                                    <Ionicons name="file-tray-outline" size={16} color={colors.text.secondary} />
-                                    <Text style={styles.projName}>Todos</Text>
-                                    <Text style={styles.groupCount}>{todosCount(buckets)}</Text>
-                                </View>
-                                <Text style={styles.projGoalMuted}>Tasks not assigned to a project</Text>
-                            </View>
-                        </View>
-                    </Animated.View>
 
                     {projects.map((project, i) => (
                         <Animated.View key={project.id} entering={FadeIn.duration(180).delay(Math.min(i * 30, 240))} layout={SECTION_LAYOUT}>
@@ -1026,8 +1012,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: spacing.md,
     },
-    todosCard: { backgroundColor: colors.surface.block, borderStyle: 'dashed', borderColor: colors.border.warm },
-    todosTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
     projCardBody: { flex: 1, gap: spacing.xs },
     projName: { fontSize: 15, fontWeight: '500', color: colors.text.primary, letterSpacing: -0.15 },
     projGoal: { fontSize: 13, color: colors.text.secondary, lineHeight: 18 },
