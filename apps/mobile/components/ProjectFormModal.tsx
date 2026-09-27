@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
     Modal,
     View,
@@ -10,7 +10,7 @@ import {
     Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { KeyboardProvider, KeyboardToolbar, KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { KeyboardProvider, KeyboardToolbar, KeyboardAwareScrollView, type KeyboardAwareScrollViewRef } from "react-native-keyboard-controller";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../lib/api";
 import type { Project } from "../lib/api.types";
@@ -27,6 +27,7 @@ type Props = {
 
 export default function ProjectFormModal({ visible, mode, project, onClose, onSaved, onDeleted }: Props) {
     const insets = useSafeAreaInsets();
+    const scrollViewRef = useRef<KeyboardAwareScrollViewRef>(null);
 
     const [name, setName] = useState('');
     const [goal, setGoal] = useState('');
@@ -108,6 +109,14 @@ export default function ProjectFormModal({ visible, mode, project, onClose, onSa
         );
     }
 
+    // KeyboardAwareScrollView's auto-scroll is unreliable for multiline inputs in a
+    // page-sheet Modal, so nudge the focused field into view on focus — a second pass
+    // after the keyboard settles (mirrors CreateTaskModal).
+    const revealFocusedInput = () => {
+        scrollViewRef.current?.assureFocusedInputVisible();
+        setTimeout(() => scrollViewRef.current?.assureFocusedInputVisible(), 300);
+    };
+
     return (
         <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
             <KeyboardProvider>
@@ -121,11 +130,13 @@ export default function ProjectFormModal({ visible, mode, project, onClose, onSa
                     </View>
 
                     <KeyboardAwareScrollView
+                        ref={scrollViewRef}
                         style={s.scrollFlex}
                         contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + 32 }]}
                         showsVerticalScrollIndicator={false}
                         keyboardShouldPersistTaps="handled"
                         bottomOffset={16}
+                        mode="layout"
                     >
                         <TextInput
                             style={[s.nameInput, nameError && s.nameInputError]}
@@ -146,6 +157,7 @@ export default function ProjectFormModal({ visible, mode, project, onClose, onSa
                                 placeholderTextColor={colors.text.muted}
                                 value={goal}
                                 onChangeText={setGoal}
+                                onFocus={revealFocusedInput}
                                 multiline
                                 textAlignVertical="top"
                             />
@@ -159,6 +171,7 @@ export default function ProjectFormModal({ visible, mode, project, onClose, onSa
                                 placeholderTextColor={colors.text.muted}
                                 value={notes}
                                 onChangeText={setNotes}
+                                onFocus={revealFocusedInput}
                                 multiline
                                 textAlignVertical="top"
                             />
