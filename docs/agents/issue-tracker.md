@@ -55,3 +55,21 @@ advances its status through `In Progress` / `In Review` / `Done`.
 ## No PR triage surface
 
 This repo does not use GitHub Issues. External PRs are not part of the triage queue.
+
+## Wayfinding operations
+
+How the wayfinder skill's artifacts map onto Linear:
+
+- **Map** — a regular `STA` issue labelled `wayfinder:map`; its body holds Destination /
+  Notes / Decisions so far / Not yet specified / Out of scope.
+- **Tickets** — sub-issues of the map (`parentId`), each labelled one of
+  `wayfinder:research`, `wayfinder:prototype`, `wayfinder:grilling`, `wayfinder:task`.
+  Open tickets sit in `Todo`.
+- **Blocking** — Linear's native blocked-by relations: `save_issue` with
+  `blockedBy` / `blocks` (issue identifiers). Linear renders blocked badges on the
+  map's sub-issue list, so the frontier is visible in the UI.
+- **Frontier** — open sub-issues of the map that are unblocked and unassigned.
+- **Claim** — assign the ticket to yourself before any work; open + unassigned means
+  unclaimed.
+- **Resolution** — post the answer as a comment on the ticket, move it to `Done`, and
+  append a one-line pointer to the map's "Decisions so far" section.
