@@ -17,7 +17,10 @@ function toMins(hhMm: string): number {
     return h * 60 + m;
 }
 
+export const MAX_TEMPLATE_NAME_LENGTH = 50;
+
 export type DayTemplateInput = {
+    name: string;
     wakeTime: string;
     sleepTime: string;
     blocks: BlockInput[];
@@ -25,6 +28,7 @@ export type DayTemplateInput = {
 
 /**
  * The single authoritative validator for a day template. It owns all template invariants:
+ *   - a non-empty name of at most 50 characters
  *   - HH:mm format for wake/sleep and every block boundary
  *   - wakeTime strictly before sleepTime
  *   - non-empty block name; valid block-type and energy-level enums
@@ -37,7 +41,15 @@ export type DayTemplateInput = {
  * Throws {@link DayTemplateValidationError} on the first violation.
  */
 export function validateDayTemplate(data: DayTemplateInput): void {
-    const { wakeTime, sleepTime, blocks } = data;
+    const { name, wakeTime, sleepTime, blocks } = data;
+
+    const trimmedName = typeof name === "string" ? name.trim() : "";
+    if (trimmedName.length === 0) {
+        throw new DayTemplateValidationError("Template name must not be blank");
+    }
+    if (trimmedName.length > MAX_TEMPLATE_NAME_LENGTH) {
+        throw new DayTemplateValidationError(`Template name must be at most ${MAX_TEMPLATE_NAME_LENGTH} characters`);
+    }
 
     if (!isValidHHmm(wakeTime)) {
         throw new DayTemplateValidationError("wakeTime must be a valid HH:mm string");

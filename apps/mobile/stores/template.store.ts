@@ -2,15 +2,19 @@ import { create } from "zustand";
 import { BlockInput, DayTemplate } from "../lib/api.types";
 import { TemplateDraft, OverlapChange } from "../lib/templateDraft";
 
-// Backs the Day Template editor: the loaded `baseline` (server truth)
-// alongside a `draft` the user edits.
-// Blocks are held without ids; ids are dropped on hydrate.
+// `templateId` is null while creating a template — set once the first save persists it.
+// Blocks are held without ids (dropped on hydrate), and `name` is tracked next to the
+// draft so a rename registers as an edit.
 type TemplateState = {
+    templateId: string | null;
+    name: string;
+    baselineName: string;
     baseline: TemplateDraft | null;
     draft: TemplateDraft | null;
     blockKeys: string[];
     hydrate: (template: DayTemplate) => void;
-    seed: (draft: TemplateDraft) => void;
+    seed: (draft: TemplateDraft, name: string) => void;
+    setName: (name: string) => void;
     setWakeSleep: (wakeTime: string, sleepTime: string) => void;
     // Replace the whole draft (live drag/resolve path + Undo). blockKeys are left untouched
     // because the resolvers preserve block count and order.
@@ -21,9 +25,9 @@ type TemplateState = {
     // Seat an edited/created block and apply its overlap plan in one step, so the neighbour
     // trims/removals and the seated block land together and blockKeys never desync.
     resolveOverlap: (seat: { index: number | null; block: BlockInput }, changes: OverlapChange[]) => void;
-    commit: () => void;  // adopt the current draft as the saved baseline
-    reset: () => void;   // discard edits and restore the baseline
-    clear: () => void;   // drop all state
+    commit: () => void;
+    reset: () => void;
+    clear: () => void;
 };
 
 let keySeq = 0;
@@ -44,20 +48,39 @@ function toDraft(t: { wakeTime: string; sleepTime: string; blocks: BlockInput[] 
 }
 
 export const useTemplateStore = create<TemplateState>((set) => ({
+    templateId: null,
+    name: "",
+    baselineName: "",
     baseline: null,
     draft: null,
     blockKeys: [],
 
     hydrate: (template) => {
         const draft = toDraft(template);
-        set({ baseline: toDraft(template), draft, blockKeys: draft.blocks.map(nextKey) });
+        set({
+            templateId: template.id,
+            name: template.name,
+            baselineName: template.name,
+            baseline: toDraft(template),
+            draft,
+            blockKeys: draft.blocks.map(nextKey),
+        });
     },
 
     // Baseline mirrors the draft so the editor opens clean; onboarding gates Continue on
     // validity, not dirtiness.
-    seed: (draft) => {
-        set({ baseline: toDraft(draft), draft: toDraft(draft), blockKeys: draft.blocks.map(nextKey) });
+    seed: (draft, name) => {
+        set({
+            templateId: null,
+            name,
+            baselineName: name,
+            baseline: toDraft(draft),
+            draft: toDraft(draft),
+            blockKeys: draft.blocks.map(nextKey),
+        });
     },
+
+    setName: (name) => set({ name }),
 
     setWakeSleep: (wakeTime, sleepTime) =>
         set((state) => (state.draft ? { draft: { ...state.draft, wakeTime, sleepTime } } : state)),
@@ -113,14 +136,14 @@ export const useTemplateStore = create<TemplateState>((set) => ({
             return { draft: { ...state.draft, blocks }, blockKeys: keys };
         }),
 
-    commit: () => set((state) => (state.draft ? { baseline: toDraft(state.draft) } : state)),
+    commit: () => set((state) => (state.draft ? { baseline: toDraft(state.draft), baselineName: state.name } : state)),
 
     reset: () =>
         set((state) => {
             if (!state.baseline) return state;
             const draft = toDraft(state.baseline);
-            return { draft, blockKeys: draft.blocks.map(nextKey) };
+            return { draft, name: state.baselineName, blockKeys: draft.blocks.map(nextKey) };
         }),
 
-    clear: () => set({ baseline: null, draft: null, blockKeys: [] }),
+    clear: () => set({ templateId: null, name: "", baselineName: "", baseline: null, draft: null, blockKeys: [] }),
 }));

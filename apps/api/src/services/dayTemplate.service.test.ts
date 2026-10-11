@@ -1,33 +1,27 @@
 import { prisma } from "../lib/prisma";
 import {
+    listDayTemplates,
+    getDayTemplateById,
     createDayTemplate,
-    upsertDayTemplate,
-    getDayTemplate,
-    DayTemplateAlreadyExistsError,
+    updateDayTemplate,
     DayTemplateNotFoundError,
+    DuplicateTemplateNameError,
 } from "./dayTemplate.service";
 import { DayTemplateValidationError } from "./dayTemplate.validator";
 import { BlockInput } from "../types/dayTemplate.types";
 
 const TEST_CLERK_ID = "user_test_day_template_service";
+const OTHER_CLERK_ID = "user_test_day_template_service_other";
 
 async function seedUser(clerkUserId: string) {
-    return prisma.user.upsert({
-        where: { clerkUserId },
-        update: {},
-        create: { clerkUserId },
-    });
+    return prisma.user.upsert({ where: { clerkUserId }, update: {}, create: { clerkUserId } });
 }
 
 async function cleanup(userId: string) {
-    const template = await prisma.dayTemplate.findUnique({ where: { userId }, select: { id: true } });
-    if (template) {
-        await prisma.block.deleteMany({ where: { dayTemplateId: template.id } });
-        await prisma.dayTemplate.delete({ where: { id: template.id } });
-    }
+    const templates = await prisma.dayTemplate.findMany({ where: { userId }, select: { id: true } });
+    for (const t of templates) await prisma.block.deleteMany({ where: { dayTemplateId: t.id } });
+    await prisma.dayTemplate.deleteMany({ where: { userId } });
 }
-
-// A valid baseline template; individual tests clone and mutate it to isolate one broken invariant.
 function validTemplate(): { wakeTime: string; sleepTime: string; blocks: BlockInput[] } {
     return {
         wakeTime: "07:00",
@@ -40,139 +34,192 @@ function validTemplate(): { wakeTime: string; sleepTime: string; blocks: BlockIn
     };
 }
 
-// Seeds a valid template
-async function seedTemplate(userId: string) {
-    const t = validTemplate();
-    await prisma.dayTemplate.create({
-        data: {
-            userId,
-            wakeTime: t.wakeTime,
-            sleepTime: t.sleepTime,
-            blocks: { create: t.blocks },
-        },
-    });
-}
-
 let userId: string;
+let otherUserId: string;
+
+beforeAll(async () => {
+    userId = (await seedUser(TEST_CLERK_ID)).id;
+    otherUserId = (await seedUser(OTHER_CLERK_ID)).id;
+});
 
 beforeEach(async () => {
-    const user = await seedUser(TEST_CLERK_ID);
-    userId = user.id;
     await cleanup(userId);
+    await cleanup(otherUserId);
 });
 
 afterAll(async () => {
-    const user = await prisma.user.findUnique({ where: { clerkUserId: TEST_CLERK_ID } });
-    if (user) {
-        await cleanup(user.id);
-        await prisma.user.delete({ where: { id: user.id } });
-    }
+    await cleanup(userId);
+    await cleanup(otherUserId);
+    await prisma.user.deleteMany({ where: { id: { in: [userId, otherUserId] } } });
     await prisma.$disconnect();
 });
 
-describe("createDayTemplate", () => {
-    it("persists the template and all its blocks", async () => {
-        const t = validTemplate();
-        await createDayTemplate({ userId, ...t });
-
-        const stored = await prisma.dayTemplate.findUnique({ where: { userId }, include: { blocks: true } });
-        expect(stored?.wakeTime).toBe("07:00");
-        expect(stored?.sleepTime).toBe("23:00");
-        expect(stored?.blocks).toHaveLength(3);
-        expect(stored?.blocks.map((b) => b.name).sort()).toEqual(["Deep Work", "Lunch", "Wind Down"]);
+describe("listDayTemplates", () => {
+    it("returns an empty array when the user has no templates", async () => {
+        expect(await listDayTemplates(userId)).toEqual([]);
     });
 
-    it("routes through the validator and never persists an invalid template", async () => {
-        const t = validTemplate();
-        t.blocks[0] = { type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00" }; // no energyLevel
+    it("orders by most-recently-updated: editing a template moves it to the front", async () => {
+        await createDayTemplate({ userId, name: "Workday", ...validTemplate() });
+        const weekend = await createDayTemplate({ userId, name: "Weekend", ...validTemplate() });
+        await createDayTemplate({ userId, name: "Chill", ...validTemplate() });
 
-        await expect(createDayTemplate({ userId, ...t })).rejects.toBeInstanceOf(DayTemplateValidationError);
+        expect((await listDayTemplates(userId)).map((t) => t.name)).toEqual(["Chill", "Weekend", "Workday"]);
 
-        const stored = await prisma.dayTemplate.findUnique({ where: { userId } });
-        expect(stored).toBeNull();
+        await updateDayTemplate({ userId, id: weekend.id, name: "Weekend", ...validTemplate() });
+
+        expect((await listDayTemplates(userId)).map((t) => t.name)).toEqual(["Weekend", "Chill", "Workday"]);
     });
 
-    it("rejects a second template for the same user", async () => {
-        await createDayTemplate({ userId, ...validTemplate() });
-        await expect(createDayTemplate({ userId, ...validTemplate() })).rejects.toBeInstanceOf(
-            DayTemplateAlreadyExistsError
-        );
+    it("nests each template's own blocks without leaking across templates", async () => {
+        await createDayTemplate({
+            userId,
+            name: "Workday",
+            wakeTime: "07:00",
+            sleepTime: "23:00",
+            blocks: [{ type: "CONTAINER", name: "Focus", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" }],
+        });
+        await createDayTemplate({
+            userId,
+            name: "Weekend",
+            wakeTime: "08:00",
+            sleepTime: "22:00",
+            blocks: [
+                { type: "CONTAINER", name: "Hobby", startTime: "10:00", endTime: "12:00", energyLevel: "MEDIUM" },
+                { type: "ANCHOR", name: "Brunch", startTime: "12:00", endTime: "13:00" },
+            ],
+        });
+
+        const list = await listDayTemplates(userId);
+        const workday = list.find((t) => t.name === "Workday")!;
+        const weekend = list.find((t) => t.name === "Weekend")!;
+
+        expect(workday.blocks.map((b) => b.name)).toEqual(["Focus"]);
+        expect(weekend.blocks.map((b) => b.name).sort()).toEqual(["Brunch", "Hobby"]);
+        expect(workday.blocks.every((b) => b.dayTemplateId === workday.id)).toBe(true);
+        expect(weekend.blocks.every((b) => b.dayTemplateId === weekend.id)).toBe(true);
+    });
+
+    it("excludes another user's templates", async () => {
+        await createDayTemplate({ userId, name: "Mine", ...validTemplate() });
+        await createDayTemplate({ userId: otherUserId, name: "Theirs", ...validTemplate() });
+
+        const list = await listDayTemplates(userId);
+        expect(list.map((t) => t.name)).toEqual(["Mine"]);
     });
 });
 
-describe("upsertDayTemplate", () => {
-    it("creates the template when the user has none", async () => {
-        await upsertDayTemplate({ userId, ...validTemplate() });
+describe("getDayTemplateById", () => {
+    it("returns the template with its blocks", async () => {
+        const created = await createDayTemplate({ userId, name: "Workday", ...validTemplate() });
 
-        const stored = await getDayTemplate(userId);
-        expect(stored.wakeTime).toBe("07:00");
-        expect(stored.blocks.map((b) => b.name).sort()).toEqual(["Deep Work", "Lunch", "Wind Down"]);
+        const fetched = await getDayTemplateById(userId, created.id);
+        expect(fetched).toMatchObject({ id: created.id, name: "Workday", wakeTime: "07:00", sleepTime: "23:00" });
+        expect(fetched.blocks).toHaveLength(3);
     });
 
-    it("recreates blocks with fresh ids (delete-all + recreate)", async () => {
-        await seedTemplate(userId);
-        const before = await prisma.dayTemplate.findUnique({ where: { userId }, include: { blocks: true } });
-        const beforeIds = before!.blocks.map((b) => b.id).sort();
+    it("throws NotFound for a missing id", async () => {
+        await expect(getDayTemplateById(userId, "does-not-exist")).rejects.toBeInstanceOf(DayTemplateNotFoundError);
+    });
 
-        const edited = validTemplate();
-        edited.blocks[0] = { ...edited.blocks[0], name: "Deep Work (renamed)" };
-        await upsertDayTemplate({ userId, ...edited });
+    it("throws NotFound for another user's template (ownership isolation)", async () => {
+        const foreign = await createDayTemplate({ userId: otherUserId, name: "Theirs", ...validTemplate() });
+        await expect(getDayTemplateById(userId, foreign.id)).rejects.toBeInstanceOf(DayTemplateNotFoundError);
+    });
+});
 
-        const after = await prisma.dayTemplate.findUnique({ where: { userId }, include: { blocks: true } });
-        const afterIds = after!.blocks.map((b) => b.id).sort();
+describe("createDayTemplate", () => {
+    it("persists the named template and all its blocks", async () => {
+        const created = await createDayTemplate({ userId, name: "Workday", ...validTemplate() });
 
-        expect(after?.blocks).toHaveLength(3);
-        expect(after?.blocks.map((b) => b.name).sort()).toEqual(["Deep Work (renamed)", "Lunch", "Wind Down"]);
+        expect(created).toMatchObject({ name: "Workday", wakeTime: "07:00", sleepTime: "23:00" });
+        expect(created.blocks).toHaveLength(3);
+
+        const byName = Object.fromEntries(created.blocks.map((b) => [b.name, b] as const));
+        expect(byName["Deep Work"]).toMatchObject({ type: "CONTAINER", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" });
+        expect(byName["Lunch"]).toMatchObject({ type: "ANCHOR", startTime: "12:00", endTime: "13:00", energyLevel: null });
+        expect(byName["Wind Down"]).toMatchObject({ type: "ANCHOR", startTime: "20:00", endTime: "22:00", energyLevel: null });
+    });
+
+    it("trims the name and rejects blank / over-length names without persisting", async () => {
+        const created = await createDayTemplate({ userId, name: "  Weekend  ", ...validTemplate() });
+        expect(created.name).toBe("Weekend");
+
+        await expect(createDayTemplate({ userId, name: "   ", ...validTemplate() })).rejects.toBeInstanceOf(DayTemplateValidationError);
+        await expect(createDayTemplate({ userId, name: "x".repeat(51), ...validTemplate() })).rejects.toBeInstanceOf(DayTemplateValidationError);
+
+        expect(await prisma.dayTemplate.count({ where: { userId } })).toBe(1);
+    });
+
+    it("routes through the structural validator and never persists an invalid template", async () => {
+        const t = validTemplate();
+        t.blocks[0] = { type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00" };
+
+        await expect(createDayTemplate({ userId, name: "Bad", ...t })).rejects.toBeInstanceOf(DayTemplateValidationError);
+        expect(await prisma.dayTemplate.count({ where: { userId } })).toBe(0);
+    });
+
+    it("allows multiple templates per user but rejects a duplicate name (case-insensitive)", async () => {
+        await createDayTemplate({ userId, name: "Workday", ...validTemplate() });
+        await createDayTemplate({ userId, name: "Weekend", ...validTemplate() });
+        expect(await prisma.dayTemplate.count({ where: { userId } })).toBe(2);
+
+        await expect(createDayTemplate({ userId, name: "workday", ...validTemplate() })).rejects.toBeInstanceOf(DuplicateTemplateNameError);
+        expect(await prisma.dayTemplate.count({ where: { userId } })).toBe(2);
+    });
+});
+
+describe("updateDayTemplate", () => {
+    it("renames, updates wake/sleep, and replaces blocks with fresh ids", async () => {
+        const created = await createDayTemplate({ userId, name: "Workday", ...validTemplate() });
+        const beforeIds = created.blocks.map((b) => b.id).sort();
+
+        const updated = await updateDayTemplate({
+            userId,
+            id: created.id,
+            name: "Focus Day",
+            wakeTime: "06:30",
+            sleepTime: "22:30",
+            blocks: [{ type: "CONTAINER", name: "Sprint", startTime: "08:00", endTime: "11:00", energyLevel: "HIGH" }],
+        });
+
+        expect(updated).toMatchObject({ id: created.id, name: "Focus Day", wakeTime: "06:30", sleepTime: "22:30" });
+        expect(updated.blocks).toHaveLength(1);
+        expect(updated.blocks[0]).toMatchObject({ type: "CONTAINER", name: "Sprint", startTime: "08:00", endTime: "11:00", energyLevel: "HIGH" });
+        const afterIds = updated.blocks.map((b) => b.id).sort();
         expect(afterIds.some((id) => beforeIds.includes(id))).toBe(false);
     });
 
-    it("replaces wake/sleep and blocks when a template already exists", async () => {
-        await seedTemplate(userId);
-
-        const edited = {
-            wakeTime: "06:30",
-            sleepTime: "22:30",
-            blocks: [{ type: "CONTAINER", name: "Sprint", startTime: "08:00", endTime: "11:00", energyLevel: "HIGH" }] as BlockInput[],
-        };
-        await upsertDayTemplate({ userId, ...edited });
-
-        const stored = await getDayTemplate(userId);
-        expect(stored.wakeTime).toBe("06:30");
-        expect(stored.sleepTime).toBe("22:30");
-        expect(stored.blocks).toHaveLength(1);
-        expect(stored.blocks[0].name).toBe("Sprint");
+    it("throws NotFound for an id that doesn't exist", async () => {
+        await expect(updateDayTemplate({ userId, id: "does-not-exist", name: "Whatever", ...validTemplate() }))
+            .rejects.toBeInstanceOf(DayTemplateNotFoundError);
     });
 
-    it("does not create a second template on repeat saves", async () => {
-        await upsertDayTemplate({ userId, ...validTemplate() });
-        await upsertDayTemplate({ userId, ...validTemplate() });
-
-        const count = await prisma.dayTemplate.count({ where: { userId } });
-        expect(count).toBe(1);
+    it("throws NotFound for another user's template", async () => {
+        const foreign = await createDayTemplate({ userId: otherUserId, name: "Theirs", ...validTemplate() });
+        await expect(updateDayTemplate({ userId, id: foreign.id, name: "Hijack", ...validTemplate() }))
+            .rejects.toBeInstanceOf(DayTemplateNotFoundError);
     });
 
-    it("routes through the validator and never persists an invalid template", async () => {
+    it("routes through the validator and leaves the template unchanged on an invalid payload", async () => {
+        const created = await createDayTemplate({ userId, name: "Workday", ...validTemplate() });
+
         const invalid = validTemplate();
-        invalid.wakeTime = "not-a-time";
+        invalid.blocks[0] = { type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00" };
 
-        await expect(upsertDayTemplate({ userId, ...invalid })).rejects.toBeInstanceOf(DayTemplateValidationError);
-        await expect(getDayTemplate(userId)).rejects.toBeInstanceOf(DayTemplateNotFoundError);
-    });
-});
+        await expect(updateDayTemplate({ userId, id: created.id, name: "Workday", ...invalid }))
+            .rejects.toBeInstanceOf(DayTemplateValidationError);
 
-describe("getDayTemplate", () => {
-    it("returns the stored template with its blocks", async () => {
-        await seedTemplate(userId);
-
-        const template = await getDayTemplate(userId);
-
-        expect(template.wakeTime).toBe("07:00");
-        expect(template.sleepTime).toBe("23:00");
-        expect(template.blocks).toHaveLength(3);
-        expect(template.blocks.map((b) => b.name).sort()).toEqual(["Deep Work", "Lunch", "Wind Down"]);
+        const after = await getDayTemplateById(userId, created.id);
+        expect(after.blocks).toHaveLength(3);
+        expect(after.blocks.map((b) => b.name).sort()).toEqual(["Deep Work", "Lunch", "Wind Down"]);
     });
 
-    it("throws DayTemplateNotFoundError when the user has no template", async () => {
-        await expect(getDayTemplate(userId)).rejects.toBeInstanceOf(DayTemplateNotFoundError);
+    it("rejects renaming onto an existing name", async () => {
+        await createDayTemplate({ userId, name: "Workday", ...validTemplate() });
+        const weekend = await createDayTemplate({ userId, name: "Weekend", ...validTemplate() });
+
+        await expect(updateDayTemplate({ userId, id: weekend.id, name: "Workday", ...validTemplate() }))
+            .rejects.toBeInstanceOf(DuplicateTemplateNameError);
     });
 });

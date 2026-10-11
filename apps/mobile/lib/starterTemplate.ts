@@ -1,5 +1,9 @@
 import { TemplateDraft } from "./templateDraft";
 
+// The seed name for a user's first template, matching the server-side migration
+// that backfilled existing single templates.
+export const DEFAULT_TEMPLATE_NAME = 'My Day';
+
 // buildStarterTemplate returns a neutral, valid day for onboarding to pre-seed, so a new
 // user edits a real day instead of a blank slate. Block times are spaced to leave visible
 // free gaps for Starlight to schedule into.

@@ -325,7 +325,7 @@ export default function PlanningReviewScreen() {
     // lingering overlay would still cover it when the editor is popped back.
     const adjustDay = useCallback(() => {
         dismissError();
-        router.push('/day-template');
+        router.push('/day-templates');
     }, [dismissError, router]);
 
     // Refetch on focus so edits made on the task detail screen reflect here.

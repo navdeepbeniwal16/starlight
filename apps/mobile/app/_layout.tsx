@@ -25,7 +25,8 @@ export default function RootLayout() {
             <Stack screenOptions={{ headerShown: false }}>
               <Stack.Screen name="planning" options={{ presentation: "modal" }} />
               <Stack.Screen name="task/[taskId]" options={{ presentation: "modal" }} />
-              <Stack.Screen name="day-template" options={{ presentation: "modal" }} />
+              <Stack.Screen name="day-templates" />
+              <Stack.Screen name="day-template/[id]" options={{ presentation: "modal" }} />
             </Stack>
             <KeyboardToolbar />
           </QueryClientProvider>

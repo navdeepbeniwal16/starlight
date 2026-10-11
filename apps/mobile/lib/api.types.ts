@@ -23,11 +23,14 @@ export type DayTemplateBlock = BlockInput & { id: string };
 
 export type DayTemplate = {
     id: string;
+    name: string;
     wakeTime: string;
     sleepTime: string;
     blocks: DayTemplateBlock[];
+    updatedAt: string;
 };
 
+export type GetDayTemplatesResponse = ApiResult<DayTemplate[]>;
 export type GetDayTemplateResponse = ApiResult<DayTemplate>;
 export type CreateDayTemplateResponse = ApiResult<DayTemplate>;
 export type UpdateDayTemplateResponse = ApiResult<DayTemplate>;

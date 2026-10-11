@@ -8,7 +8,7 @@ import logger from "./lib/logger";
 import healthRouter from "./routes/health";
 import meRouter from "./routes/me.route";
 import appConfigRouter from "./routes/app";
-import dayTemplateRouter from "./routes/dayTemplate.route";
+import dayTemplatesRouter from "./routes/dayTemplates.route";
 import dayPlanRouter from "./routes/dayPlan.route";
 import taskRouter from "./routes/task.route";
 import projectRouter from "./routes/project.route";
@@ -58,7 +58,7 @@ app.use((_req, res, next) => {
 app.use("/health", healthRouter);
 app.use("/me", meRouter);
 app.use("/app", appConfigRouter);
-app.use("/day-template", dayTemplateRouter);
+app.use("/day-templates", dayTemplatesRouter);
 app.use("/day-plan", dayPlanRouter);
 app.use("/tasks", taskRouter);
 app.use("/projects", projectRouter);
