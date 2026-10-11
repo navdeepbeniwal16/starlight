@@ -1,4 +1,4 @@
-import { ApiResult, BlockInput, ConfirmAssignment, ConfirmPlanResponse, CreateDayTemplateResponse, CreateProjectInput, CreateTaskInput, CreateTaskResponse, GeneratePlanResponse, GetAllTasksResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, GetProjectsResponse, GetReviewTasksResponse, GetTaskDetailResponse, OnboardingResponse, ProjectResponse, UpdateDayTemplateResponse, UpdateProjectInput, UpdateTaskInput, UpdateTaskResponse } from "./api.types";
+import { ApiResult, BlockInput, ConfirmAssignment, ConfirmPlanResponse, CreateDayTemplateResponse, CreateProjectInput, CreateTaskInput, CreateTaskResponse, GeneratePlanResponse, GetAllTasksResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, GetDayTemplatesResponse, GetProjectsResponse, GetReviewTasksResponse, GetTaskDetailResponse, OnboardingResponse, ProjectResponse, UpdateDayTemplateResponse, UpdateProjectInput, UpdateTaskInput, UpdateTaskResponse } from "./api.types";
 import { getToken } from "./clerk";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
@@ -11,7 +11,7 @@ export const api = {
     return json;
   },
 
-  getDayTemplate: async (): Promise<GetDayTemplateResponse> => {
+  listDayTemplates: async (): Promise<GetDayTemplatesResponse> => {
     const token = await getToken();
 
     if (!token) {
@@ -19,7 +19,7 @@ export const api = {
     }
 
     try {
-      const response = await fetch(`${API_URL}/day-template`, {
+      const response = await fetch(`${API_URL}/day-templates`, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` },
       });
@@ -35,7 +35,7 @@ export const api = {
     }
   },
 
-  createDayTemplate: async (payload: { wakeTime: string; sleepTime: string; blocks: BlockInput[] }): Promise<CreateDayTemplateResponse> => {
+  getDayTemplate: async (id: string): Promise<GetDayTemplateResponse> => {
     const token = await getToken();
 
     if (!token) {
@@ -43,7 +43,31 @@ export const api = {
     }
 
     try {
-      const response = await fetch(`${API_URL}/day-template`, {
+      const response = await fetch(`${API_URL}/day-templates/${id}`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+
+      const responseJson = await response.json();
+      if (!response.ok) {
+        return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
+      }
+
+      return { ok: true, data: responseJson.data };
+    } catch (error) {
+      return { ok: false, error: 'Network error. Please check your connection.' };
+    }
+  },
+
+  createDayTemplate: async (payload: { name: string; wakeTime: string; sleepTime: string; blocks: BlockInput[] }): Promise<CreateDayTemplateResponse> => {
+    const token = await getToken();
+
+    if (!token) {
+      return { ok: false, error: 'No token found' };
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/day-templates`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -60,7 +84,7 @@ export const api = {
     }
   },
 
-  updateDayTemplate: async (payload: { wakeTime: string; sleepTime: string; blocks: BlockInput[] }): Promise<UpdateDayTemplateResponse> => {
+  updateDayTemplate: async (id: string, payload: { name: string; wakeTime: string; sleepTime: string; blocks: BlockInput[] }): Promise<UpdateDayTemplateResponse> => {
     const token = await getToken();
 
     if (!token) {
@@ -68,8 +92,8 @@ export const api = {
     }
 
     try {
-      const response = await fetch(`${API_URL}/day-template`, {
-        method: 'PUT',
+      const response = await fetch(`${API_URL}/day-templates/${id}`, {
+        method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });

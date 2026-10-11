@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, TextInput } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter, useNavigation } from "expo-router";
+import { useRouter, useNavigation, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, {
     SlideInDown,
@@ -16,18 +16,18 @@ import Animated, {
     interpolate,
     Extrapolation,
 } from "react-native-reanimated";
-import { api } from "../lib/api";
-import { colors, radius, spacing, shadow } from "../lib/theme";
-import type { BlockInput } from "../lib/api.types";
-import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, blockTypeTotals, POINTS_PER_HOUR, type OverlapChange } from "../lib/templateDraft";
-import { formatDuration, toMins } from "../lib/time";
-import { BLOCK_TYPE_LABELS, BLOCK_TYPE_LEGEND_HINTS } from "../lib/templateBlocks";
-import { useTemplateStore } from "../stores/template.store";
-import { BlockEditorModal } from "../components/BlockEditorModal";
-import { TemplateTimeline } from "../components/TemplateTimeline";
-import { TemplateValidationBanner } from "../components/TemplateValidationBanner";
-import { UndoSnackbar, useUndoableEdit } from "../components/UndoSnackbar";
-import { PressableScale } from "../components/PressableScale";
+import { api } from "../../lib/api";
+import { colors, radius, spacing, shadow } from "../../lib/theme";
+import type { BlockInput } from "../../lib/api.types";
+import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, blockTypeTotals, POINTS_PER_HOUR, type OverlapChange } from "../../lib/templateDraft";
+import { formatDuration, toMins } from "../../lib/time";
+import { BLOCK_TYPE_LABELS, BLOCK_TYPE_LEGEND_HINTS } from "../../lib/templateBlocks";
+import { useTemplateStore } from "../../stores/template.store";
+import { BlockEditorModal } from "../../components/BlockEditorModal";
+import { TemplateTimeline } from "../../components/TemplateTimeline";
+import { TemplateValidationBanner } from "../../components/TemplateValidationBanner";
+import { UndoSnackbar, useUndoableEdit } from "../../components/UndoSnackbar";
+import { PressableScale } from "../../components/PressableScale";
 
 // What the block editor is open on: an existing block by index, or a new block seeded into a
 // tapped free slot.
@@ -37,8 +37,9 @@ export default function DayTemplateScreen() {
     const router = useRouter();
     const navigation = useNavigation();
     const insets = useSafeAreaInsets();
+    const { id } = useLocalSearchParams<{ id: string }>();
 
-    const { baseline, draft, blockKeys, hydrate, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap, commit, reset, clear } = useTemplateStore();
+    const { baseline, draft, blockKeys, name, baselineName, hydrate, setName, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap, commit, reset, clear } = useTemplateStore();
     const { undoLabel, offerUndo, undo } = useUndoableEdit();
 
     const [loading, setLoading] = useState(true);
@@ -46,6 +47,7 @@ export default function DayTemplateScreen() {
     const [editor, setEditor] = useState<Editor | null>(null);
     const [saving, setSaving] = useState(false);
     const [saveError, setSaveError] = useState<string | null>(null);
+    const [nameError, setNameError] = useState<string | null>(null);
     const [savedVisible, setSavedVisible] = useState(false);
     const [entering, setEntering] = useState(false);
     // Measured so the scroll can reserve exactly the dirty-state footer's height,
@@ -53,16 +55,19 @@ export default function DayTemplateScreen() {
     const [footerHeight, setFooterHeight] = useState(0);
 
     const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const nameInputRef = useRef<TextInput>(null);
 
     // Memoized so the serialize-and-validate work reruns only when the draft or
     // baseline changes, not on every toast, flash, or saving update.
-    const dirty = useMemo(() => isTemplateDirty(baseline, draft), [baseline, draft]);
+    const trimmedName = name.trim();
+    const nameValid = trimmedName.length > 0 && trimmedName.length <= 50;
+    const dirty = useMemo(() => isTemplateDirty(baseline, draft) || trimmedName !== baselineName, [baseline, draft, trimmedName, baselineName]);
     const valid = useMemo(() => isTemplateValid(draft), [draft]);
 
     const load = useCallback(async () => {
         setLoading(true);
         setError(null);
-        const result = await api.getDayTemplate();
+        const result = await api.getDayTemplate(id);
         if (result.ok) {
             hydrate(result.data);
             setEntering(true);
@@ -70,7 +75,7 @@ export default function DayTemplateScreen() {
             setError(result.error);
         }
         setLoading(false);
-    }, [hydrate]);
+    }, [hydrate, id]);
 
     useEffect(() => {
         if (!entering) return;
@@ -147,9 +152,19 @@ export default function DayTemplateScreen() {
 
     async function handleSave() {
         if (!draft) return;
+        if (!nameValid) {
+            setNameError('Name must be 1–50 characters');
+            return;
+        }
         setSaving(true);
         setSaveError(null);
-        const result = await api.updateDayTemplate(draft);
+        setNameError(null);
+        const result = await api.updateDayTemplate(id, {
+            name: trimmedName,
+            wakeTime: draft.wakeTime,
+            sleepTime: draft.sleepTime,
+            blocks: draft.blocks,
+        });
         setSaving(false);
         if (result.ok) {
             // Adopt the draft as the new baseline so the screen is no longer dirty.
@@ -157,6 +172,8 @@ export default function DayTemplateScreen() {
             setSavedVisible(true);
             if (savedTimer.current) clearTimeout(savedTimer.current);
             savedTimer.current = setTimeout(() => setSavedVisible(false), 1800);
+        } else if (result.status === 409) {
+            setNameError('You already have a template with that name');
         } else {
             setSaveError(result.error);
         }
@@ -193,7 +210,7 @@ export default function DayTemplateScreen() {
         return ((maxEnd - sleep) / 60) * POINTS_PER_HOUR;
     }, [draft]);
 
-    const canSave = dirty && valid && !saving;
+    const canSave = dirty && valid && nameValid && !saving;
 
     const scrollRef = useAnimatedRef<Animated.ScrollView>();
     const scrollY = useSharedValue(0);
@@ -243,6 +260,29 @@ export default function DayTemplateScreen() {
                         onScroll={scrollHandler}
                         scrollEventThrottle={16}
                     >
+                        <View style={styles.nameRow}>
+                            <TextInput
+                                ref={nameInputRef}
+                                style={[styles.nameTitle, nameError ? styles.nameTitleError : null]}
+                                value={name}
+                                onChangeText={(t) => { setName(t); setNameError(null); setSaveError(null); }}
+                                placeholder="Name this template"
+                                placeholderTextColor={colors.text.muted}
+                                maxLength={50}
+                                multiline
+                                blurOnSubmit
+                                returnKeyType="done"
+                            />
+                            <TouchableOpacity
+                                onPress={() => nameInputRef.current?.focus()}
+                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                activeOpacity={0.6}
+                            >
+                                <Ionicons name="pencil-outline" size={18} color={colors.text.muted} />
+                            </TouchableOpacity>
+                        </View>
+                        {nameError && <Text style={styles.nameErrorText}>{nameError}</Text>}
+
                         <Animated.View
                             style={styles.legend}
                             entering={entering ? FadeInDown.duration(300) : undefined}
@@ -396,6 +436,18 @@ const styles = StyleSheet.create({
     scroll: { flex: 1 },
     content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
     timeline: { paddingTop: spacing.lg, paddingBottom: spacing.lg },
+
+    // The name is the first body element, styled as a large borderless heading — matching
+    // the task detail title field — with a trailing pencil as its only edit cue and a danger
+    // baseline surfacing on error.
+    nameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
+    nameTitle: {
+        flex: 1,
+        fontSize: 22, fontWeight: '500', color: colors.text.primary,
+        letterSpacing: -0.4, lineHeight: 30, padding: 0, paddingHorizontal: 4,
+    },
+    nameTitleError: { borderBottomWidth: 1, borderBottomColor: colors.danger.default },
+    nameErrorText: { fontSize: 12, color: colors.danger.default, paddingHorizontal: 4 },
 
     legend: { gap: spacing.sm, backgroundColor: colors.surface.sunken, borderRadius: radius.md, paddingVertical: 10, paddingHorizontal: 12, marginTop: spacing.md },
     legendItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },

@@ -39,6 +39,7 @@ async function seedTemplate(blocks?: {
     return prisma.dayTemplate.create({
         data: {
             userId,
+            name: "My Day",
             wakeTime: "07:00",
             sleepTime: "23:00",
             blocks: {
@@ -126,11 +127,11 @@ async function cleanup() {
     const plans = await prisma.dayPlan.findMany({ where: { userId }, select: { id: true } });
     await prisma.plannedBlock.deleteMany({ where: { dayPlanId: { in: plans.map(p => p.id) } } });
     await prisma.dayPlan.deleteMany({ where: { userId } });
-    const template = await prisma.dayTemplate.findUnique({ where: { userId } });
-    if (template) {
-        await prisma.block.deleteMany({ where: { dayTemplateId: template.id } });
-        await prisma.dayTemplate.delete({ where: { id: template.id } });
+    const templates = await prisma.dayTemplate.findMany({ where: { userId }, select: { id: true } });
+    for (const t of templates) {
+        await prisma.block.deleteMany({ where: { dayTemplateId: t.id } });
     }
+    await prisma.dayTemplate.deleteMany({ where: { userId } });
 }
 
 beforeAll(async () => {

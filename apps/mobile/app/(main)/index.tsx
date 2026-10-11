@@ -465,10 +465,10 @@ export default function TodayScreen() {
         }
 
         if (planResult.status === 404) {
-            const templateResult = await api.getDayTemplate();
+            const templateResult = await api.listDayTemplates();
             setState({
                 status: 'empty',
-                template: templateResult.ok ? templateResult.data : null,
+                template: templateResult.ok ? (templateResult.data[0] ?? null) : null,
             });
             return;
         }

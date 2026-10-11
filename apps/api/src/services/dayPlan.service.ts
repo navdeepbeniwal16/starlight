@@ -163,19 +163,37 @@ type EligibleBlock = {
     energyLevel: 'HIGH' | 'MEDIUM' | 'LOW' | null;
 };
 
-async function getTemplateOrThrow(userId: string) {
-    const template = await prisma.dayTemplate.findUnique({
-        where: { userId },
-        select: {
-            wakeTime: true,
-            sleepTime: true,
-            blocks: {
-                select: { id: true, type: true, name: true, startTime: true, endTime: true, energyLevel: true },
-            },
+async function resolveTemplateForUser(userId: string) {
+    const templateSelect = {
+        id: true,
+        wakeTime: true,
+        sleepTime: true,
+        blocks: {
+            select: { id: true, type: true, name: true, startTime: true, endTime: true, energyLevel: true },
         },
+    } as const;
+
+    const lastPlan = await prisma.dayPlan.findFirst({
+        where: { userId, dayTemplateId: { not: null } },
+        orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+        select: { dayTemplateId: true },
     });
-    if (!template) throw new NoTemplateError();
-    return template;
+
+    if (lastPlan?.dayTemplateId) {
+        const lastUsed = await prisma.dayTemplate.findUnique({
+            where: { id: lastPlan.dayTemplateId },
+            select: templateSelect,
+        });
+        if (lastUsed) return lastUsed;
+    }
+
+    const fallback = await prisma.dayTemplate.findFirst({
+        where: { userId },
+        orderBy: { updatedAt: 'desc' },
+        select: templateSelect,
+    });
+    if (!fallback) throw new NoTemplateError();
+    return fallback;
 }
 
 function eligibleBlocksOf(blocks: EligibleBlock[], nowHHmm: string): EligibleBlock[] {
@@ -211,7 +229,7 @@ export async function generatePlanProposal(
     now: string,
     deps?: ScheduleDeps,
 ): Promise<PlanProposal> {
-    const template = await getTemplateOrThrow(userId);
+    const template = await resolveTemplateForUser(userId);
 
     const eligible = eligibleBlocksOf(template.blocks, nowHHmm);
     if (!eligible.some(b => b.type === 'CONTAINER')) {
@@ -326,7 +344,7 @@ export async function confirmPlan(
     nowHHmm: string,
     assignments: ConfirmAssignment[],
 ): Promise<DayPlan> {
-    const template = await getTemplateOrThrow(userId);
+    const template = await resolveTemplateForUser(userId);
 
     const templateBlockById = new Map(template.blocks.map(b => [b.id, b]));
     for (const a of assignments) {
@@ -427,6 +445,7 @@ export async function confirmPlan(
             data: {
                 userId,
                 date,
+                dayTemplateId: template.id,
                 wakeTime: template.wakeTime,
                 sleepTime: template.sleepTime,
                 status: 'ACTIVE',

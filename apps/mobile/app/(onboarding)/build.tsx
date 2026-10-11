@@ -9,7 +9,7 @@ import type { BlockInput } from "../../lib/api.types";
 import { isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, blockTypeTotals, POINTS_PER_HOUR, type OverlapChange } from "../../lib/templateDraft";
 import { formatDuration, toMins } from "../../lib/time";
 import { BLOCK_TYPE_LABELS, BLOCK_TYPE_LEGEND_HINTS } from "../../lib/templateBlocks";
-import { buildStarterTemplate } from "../../lib/starterTemplate";
+import { buildStarterTemplate, DEFAULT_TEMPLATE_NAME } from "../../lib/starterTemplate";
 import { useTemplateStore } from "../../stores/template.store";
 import { StepEyebrow } from "../../components/StepEyebrow";
 import { TemplateTimeline } from "../../components/TemplateTimeline";
@@ -26,7 +26,7 @@ export default function BuildScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
 
-    const { draft, blockKeys, hydrate, seed, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap } = useTemplateStore();
+    const { draft, blockKeys, templateId, name, hydrate, seed, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap } = useTemplateStore();
     const { undoLabel, offerUndo, undo } = useUndoableEdit();
     const scrollRef = useAnimatedRef<Animated.ScrollView>();
 
@@ -42,12 +42,14 @@ export default function BuildScreen() {
     const load = useCallback(async () => {
         setLoading(true);
         setError(null);
-        const result = await api.getDayTemplate();
+        const result = await api.listDayTemplates();
         if (result.ok) {
-            hydrate(result.data);
-        } else if (result.status === 404) {
-            seed(buildStarterTemplate());
-            setShowStarterHint(true);
+            if (result.data.length > 0) {
+                hydrate(result.data[0]);
+            } else {
+                seed(buildStarterTemplate(), DEFAULT_TEMPLATE_NAME);
+                setShowStarterHint(true);
+            }
         } else {
             setError(result.error);
         }
@@ -97,7 +99,10 @@ export default function BuildScreen() {
         if (!draft) return;
         setSaving(true);
         setSaveError(null);
-        const result = await api.updateDayTemplate(draft);
+        const payload = { name, wakeTime: draft.wakeTime, sleepTime: draft.sleepTime, blocks: draft.blocks };
+        const result = templateId
+            ? await api.updateDayTemplate(templateId, payload)
+            : await api.createDayTemplate(payload);
         setSaving(false);
         if (result.ok) {
             router.push('/(onboarding)/first-task');

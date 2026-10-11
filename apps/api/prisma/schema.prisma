@@ -9,26 +9,30 @@ datasource db {
 }
 
 model User {
-  id           String       @id @default(cuid())
-  clerkUserId  String       @unique
+  id           String        @id @default(cuid())
+  clerkUserId  String        @unique
   onboardedAt  DateTime?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  dayTemplate  DayTemplate?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  dayTemplates DayTemplate[]
   dayPlans     DayPlan[]
   tasks        Task[]
   projects     Project[]
 }
 
 model DayTemplate {
-  id        String   @id @default(cuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id])
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  name      String    @db.Citext
   wakeTime  String
   sleepTime String
   blocks    Block[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  dayPlans  DayPlan[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([userId, name])
 }
 
 model Block {
@@ -58,16 +62,21 @@ enum EnergyLevel {
 }
 
 model DayPlan {
-  id        String         @id @default(cuid())
-  userId    String
-  user      User           @relation(fields: [userId], references: [id])
-  date      String
-  wakeTime  String
-  sleepTime String
-  status    DayPlanStatus  @default(DRAFT)
-  blocks    PlannedBlock[]
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  id            String         @id @default(cuid())
+  userId        String
+  user          User           @relation(fields: [userId], references: [id])
+  // Nulled, not cascaded, when the source template is deleted — the plan keeps
+  // its snapshotted blocks and only loses the provenance link. Also the source
+  // of "last used" for the next plan's template resolution.
+  dayTemplateId String?
+  dayTemplate   DayTemplate?   @relation(fields: [dayTemplateId], references: [id], onDelete: SetNull)
+  date          String
+  wakeTime      String
+  sleepTime     String
+  status        DayPlanStatus  @default(DRAFT)
+  blocks        PlannedBlock[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
   @@unique([userId, date, status])
 }

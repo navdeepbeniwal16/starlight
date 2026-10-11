@@ -1,103 +1,104 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { BlockInput } from "../types/dayTemplate.types";
 import { validateDayTemplate } from "./dayTemplate.validator";
 
-export class DayTemplateNotFoundError extends Error { };
-export class DayTemplateAlreadyExistsError extends Error { };
+export class DayTemplateNotFoundError extends Error { }
+export class DuplicateTemplateNameError extends Error { }
 
-export async function getDayTemplate(userId: string) {
-    const template = await prisma.dayTemplate.findUnique({
+// Name uniqueness is enforced by @@unique([userId, name]) on a citext column, so
+// a colliding write surfaces as Prisma's P2002 rather than an in-code check.
+function isDuplicateName(error: unknown): boolean {
+    return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+function blockRows(dayTemplateId: string, blocks: BlockInput[]) {
+    return blocks.map(block => ({
+        dayTemplateId,
+        type: block.type,
+        name: block.name,
+        startTime: block.startTime,
+        endTime: block.endTime,
+        energyLevel: block.energyLevel,
+    }));
+}
+
+export async function listDayTemplates(userId: string) {
+    return prisma.dayTemplate.findMany({
         where: { userId },
-        include: { blocks: true }
+        orderBy: { updatedAt: "desc" },
+        include: { blocks: true },
+    });
+}
+
+export async function getDayTemplateById(userId: string, id: string) {
+    const template = await prisma.dayTemplate.findFirst({
+        where: { id, userId },
+        include: { blocks: true },
     });
 
+    // it 404s rather than revealing that the template exists.
     if (!template) throw new DayTemplateNotFoundError();
-
     return template;
 }
 
 export async function createDayTemplate(data: {
     userId: string,
+    name: string,
     wakeTime: string,
     sleepTime: string,
-    blocks: BlockInput[]
+    blocks: BlockInput[],
 }) {
-    validateDayTemplate({
-        wakeTime: data.wakeTime,
-        sleepTime: data.sleepTime,
-        blocks: data.blocks,
-    });
+    const name = data.name.trim();
+    validateDayTemplate({ name, wakeTime: data.wakeTime, sleepTime: data.sleepTime, blocks: data.blocks });
 
-    // Validate no pre-existing day template for user
-    const exists = await prisma.dayTemplate.findUnique({
-        where: { userId: data.userId }
-    });
-
-    if (exists) {
-        throw new DayTemplateAlreadyExistsError();
+    let createdId: string;
+    try {
+        createdId = await prisma.$transaction(async (tx) => {
+            const template = await tx.dayTemplate.create({
+                data: { userId: data.userId, name, wakeTime: data.wakeTime, sleepTime: data.sleepTime },
+            });
+            await tx.block.createMany({ data: blockRows(template.id, data.blocks) });
+            return template.id;
+        });
+    } catch (error) {
+        if (isDuplicateName(error)) throw new DuplicateTemplateNameError();
+        throw error;
     }
 
-    // Create template & blocks in a transaction
-    const result = await prisma.$transaction(async (tx) => {
-        const template = await tx.dayTemplate.create({
-            data: {
-                userId: data.userId,
-                wakeTime: data.wakeTime,
-                sleepTime: data.sleepTime
-            }
-        });
-
-        await tx.block.createMany({
-            data: data.blocks.map(block => ({
-                dayTemplateId: template.id,
-                type: block.type,
-                name: block.name,
-                startTime: block.startTime,
-                endTime: block.endTime,
-                energyLevel: block.energyLevel
-            }))
-        });
-
-        return template;
-    });
-
-    return result;
+    return getDayTemplateById(data.userId, createdId);
 }
 
-// Create-or-replace so callers can "save my day" without tracking whether a
-// template already exists — no client-side exists flag to drift from the server.
-export async function upsertDayTemplate(data: {
+export async function updateDayTemplate(data: {
     userId: string,
+    id: string,
+    name: string,
     wakeTime: string,
     sleepTime: string,
-    blocks: BlockInput[]
+    blocks: BlockInput[],
 }) {
-    validateDayTemplate({
-        wakeTime: data.wakeTime,
-        sleepTime: data.sleepTime,
-        blocks: data.blocks,
+    const name = data.name.trim();
+    validateDayTemplate({ name, wakeTime: data.wakeTime, sleepTime: data.sleepTime, blocks: data.blocks });
+
+    const existing = await prisma.dayTemplate.findFirst({
+        where: { id: data.id, userId: data.userId },
+        select: { id: true },
     });
+    if (!existing) throw new DayTemplateNotFoundError();
 
-    await prisma.$transaction(async (tx) => {
-        const template = await tx.dayTemplate.upsert({
-            where: { userId: data.userId },
-            update: { wakeTime: data.wakeTime, sleepTime: data.sleepTime },
-            create: { userId: data.userId, wakeTime: data.wakeTime, sleepTime: data.sleepTime }
+    try {
+        await prisma.$transaction(async (tx) => {
+            await tx.dayTemplate.update({
+                where: { id: data.id },
+                data: { name, wakeTime: data.wakeTime, sleepTime: data.sleepTime },
+            });
+            await tx.block.deleteMany({ where: { dayTemplateId: data.id } });
+            await tx.block.createMany({ data: blockRows(data.id, data.blocks) });
         });
+    } catch (error) {
+        if (isDuplicateName(error)) throw new DuplicateTemplateNameError();
+        throw error;
+    }
 
-        await tx.block.deleteMany({ where: { dayTemplateId: template.id } });
-
-        await tx.block.createMany({
-            data: data.blocks.map(block => ({
-                dayTemplateId: template.id,
-                type: block.type,
-                name: block.name,
-                startTime: block.startTime,
-                endTime: block.endTime,
-                energyLevel: block.energyLevel
-            }))
-        });
-    });
-
-    return getDayTemplate(data.userId);
+    return getDayTemplateById(data.userId, data.id);
 }

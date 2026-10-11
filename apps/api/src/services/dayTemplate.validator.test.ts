@@ -2,8 +2,9 @@ import { validateDayTemplate, DayTemplateValidationError } from "./dayTemplate.v
 import { BlockInput } from "../types/dayTemplate.types";
 
 // A valid baseline template; individual tests clone and mutate it to isolate one broken invariant.
-function validTemplate(): { wakeTime: string; sleepTime: string; blocks: BlockInput[] } {
+function validTemplate(): { name: string; wakeTime: string; sleepTime: string; blocks: BlockInput[] } {
     return {
+        name: "Workday",
         wakeTime: "07:00",
         sleepTime: "23:00",
         blocks: [
@@ -18,6 +19,20 @@ describe("validateDayTemplate", () => {
     describe("valid input", () => {
         it("accepts a well-formed template", () => {
             expect(() => validateDayTemplate(validTemplate())).not.toThrow();
+        });
+    });
+
+    describe("name", () => {
+        it("rejects a blank name", () => {
+            expect(() => validateDayTemplate({ ...validTemplate(), name: "   " })).toThrow(/name must not be blank/i);
+        });
+
+        it("rejects an over-length name", () => {
+            expect(() => validateDayTemplate({ ...validTemplate(), name: "x".repeat(51) })).toThrow(/at most 50/);
+        });
+
+        it("accepts a name at the length limit", () => {
+            expect(() => validateDayTemplate({ ...validTemplate(), name: "x".repeat(50) })).not.toThrow();
         });
     });
 
