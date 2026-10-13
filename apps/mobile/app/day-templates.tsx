@@ -9,6 +9,7 @@ import { colors, radius, spacing, shadow } from "../lib/theme";
 import { blockTypeTotals } from "../lib/templateDraft";
 import { durationMins, formatDuration, formatTime } from "../lib/time";
 import { buildBlankTemplate } from "../lib/starterTemplate";
+import { buildDuplicateDraft } from "../lib/duplicateTemplate";
 import { useTemplateStore } from "../stores/template.store";
 import { PressableScale } from "../components/PressableScale";
 
@@ -32,7 +33,7 @@ function formatRelative(iso: string): string {
     return `${Math.floor(days / 365)}y ago`;
 }
 
-function TemplateCard({ template, onPress }: { template: DayTemplate; onPress: () => void }) {
+function TemplateCard({ template, onPress, onDuplicate }: { template: DayTemplate; onPress: () => void; onDuplicate: () => void }) {
     const { container, anchor } = blockTypeTotals(template);
     const waking = durationMins(template.wakeTime, template.sleepTime);
     const free = Math.max(0, waking - container - anchor);
@@ -42,6 +43,9 @@ function TemplateCard({ template, onPress }: { template: DayTemplate; onPress: (
             <View style={styles.cardHeader}>
                 <Text style={styles.name} numberOfLines={1}>{template.name}</Text>
                 <Text style={styles.updated} numberOfLines={1}>Updated {formatRelative(template.updatedAt)}</Text>
+                <PressableScale style={styles.cardAction} onPress={onDuplicate} activeScale={0.9} hitSlop={8}>
+                    <Ionicons name="copy-outline" size={18} color={colors.text.secondary} />
+                </PressableScale>
                 <Ionicons name="create-outline" size={18} color={colors.text.secondary} />
             </View>
 
@@ -103,6 +107,12 @@ export default function DayTemplatesScreen() {
         router.push('/day-template/new');
     }
 
+    function handleDuplicate(template: DayTemplate) {
+        const { name, draft } = buildDuplicateDraft(template);
+        seed(draft, name);
+        router.push('/day-template/new');
+    }
+
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <View style={styles.backRow}>
@@ -144,6 +154,7 @@ export default function DayTemplatesScreen() {
                             key={template.id}
                             template={template}
                             onPress={() => router.push(`/day-template/${template.id}`)}
+                            onDuplicate={() => handleDuplicate(template)}
                         />
                     ))}
                 </ScrollView>
@@ -184,6 +195,7 @@ const styles = StyleSheet.create({
     cardHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
     name: { flex: 1, fontSize: 16, fontWeight: '600', color: colors.text.primary, letterSpacing: -0.2 },
     updated: { fontSize: 12, color: colors.text.muted, letterSpacing: -0.1 },
+    cardAction: { padding: 2 },
 
     window: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     windowText: { fontSize: 13, color: colors.text.secondary, letterSpacing: -0.1, fontVariant: ['tabular-nums'] },
