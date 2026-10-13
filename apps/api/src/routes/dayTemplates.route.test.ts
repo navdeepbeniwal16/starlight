@@ -35,6 +35,10 @@ async function seedUser(clerkUserId: string) {
 }
 
 async function cleanup(userId: string) {
+    const plans = await prisma.dayPlan.findMany({ where: { userId }, select: { id: true } });
+    for (const p of plans) await prisma.plannedBlock.deleteMany({ where: { dayPlanId: p.id } });
+    await prisma.dayPlan.deleteMany({ where: { userId } });
+
     const templates = await prisma.dayTemplate.findMany({ where: { userId }, select: { id: true } });
     for (const t of templates) await prisma.block.deleteMany({ where: { dayTemplateId: t.id } });
     await prisma.dayTemplate.deleteMany({ where: { userId } });
@@ -179,5 +183,71 @@ describe("day-templates routes", () => {
     it("GET rejects an unauthenticated request with 401", async () => {
         const res = await request(app).get("/day-templates");
         expect(res.status).toBe(401);
+    });
+
+    it("DELETE removes a template (and its blocks) and drops it from the list", async () => {
+        await request(app).post("/day-templates").set(auth()).send(validBody("Workday"));
+        const weekend = await request(app).post("/day-templates").set(auth()).send(validBody("Weekend"));
+        const id = weekend.body.data.id;
+
+        const del = await request(app).delete(`/day-templates/${id}`).set(auth());
+        expect(del.status).toBe(204);
+
+        expect(await prisma.dayTemplate.findUnique({ where: { id } })).toBeNull();
+        expect(await prisma.block.count({ where: { dayTemplateId: id } })).toBe(0);
+
+        const list = await request(app).get("/day-templates").set(auth());
+        expect(list.body.data.map((t: { name: string }) => t.name)).toEqual(["Workday"]);
+    });
+
+    it("DELETE rejects removing the user's only template with 409 and leaves it intact", async () => {
+        const only = await request(app).post("/day-templates").set(auth()).send(validBody("Workday"));
+        const id = only.body.data.id;
+
+        const del = await request(app).delete(`/day-templates/${id}`).set(auth());
+        expect(del.status).toBe(409);
+        expect(del.body.error).toBeTruthy();
+
+        expect(await prisma.dayTemplate.findUnique({ where: { id } })).not.toBeNull();
+    });
+
+    it("DELETE is idempotent for an unknown id: 204 and no-op", async () => {
+        const del = await request(app).delete("/day-templates/nope").set(auth());
+        expect(del.status).toBe(204);
+    });
+
+    it("DELETE on another user's template is a 204 no-op that leaves it intact", async () => {
+        const foreignId = await seedForeignTemplate("Theirs");
+
+        const del = await request(app).delete(`/day-templates/${foreignId}`).set(auth());
+        expect(del.status).toBe(204);
+        expect(await prisma.dayTemplate.findUnique({ where: { id: foreignId } })).not.toBeNull();
+    });
+
+    it("DELETE nulls a past plan's template link while leaving the plan and its blocks intact", async () => {
+        await request(app).post("/day-templates").set(auth()).send(validBody("Workday"));
+        const weekend = await request(app).post("/day-templates").set(auth()).send(validBody("Weekend"));
+        const templateId = weekend.body.data.id;
+
+        const plan = await prisma.dayPlan.create({
+            data: {
+                userId,
+                dayTemplateId: templateId,
+                date: "2026-01-01",
+                wakeTime: "07:00",
+                sleepTime: "23:00",
+                blocks: {
+                    create: [{ type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" }],
+                },
+            },
+        });
+
+        const del = await request(app).delete(`/day-templates/${templateId}`).set(auth());
+        expect(del.status).toBe(204);
+
+        const after = await prisma.dayPlan.findUnique({ where: { id: plan.id }, include: { blocks: true } });
+        expect(after).not.toBeNull();
+        expect(after!.dayTemplateId).toBeNull();
+        expect(after!.blocks.map((b) => b.name)).toEqual(["Deep Work"]);
     });
 });

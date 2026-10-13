@@ -38,7 +38,7 @@ model DayTemplate {
 model Block {
   id            String       @id @default(cuid())
   dayTemplateId String
-  dayTemplate   DayTemplate  @relation(fields: [dayTemplateId], references: [id])
+  dayTemplate   DayTemplate  @relation(fields: [dayTemplateId], references: [id], onDelete: Cascade)
   type          BlockType
   name          String
   startTime     String

@@ -4,8 +4,10 @@ import {
     getDayTemplateById,
     createDayTemplate,
     updateDayTemplate,
+    deleteDayTemplate,
     DayTemplateNotFoundError,
     DuplicateTemplateNameError,
+    CannotDeleteLastTemplateError,
 } from "./dayTemplate.service";
 import { DayTemplateValidationError } from "./dayTemplate.validator";
 import { BlockInput } from "../types/dayTemplate.types";
@@ -221,5 +223,37 @@ describe("updateDayTemplate", () => {
 
         await expect(updateDayTemplate({ userId, id: weekend.id, name: "Workday", ...validTemplate() }))
             .rejects.toBeInstanceOf(DuplicateTemplateNameError);
+    });
+});
+
+describe("deleteDayTemplate", () => {
+    it("removes the template and its blocks when it isn't the user's last", async () => {
+        const workday = await createDayTemplate({ userId, name: "Workday", ...validTemplate() });
+        await createDayTemplate({ userId, name: "Weekend", ...validTemplate() });
+
+        await deleteDayTemplate(userId, workday.id);
+
+        expect(await prisma.dayTemplate.findUnique({ where: { id: workday.id } })).toBeNull();
+        expect(await prisma.block.count({ where: { dayTemplateId: workday.id } })).toBe(0);
+        expect((await listDayTemplates(userId)).map((t) => t.name)).toEqual(["Weekend"]);
+    });
+
+    it("throws NotFound for a missing id", async () => {
+        await expect(deleteDayTemplate(userId, "does-not-exist")).rejects.toBeInstanceOf(DayTemplateNotFoundError);
+    });
+
+    it("throws NotFound for another user's template (ownership isolation)", async () => {
+        const foreign = await createDayTemplate({ userId: otherUserId, name: "Theirs", ...validTemplate() });
+        await createDayTemplate({ userId: otherUserId, name: "Spare", ...validTemplate() });
+
+        await expect(deleteDayTemplate(userId, foreign.id)).rejects.toBeInstanceOf(DayTemplateNotFoundError);
+        expect(await prisma.dayTemplate.findUnique({ where: { id: foreign.id } })).not.toBeNull();
+    });
+
+    it("refuses to delete the user's only remaining template", async () => {
+        const only = await createDayTemplate({ userId, name: "Workday", ...validTemplate() });
+
+        await expect(deleteDayTemplate(userId, only.id)).rejects.toBeInstanceOf(CannotDeleteLastTemplateError);
+        expect(await prisma.dayTemplate.findUnique({ where: { id: only.id } })).not.toBeNull();
     });
 });
