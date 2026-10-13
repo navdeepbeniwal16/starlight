@@ -14,6 +14,7 @@ type TemplateState = {
     blockKeys: string[];
     hydrate: (template: DayTemplate) => void;
     seed: (draft: TemplateDraft, name: string) => void;
+    setTemplateId: (templateId: string) => void;
     setName: (name: string) => void;
     setWakeSleep: (wakeTime: string, sleepTime: string) => void;
     // Replace the whole draft (live drag/resolve path + Undo). blockKeys are left untouched
@@ -79,6 +80,8 @@ export const useTemplateStore = create<TemplateState>((set) => ({
             blockKeys: draft.blocks.map(nextKey),
         });
     },
+
+    setTemplateId: (templateId) => set({ templateId }),
 
     setName: (name) => set({ name }),
 
