@@ -19,3 +19,11 @@ export function buildStarterTemplate(): TemplateDraft {
         ],
     };
 }
+
+export function buildBlankTemplate(): TemplateDraft {
+    return {
+        wakeTime: '06:00',
+        sleepTime: '22:00',
+        blocks: []
+    };
+}

@@ -4,8 +4,6 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { useRouter, useNavigation, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, {
-    SlideInDown,
-    SlideOutDown,
     FadeIn,
     FadeInDown,
     FadeOut,
@@ -22,6 +20,7 @@ import type { BlockInput } from "../../lib/api.types";
 import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, blockTypeTotals, POINTS_PER_HOUR, type OverlapChange } from "../../lib/templateDraft";
 import { formatDuration, toMins } from "../../lib/time";
 import { BLOCK_TYPE_LABELS, BLOCK_TYPE_LEGEND_HINTS } from "../../lib/templateBlocks";
+import { buildBlankTemplate } from "../../lib/starterTemplate";
 import { useTemplateStore } from "../../stores/template.store";
 import { BlockEditorModal } from "../../components/BlockEditorModal";
 import { TemplateTimeline } from "../../components/TemplateTimeline";
@@ -38,8 +37,9 @@ export default function DayTemplateScreen() {
     const navigation = useNavigation();
     const insets = useSafeAreaInsets();
     const { id } = useLocalSearchParams<{ id: string }>();
+    const isCreating = id === 'new';
 
-    const { baseline, draft, blockKeys, name, baselineName, hydrate, setName, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap, commit, reset, clear } = useTemplateStore();
+    const { baseline, draft, blockKeys, name, baselineName, templateId, hydrate, seed, setTemplateId, setName, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap, commit, reset, clear } = useTemplateStore();
     const { undoLabel, offerUndo, undo } = useUndoableEdit();
 
     const [loading, setLoading] = useState(true);
@@ -50,8 +50,8 @@ export default function DayTemplateScreen() {
     const [nameError, setNameError] = useState<string | null>(null);
     const [savedVisible, setSavedVisible] = useState(false);
     const [entering, setEntering] = useState(false);
-    // Measured so the scroll can reserve exactly the dirty-state footer's height,
-    // keeping the last row (sleep) reachable above it rather than hidden behind.
+    // Measured so the scroll can reserve exactly the footer's height, keeping the
+    // last row (sleep) reachable above it rather than hidden behind.
     const [footerHeight, setFooterHeight] = useState(0);
 
     const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -63,8 +63,18 @@ export default function DayTemplateScreen() {
     const nameValid = trimmedName.length > 0 && trimmedName.length <= 50;
     const dirty = useMemo(() => isTemplateDirty(baseline, draft) || trimmedName !== baselineName, [baseline, draft, trimmedName, baselineName]);
     const valid = useMemo(() => isTemplateValid(draft), [draft]);
+    const isUnsaved = templateId === null;
+    const canSave = valid && nameValid && !saving && (isUnsaved || dirty);
+    const guardUnsaved = dirty || (isUnsaved && valid);
 
     const load = useCallback(async () => {
+        if (isCreating) {
+            // The store is seeded before navigation; a cold entry (deep link / reload) arrives unseeded.
+            if (!useTemplateStore.getState().draft) seed(buildBlankTemplate(), '');
+            setEntering(true);
+            setLoading(false);
+            return;
+        }
         setLoading(true);
         setError(null);
         const result = await api.getDayTemplate(id);
@@ -75,7 +85,7 @@ export default function DayTemplateScreen() {
             setError(result.error);
         }
         setLoading(false);
-    }, [hydrate, id]);
+    }, [hydrate, seed, isCreating, id]);
 
     useEffect(() => {
         if (!entering) return;
@@ -97,13 +107,13 @@ export default function DayTemplateScreen() {
     // beforeRemove guard below, so disable the gesture while there are unsaved
     // edits — the back button (which the guard intercepts) becomes the only exit.
     useEffect(() => {
-        navigation.setOptions({ gestureEnabled: !dirty });
-    }, [navigation, dirty]);
+        navigation.setOptions({ gestureEnabled: !guardUnsaved });
+    }, [navigation, guardUnsaved]);
 
     // Confirm before discarding unsaved edits on any back navigation.
     useEffect(() => {
         const sub = navigation.addListener('beforeRemove', (e: any) => {
-            if (!dirty) return;
+            if (!guardUnsaved) return;
             e.preventDefault();
             Alert.alert(
                 'Discard changes?',
@@ -115,7 +125,7 @@ export default function DayTemplateScreen() {
             );
         });
         return sub;
-    }, [navigation, dirty, reset]);
+    }, [navigation, guardUnsaved, reset]);
 
     function handleWakeSleep(wake: string, sleep: string) {
         setSaveError(null);
@@ -159,14 +169,18 @@ export default function DayTemplateScreen() {
         setSaving(true);
         setSaveError(null);
         setNameError(null);
-        const result = await api.updateDayTemplate(id, {
+        const payload = {
             name: trimmedName,
             wakeTime: draft.wakeTime,
             sleepTime: draft.sleepTime,
             blocks: draft.blocks,
-        });
+        };
+        const result = templateId
+            ? await api.updateDayTemplate(templateId, payload)
+            : await api.createDayTemplate(payload);
         setSaving(false);
         if (result.ok) {
+            if (!templateId) setTemplateId(result.data.id);
             // Adopt the draft as the new baseline so the screen is no longer dirty.
             commit();
             setSavedVisible(true);
@@ -180,6 +194,10 @@ export default function DayTemplateScreen() {
     }
 
     function handleCancel() {
+        if (!guardUnsaved) {
+            router.back();
+            return;
+        }
         Alert.alert(
             'Discard changes?',
             'You have unsaved edits to your day template.',
@@ -210,8 +228,6 @@ export default function DayTemplateScreen() {
         return ((maxEnd - sleep) / 60) * POINTS_PER_HOUR;
     }, [draft]);
 
-    const canSave = dirty && valid && nameValid && !saving;
-
     const scrollRef = useAnimatedRef<Animated.ScrollView>();
     const scrollY = useSharedValue(0);
     const scrollHandler = useAnimatedScrollHandler((e) => { scrollY.value = e.contentOffset.y; });
@@ -223,10 +239,10 @@ export default function DayTemplateScreen() {
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <View style={styles.header}>
                 <View style={styles.headerEyebrow}>
-                    <Text style={styles.headerEyebrowLabel}>Day Template</Text>
+                    <Text style={styles.headerEyebrowLabel}>{isCreating ? 'New Day Template' : 'Day Template'}</Text>
                 </View>
                 <View style={styles.headerRow}>
-                    <Text style={styles.headerTitle}>Reshape your day</Text>
+                    <Text style={styles.headerTitle}>{isCreating ? 'Shape your day' : 'Reshape your day'}</Text>
                     <TouchableOpacity onPress={() => router.back()} activeOpacity={0.6} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                         <Ionicons name="close" size={22} color={colors.text.primary} />
                     </TouchableOpacity>
@@ -255,7 +271,7 @@ export default function DayTemplateScreen() {
                     <Animated.ScrollView
                         ref={scrollRef}
                         style={styles.scroll}
-                        contentContainerStyle={[styles.content, dirty && { paddingBottom: (footerHeight || 160) + spacing.md + bottomOverflow }]}
+                        contentContainerStyle={[styles.content, { paddingBottom: (footerHeight || 160) + spacing.md + bottomOverflow }]}
                         showsVerticalScrollIndicator={false}
                         onScroll={scrollHandler}
                         scrollEventThrottle={16}
@@ -337,33 +353,29 @@ export default function DayTemplateScreen() {
                         />
                     </Animated.ScrollView>
 
-                    {dirty && (
-                        <Animated.View
-                            style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}
-                            onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}
-                            entering={SlideInDown.springify().damping(20).stiffness(220).mass(0.6)}
-                            exiting={SlideOutDown.duration(180)}
+                    <View
+                        style={[styles.footer, { paddingBottom: Math.max(insets.bottom - 22, 8) }]}
+                        onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}
+                    >
+                        {saveError && <Text style={styles.saveErrorText}>{saveError}</Text>}
+                        <PressableScale
+                            style={[styles.saveButton, !canSave && styles.saveButtonDisabled]}
+                            onPress={handleSave}
+                            disabled={!canSave}
                         >
-                            {saveError && <Text style={styles.saveErrorText}>{saveError}</Text>}
-                            <PressableScale
-                                style={[styles.saveButton, !canSave && styles.saveButtonDisabled]}
-                                onPress={handleSave}
-                                disabled={!canSave}
-                            >
-                                {saving
-                                    ? <ActivityIndicator color={colors.surface.page} />
-                                    : <Text style={styles.saveButtonText}>Save</Text>}
-                            </PressableScale>
-                            <TouchableOpacity
-                                style={styles.cancelButton}
-                                onPress={handleCancel}
-                                disabled={saving}
-                                activeOpacity={0.8}
-                            >
-                                <Text style={styles.cancelButtonText}>Cancel</Text>
-                            </TouchableOpacity>
-                        </Animated.View>
-                    )}
+                            {saving
+                                ? <ActivityIndicator color={colors.surface.page} />
+                                : <Text style={styles.saveButtonText}>Save</Text>}
+                        </PressableScale>
+                        <TouchableOpacity
+                            style={styles.cancelButton}
+                            onPress={handleCancel}
+                            disabled={saving}
+                            activeOpacity={0.8}
+                        >
+                            <Text style={styles.cancelButtonText}>Cancel</Text>
+                        </TouchableOpacity>
+                    </View>
                 </Animated.View>
             )}
 
