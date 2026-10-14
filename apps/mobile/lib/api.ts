@@ -109,6 +109,30 @@ export const api = {
     }
   },
 
+  deleteDayTemplate: async (id: string): Promise<ApiResult<null>> => {
+    const token = await getToken();
+
+    if (!token) {
+      return { ok: false, error: 'No token found' };
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/day-templates/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        const responseJson = await response.json().catch(() => ({}));
+        return { ok: false, error: (responseJson as { error?: string }).error ?? `HTTP ${response.status}`, status: response.status };
+      }
+
+      return { ok: true, data: null };
+    } catch (error) {
+      return { ok: false, error: 'Network error. Please check your connection.' };
+    }
+  },
+
   getDayPlan: async (): Promise<GetDayPlanResponse> => {
     const token = await getToken();
 

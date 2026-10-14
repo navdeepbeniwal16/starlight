@@ -5,6 +5,7 @@ import { validateDayTemplate } from "./dayTemplate.validator";
 
 export class DayTemplateNotFoundError extends Error { }
 export class DuplicateTemplateNameError extends Error { }
+export class CannotDeleteLastTemplateError extends Error { }
 
 // Name uniqueness is enforced by @@unique([userId, name]) on a citext column, so
 // a colliding write surfaces as Prisma's P2002 rather than an in-code check.
@@ -92,6 +93,8 @@ export async function updateDayTemplate(data: {
                 where: { id: data.id },
                 data: { name, wakeTime: data.wakeTime, sleepTime: data.sleepTime },
             });
+            // An edit replaces the whole block set — the template itself survives, so
+            // the delete-on-template cascade never fires here; blocks are cleared by hand.
             await tx.block.deleteMany({ where: { dayTemplateId: data.id } });
             await tx.block.createMany({ data: blockRows(data.id, data.blocks) });
         });
@@ -101,4 +104,17 @@ export async function updateDayTemplate(data: {
     }
 
     return getDayTemplateById(data.userId, data.id);
+}
+
+export async function deleteDayTemplate(userId: string, id: string) {
+    const existing = await prisma.dayTemplate.findFirst({ where: { id, userId }, select: { id: true } });
+    if (!existing) throw new DayTemplateNotFoundError();
+
+    // The user must always be left with at least one template, so a schedule can
+    // still be generated. The count includes the target, so one means it's the last.
+    if (await prisma.dayTemplate.count({ where: { userId } }) === 1) {
+        throw new CannotDeleteLastTemplateError();
+    }
+
+    await prisma.dayTemplate.delete({ where: { id } });
 }

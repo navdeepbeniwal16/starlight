@@ -46,6 +46,7 @@ export default function DayTemplateScreen() {
     const [error, setError] = useState<string | null>(null);
     const [editor, setEditor] = useState<Editor | null>(null);
     const [saving, setSaving] = useState(false);
+    const [deleting, setDeleting] = useState(false);
     const [saveError, setSaveError] = useState<string | null>(null);
     const [nameError, setNameError] = useState<string | null>(null);
     const [savedVisible, setSavedVisible] = useState(false);
@@ -56,6 +57,9 @@ export default function DayTemplateScreen() {
 
     const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const nameInputRef = useRef<TextInput>(null);
+    // Set before a delete navigates back, to suppress the unsaved-changes guard
+    // that would otherwise prompt to discard pending edits.
+    const deletedRef = useRef(false);
 
     // Memoized so the serialize-and-validate work reruns only when the draft or
     // baseline changes, not on every toast, flash, or saving update.
@@ -113,7 +117,7 @@ export default function DayTemplateScreen() {
     // Confirm before discarding unsaved edits on any back navigation.
     useEffect(() => {
         const sub = navigation.addListener('beforeRemove', (e: any) => {
-            if (!guardUnsaved) return;
+            if (deletedRef.current || !guardUnsaved) return;
             e.preventDefault();
             Alert.alert(
                 'Discard changes?',
@@ -206,6 +210,32 @@ export default function DayTemplateScreen() {
                 { text: 'Discard', style: 'destructive', onPress: reset },
             ],
         );
+    }
+
+    function confirmDelete() {
+        Alert.alert(
+            'Delete template?',
+            'Plans already generated from it stay unchanged. This cannot be undone.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Delete', style: 'destructive', onPress: handleDelete },
+            ],
+        );
+    }
+
+    async function handleDelete() {
+        if (!templateId) return;
+        setDeleting(true);
+        const result = await api.deleteDayTemplate(templateId);
+        if (result.ok) {
+            deletedRef.current = true;
+            router.back();
+        } else {
+            setDeleting(false);
+            // The last-template guard is the server's rule; surface its message
+            // rather than re-deriving the threshold on the client.
+            Alert.alert("Couldn't delete template", result.error);
+        }
     }
 
     const totals = useMemo(() => blockTypeTotals(draft), [draft]);
@@ -351,6 +381,18 @@ export default function DayTemplateScreen() {
                             onCreateRange={handleCreateRange}
                             onLiveEdit={(snapshot, label) => { setSaveError(null); offerUndo(snapshot, label); }}
                         />
+
+                        {!isCreating && (
+                            <TouchableOpacity
+                                style={styles.deleteButton}
+                                onPress={confirmDelete}
+                                disabled={deleting || saving}
+                                activeOpacity={0.8}
+                            >
+                                <Ionicons name="trash-outline" size={16} color={colors.danger.default} />
+                                <Text style={styles.deleteLabel}>Delete</Text>
+                            </TouchableOpacity>
+                        )}
                     </Animated.ScrollView>
 
                     <View
@@ -472,6 +514,9 @@ const styles = StyleSheet.create({
     legendDesc: { fontWeight: '400', fontStyle: 'italic', color: colors.text.secondary },
     hintStrip: { fontSize: 12, color: colors.text.muted, letterSpacing: -0.2, textAlign: 'center' },
     hintKey: { fontWeight: '600', color: colors.text.primary },
+
+    deleteButton: { height: 48, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, marginTop: 8 },
+    deleteLabel: { fontSize: 15, fontWeight: '500', color: colors.danger.default, letterSpacing: -0.23 },
 
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: spacing.lg },
     errorText: { fontSize: 14, color: colors.text.secondary, textAlign: 'center' },

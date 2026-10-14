@@ -5,8 +5,10 @@ import {
     getDayTemplateById,
     createDayTemplate,
     updateDayTemplate,
+    deleteDayTemplate,
     DayTemplateNotFoundError,
     DuplicateTemplateNameError,
+    CannotDeleteLastTemplateError,
 } from "../services/dayTemplate.service";
 import { DayTemplateValidationError } from "../services/dayTemplate.validator";
 import { BlockInput } from "../types/dayTemplate.types";
@@ -142,6 +144,25 @@ router.patch("/:id", authenticate, async (req: Request, res: Response): Promise<
         }
         if (error instanceof DuplicateTemplateNameError) {
             res.status(409).json({ success: false, error: "You already have a template with that name" });
+            return;
+        }
+        throw error;
+    }
+});
+
+router.delete("/:id", authenticate, async (req: Request, res: Response): Promise<void> => {
+    try {
+        await deleteDayTemplate(req.user!.sub, req.params.id as string);
+        res.status(204).send();
+    } catch (error) {
+        // Delete is idempotent: a missing or not-owned template is already in the
+        // caller's desired end state, so report the no-op as success rather than 404.
+        if (error instanceof DayTemplateNotFoundError) {
+            res.status(204).send();
+            return;
+        }
+        if (error instanceof CannotDeleteLastTemplateError) {
+            res.status(409).json({ success: false, error: "You can't delete your only day template" });
             return;
         }
         throw error;
