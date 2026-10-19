@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma";
 import type { ConfirmAssignment, DayPlan, PlanProposal, ProposalBlock, ReviewTasks } from "../types/dayPlan.types";
 import { generateSchedule, remainingMinsOf, type RawTask, type ScheduleDeps } from "./planAgent.service";
+import { getDayTemplateById } from "./dayTemplate.service";
 
 export class NoTemplateError extends Error { }
 export class NoContainerBlocksError extends Error { }
@@ -163,6 +164,13 @@ type EligibleBlock = {
     energyLevel: 'HIGH' | 'MEDIUM' | 'LOW' | null;
 };
 
+type ResolvedTemplate = {
+    id: string;
+    wakeTime: string;
+    sleepTime: string;
+    blocks: EligibleBlock[];
+};
+
 async function resolveTemplateForUser(userId: string) {
     const templateSelect = {
         id: true,
@@ -196,6 +204,12 @@ async function resolveTemplateForUser(userId: string) {
     return fallback;
 }
 
+async function resolveTemplate(userId: string, templateId?: string): Promise<ResolvedTemplate> {
+    return templateId
+        ? getDayTemplateById(userId, templateId)
+        : resolveTemplateForUser(userId);
+}
+
 function eligibleBlocksOf(blocks: EligibleBlock[], nowHHmm: string): EligibleBlock[] {
     return blocks
         .filter(b => b.endTime > nowHHmm)
@@ -219,6 +233,7 @@ function eligibleBlocksOf(blocks: EligibleBlock[], nowHHmm: string): EligibleBlo
  * anchor. `deps` is the agent dependency seam, forwarded for tests; production omits it.
  *
  * @throws {NoTemplateError} If the user has no day template.
+ * @throws {DayTemplateNotFoundError} If `templateId` isn't the caller's template.
  * @throws {NoContainerBlocksError} If no CONTAINER block remains today.
  * @throws {AgentError} If the agent call fails or returns malformed output.
  */
@@ -227,9 +242,10 @@ export async function generatePlanProposal(
     date: string,
     nowHHmm: string,
     now: string,
+    templateId?: string,
     deps?: ScheduleDeps,
 ): Promise<PlanProposal> {
-    const template = await resolveTemplateForUser(userId);
+    const template = await resolveTemplate(userId, templateId);
 
     const eligible = eligibleBlocksOf(template.blocks, nowHHmm);
     if (!eligible.some(b => b.type === 'CONTAINER')) {

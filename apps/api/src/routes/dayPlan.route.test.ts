@@ -29,6 +29,7 @@ import app from "../app";
 import { prisma } from "../lib/prisma";
 
 const TEST_CLERK_ID = "user_test_dayplan_route";
+const OTHER_CLERK_ID = "user_test_dayplan_route_other";
 
 // A container block spanning the whole day, so it survives elapsed-block
 // filtering whatever the wall-clock time is when the test runs.
@@ -62,19 +63,24 @@ async function cleanup(userId: string) {
 }
 
 let userId: string;
+let otherUserId: string;
 
 beforeAll(async () => {
     userId = (await seedUser(TEST_CLERK_ID)).id;
+    otherUserId = (await seedUser(OTHER_CLERK_ID)).id;
     mockUserId = userId;
 });
 
 beforeEach(async () => {
     await cleanup(userId);
+    await cleanup(otherUserId);
+    mockUserId = userId;
 });
 
 afterAll(async () => {
     await cleanup(userId);
-    await prisma.user.delete({ where: { id: userId } });
+    await cleanup(otherUserId);
+    await prisma.user.deleteMany({ where: { id: { in: [userId, otherUserId] } } });
     await prisma.$disconnect();
 });
 
@@ -122,6 +128,36 @@ describe("day-plan routes: multi-template resolution", () => {
 
         expect(res.status).toBe(200);
         expect(res.body.data.wakeTime).toBe("06:00"); // Workday (most recently updated)
+    });
+
+    it("POST /generate builds from an explicitly chosen owned template, overriding last-used", async () => {
+        const weekend = await seedTemplate(userId, "Weekend", "09:00");
+        const workday = await seedTemplate(userId, "Workday", "06:00");
+        await prisma.dayPlan.create({
+            data: { userId, date: "2026-09-01", status: "COMPLETED", wakeTime: "09:00", sleepTime: "23:59", dayTemplateId: weekend.id },
+        });
+
+        const res = await request(app).post("/day-plan/generate").set(auth()).send({ templateId: workday.id });
+
+        expect(res.status).toBe(200);
+        expect(res.body.data.wakeTime).toBe("06:00");
+    });
+
+    it("POST /generate rejects a templateId belonging to another user with 404", async () => {
+        await seedTemplate(userId, "Mine", "07:00");
+        const foreign = await seedTemplate(otherUserId, "Theirs", "08:00");
+
+        const res = await request(app).post("/day-plan/generate").set(auth()).send({ templateId: foreign.id });
+
+        expect(res.status).toBe(404);
+    });
+
+    it("POST /generate rejects a nonexistent templateId with 404", async () => {
+        await seedTemplate(userId, "Mine", "07:00");
+
+        const res = await request(app).post("/day-plan/generate").set(auth()).send({ templateId: "no-such-template" });
+
+        expect(res.status).toBe(404);
     });
 
     it("POST /generate returns NO_TEMPLATE when the user has no template", async () => {

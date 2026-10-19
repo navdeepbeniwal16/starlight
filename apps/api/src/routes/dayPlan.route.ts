@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
 import { getDayPlan, getReviewTasks, generatePlanProposal, confirmPlan, NoTemplateError, NoContainerBlocksError, InvalidAssignmentError } from "../services/dayPlan.service";
+import { DayTemplateNotFoundError } from "../services/dayTemplate.service";
 import { AgentError } from "../services/planAgent.service";
 import type { ConfirmAssignment } from "../types/dayPlan.types";
 import { dateRegex, todayDateString, nowTimeString, parseTimezoneOffset } from "../lib/clientDate";
@@ -46,15 +47,25 @@ router.get("/review-tasks", authenticate, async (req: Request, res: Response): P
 router.post("/generate", authenticate, async (req: Request, res: Response): Promise<void> => {
     res.set("Cache-Control", "no-store, private");
 
+    const { templateId } = (req.body ?? {}) as { templateId?: unknown };
+    if (templateId !== undefined && typeof templateId !== 'string') {
+        res.status(400).json({ success: false, error: 'templateId must be a string' });
+        return;
+    }
+
     const utcOffsetMins = parseTimezoneOffset(req);
     const date = todayDateString(utcOffsetMins);
     const nowHHmm = nowTimeString(utcOffsetMins);
     const now = new Date().toISOString();
 
     try {
-        const result = await generatePlanProposal(req.user!.sub, date, nowHHmm, now);
+        const result = await generatePlanProposal(req.user!.sub, date, nowHHmm, now, templateId);
         res.status(200).json({ success: true, data: result });
     } catch (error) {
+        if (error instanceof DayTemplateNotFoundError) {
+            res.status(404).json({ success: false, error: 'Day template not found' });
+            return;
+        }
         if (error instanceof NoTemplateError) {
             res.status(400).json({ success: false, code: 'NO_TEMPLATE', error: 'No day template found. Please set up your day template first.' });
             return;
