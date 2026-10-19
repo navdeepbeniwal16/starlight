@@ -192,6 +192,39 @@ describe("day-plan routes: multi-template resolution", () => {
         expect(stored?.dayTemplateId).toBe(lastUsed.id);
     });
 
+    it("POST /confirm records the client-sent templateId, not a re-resolved one", async () => {
+        const lastUsed = await seedTemplate(userId, "Weekend", "09:00");
+        const chosen = await seedTemplate(userId, "Workday", "06:00");
+        await prisma.dayPlan.create({
+            data: { userId, date: "2026-09-01", status: "COMPLETED", wakeTime: "09:00", sleepTime: "23:59", dayTemplateId: lastUsed.id },
+        });
+
+        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ assignments: [], templateId: chosen.id });
+
+        expect(res.status).toBe(200);
+        expect(res.body.data.wakeTime).toBe("06:00"); // built from Workday (chosen), not Weekend (last used)
+        const stored = await prisma.dayPlan.findFirst({ where: { userId, status: "ACTIVE" }, select: { dayTemplateId: true } });
+        expect(stored?.dayTemplateId).toBe(chosen.id);
+    });
+
+    it("POST /confirm rejects a templateId belonging to another user with 404", async () => {
+        await seedTemplate(userId, "Mine", "07:00");
+        const foreign = await seedTemplate(otherUserId, "Theirs", "08:00");
+
+        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ assignments: [], templateId: foreign.id });
+
+        expect(res.status).toBe(404);
+        expect(await prisma.dayPlan.count({ where: { userId } })).toBe(0);
+    });
+
+    it("POST /confirm rejects a nonexistent templateId with 404", async () => {
+        await seedTemplate(userId, "Mine", "07:00");
+
+        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ assignments: [], templateId: "no-such-template" });
+
+        expect(res.status).toBe(404);
+    });
+
     it("deleting the source template nulls the plan's link but keeps its snapshotted blocks", async () => {
         const template = await seedTemplate(userId, "My Day", "07:00");
         await request(app).post("/day-plan/confirm").set(auth()).send({ assignments: [] });

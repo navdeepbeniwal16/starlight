@@ -351,6 +351,7 @@ export async function generatePlanProposal(
  * are marked COMPLETED. DONE tasks keep their placement as history.
  *
  * @throws {NoTemplateError} If the user has no day template.
+ * @throws {DayTemplateNotFoundError} If `templateId` isn't the caller's template.
  * @throws {InvalidAssignmentError} If an assignment references a block that is
  *         not a CONTAINER block of the user's template.
  */
@@ -359,8 +360,9 @@ export async function confirmPlan(
     date: string,
     nowHHmm: string,
     assignments: ConfirmAssignment[],
+    templateId?: string,
 ): Promise<DayPlan> {
-    const template = await resolveTemplateForUser(userId);
+    const template = await resolveTemplate(userId, templateId);
 
     const templateBlockById = new Map(template.blocks.map(b => [b.id, b]));
     for (const a of assignments) {

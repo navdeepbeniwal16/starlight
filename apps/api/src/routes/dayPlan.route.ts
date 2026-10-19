@@ -85,10 +85,14 @@ router.post("/generate", authenticate, async (req: Request, res: Response): Prom
 router.post("/confirm", authenticate, async (req: Request, res: Response): Promise<void> => {
     res.set("Cache-Control", "no-store, private");
 
-    const { assignments } = (req.body ?? {}) as { assignments?: unknown };
+    const { assignments, templateId } = (req.body ?? {}) as { assignments?: unknown; templateId?: unknown };
 
     if (!Array.isArray(assignments)) {
         res.status(400).json({ success: false, error: 'assignments must be an array' });
+        return;
+    }
+    if (templateId !== undefined && typeof templateId !== 'string') {
+        res.status(400).json({ success: false, error: 'templateId must be a string' });
         return;
     }
     for (const a of assignments) {
@@ -109,9 +113,13 @@ router.post("/confirm", authenticate, async (req: Request, res: Response): Promi
     const nowHHmm = nowTimeString(utcOffsetMins);
 
     try {
-        const plan = await confirmPlan(req.user!.sub, date, nowHHmm, assignments as ConfirmAssignment[]);
+        const plan = await confirmPlan(req.user!.sub, date, nowHHmm, assignments as ConfirmAssignment[], templateId);
         res.status(200).json({ success: true, data: plan });
     } catch (error) {
+        if (error instanceof DayTemplateNotFoundError) {
+            res.status(404).json({ success: false, error: 'Day template not found' });
+            return;
+        }
         if (error instanceof NoTemplateError) {
             res.status(400).json({ success: false, error: 'No day template found. Please set up your day template first.' });
             return;
