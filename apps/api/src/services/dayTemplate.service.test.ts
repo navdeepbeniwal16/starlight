@@ -20,6 +20,10 @@ async function seedUser(clerkUserId: string) {
 }
 
 async function cleanup(userId: string) {
+    const plans = await prisma.dayPlan.findMany({ where: { userId }, select: { id: true } });
+    for (const p of plans) await prisma.plannedBlock.deleteMany({ where: { dayPlanId: p.id } });
+    await prisma.dayPlan.deleteMany({ where: { userId } });
+
     const templates = await prisma.dayTemplate.findMany({ where: { userId }, select: { id: true } });
     for (const t of templates) await prisma.block.deleteMany({ where: { dayTemplateId: t.id } });
     await prisma.dayTemplate.deleteMany({ where: { userId } });
@@ -34,6 +38,20 @@ function validTemplate(): { wakeTime: string; sleepTime: string; blocks: BlockIn
             { type: "ANCHOR", name: "Wind Down", startTime: "20:00", endTime: "22:00" },
         ],
     };
+}
+
+async function seedPlan(dayTemplateId: string, date: string, createdAt?: Date) {
+    return prisma.dayPlan.create({
+        data: {
+            userId,
+            dayTemplateId,
+            date,
+            status: "COMPLETED",
+            wakeTime: "07:00",
+            sleepTime: "23:00",
+            ...(createdAt ? { createdAt } : {}),
+        },
+    });
 }
 
 let userId: string;
@@ -108,6 +126,42 @@ describe("listDayTemplates", () => {
 
         const list = await listDayTemplates(userId);
         expect(list.map((t) => t.name)).toEqual(["Mine"]);
+    });
+
+    it("reports lastUsedOn as null for a template never used in a plan", async () => {
+        await createDayTemplate({ userId, name: "Workday", ...validTemplate() });
+
+        const [template] = await listDayTemplates(userId);
+        expect(template.lastUsedOn).toBeNull();
+    });
+
+    it("reports lastUsedOn as the most recent plan date that recorded the template", async () => {
+        const workday = await createDayTemplate({ userId, name: "Workday", ...validTemplate() });
+        await seedPlan(workday.id, "2026-09-10");
+        await seedPlan(workday.id, "2026-09-20");
+
+        const [template] = await listDayTemplates(userId);
+        expect(template.lastUsedOn).toBe("2026-09-20");
+    });
+
+    it("derives lastUsedOn by plan date, not by plan creation time", async () => {
+        const workday = await createDayTemplate({ userId, name: "Workday", ...validTemplate() });
+        // The later-dated plan was created first; createdAt must not win over date.
+        await seedPlan(workday.id, "2026-09-20", new Date("2026-09-20T08:00:00Z"));
+        await seedPlan(workday.id, "2026-09-01", new Date("2026-09-25T08:00:00Z"));
+
+        const [template] = await listDayTemplates(userId);
+        expect(template.lastUsedOn).toBe("2026-09-20");
+    });
+
+    it("derives lastUsedOn per template without bleeding across them", async () => {
+        const used = await createDayTemplate({ userId, name: "Used", ...validTemplate() });
+        const unused = await createDayTemplate({ userId, name: "Unused", ...validTemplate() });
+        await seedPlan(used.id, "2026-09-15");
+
+        const list = await listDayTemplates(userId);
+        expect(list.find((t) => t.id === used.id)!.lastUsedOn).toBe("2026-09-15");
+        expect(list.find((t) => t.id === unused.id)!.lastUsedOn).toBeNull();
     });
 });
 
