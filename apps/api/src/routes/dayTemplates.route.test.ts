@@ -80,6 +80,22 @@ describe("day-templates routes", () => {
         expect(list.body.data.map((t: { name: string }) => t.name)).toEqual(["Workday"]);
     });
 
+    it("GET list exposes lastUsedOn per template: the latest plan date, else null", async () => {
+        const used = await request(app).post("/day-templates").set(auth()).send(validBody("Workday"));
+        const unused = await request(app).post("/day-templates").set(auth()).send(validBody("Weekend"));
+        await prisma.dayPlan.create({
+            data: { userId, dayTemplateId: used.body.data.id, date: "2026-09-15", status: "COMPLETED", wakeTime: "07:00", sleepTime: "23:00" },
+        });
+
+        const list = await request(app).get("/day-templates").set(auth());
+        expect(list.status).toBe(200);
+        const byId = Object.fromEntries(
+            list.body.data.map((t: { id: string; lastUsedOn: string | null }) => [t.id, t.lastUsedOn]),
+        );
+        expect(byId[used.body.data.id]).toBe("2026-09-15");
+        expect(byId[unused.body.data.id]).toBeNull();
+    });
+
     it("GET returns a template by id and rejects an unknown id with 404", async () => {
         const created = await request(app).post("/day-templates").set(auth()).send(validBody("Workday"));
         const id = created.body.data.id;

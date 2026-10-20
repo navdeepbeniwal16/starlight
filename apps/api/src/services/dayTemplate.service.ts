@@ -25,11 +25,20 @@ function blockRows(dayTemplateId: string, blocks: BlockInput[]) {
 }
 
 export async function listDayTemplates(userId: string) {
-    return prisma.dayTemplate.findMany({
+    const templates = await prisma.dayTemplate.findMany({
         where: { userId },
         orderBy: { updatedAt: "desc" },
         include: { blocks: true },
     });
+    // Plan dates are YYYY-MM-DD strings, so the lexical _max is the chronological one.
+    const usage = await prisma.dayPlan.groupBy({
+        by: ["dayTemplateId"],
+        where: { userId, dayTemplateId: { in: templates.map((t) => t.id) } },
+        _max: { date: true },
+    });
+    const lastUsedByTemplate = new Map(usage.map((row) => [row.dayTemplateId, row._max.date]));
+
+    return templates.map((t) => ({ ...t, lastUsedOn: lastUsedByTemplate.get(t.id) ?? null }));
 }
 
 export async function getDayTemplateById(userId: string, id: string) {
