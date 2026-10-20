@@ -160,6 +160,12 @@ describe("day-plan routes: multi-template resolution", () => {
         expect(res.status).toBe(404);
     });
 
+    it("POST /generate rejects a non-string templateId with 400", async () => {
+        const res = await request(app).post("/day-plan/generate").set(auth()).send({ templateId: 123 });
+
+        expect(res.status).toBe(400);
+    });
+
     it("POST /generate returns NO_TEMPLATE when the user has no template", async () => {
         const res = await request(app).post("/day-plan/generate").set(auth());
 
@@ -223,6 +229,12 @@ describe("day-plan routes: multi-template resolution", () => {
         const res = await request(app).post("/day-plan/confirm").set(auth()).send({ assignments: [], templateId: "no-such-template" });
 
         expect(res.status).toBe(404);
+    });
+
+    it("POST /confirm rejects a non-string templateId with 400", async () => {
+        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ assignments: [], templateId: 123 });
+
+        expect(res.status).toBe(400);
     });
 
     it("deleting the source template nulls the plan's link but keeps its snapshotted blocks", async () => {
