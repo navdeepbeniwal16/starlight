@@ -1,11 +1,5 @@
 import type { DayTemplate } from "./api.types";
 
-/**
- * defaultTemplate picks the template a day defaults to when planning: the one with
- * the latest `lastUsedOn`. When no template has ever been used in a confirmed plan
- * (all null), it falls back to the most-recently-updated one. Returns null for an
- * empty list so the caller can render its own empty state.
- */
 export function defaultTemplate(templates: DayTemplate[]): DayTemplate | null {
     if (templates.length === 0) return null;
 
