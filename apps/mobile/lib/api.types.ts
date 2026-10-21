@@ -28,6 +28,7 @@ export type DayTemplate = {
     sleepTime: string;
     blocks: DayTemplateBlock[];
     updatedAt: string;
+    lastUsedOn: string | null; // YYYY-MM-DD
 };
 
 export type GetDayTemplatesResponse = ApiResult<DayTemplate[]>;
