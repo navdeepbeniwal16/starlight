@@ -52,9 +52,8 @@ export type ProposalTask = {
     status: TaskStatus;
 };
 
-// A block of the proposed plan. `blockId` is the *template* block id — the
-// proposal is never persisted, so template blocks are the only stable keys the
-// client and confirm endpoint can agree on.
+// `blockId` is the submitted shape block's id — the key the client and the
+// confirm endpoint agree on for task placements.
 export type ProposalBlock = {
     blockId: string;
     type: BlockType;

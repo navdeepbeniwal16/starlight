@@ -85,7 +85,7 @@ export function validateDayTemplate(data: DayTemplateInput): void {
 
 /**
  * Validates a client-submitted day shape.
- * 
+ *
  * Throws {@link DayShapeValidationError} on the first violation.
  */
 export function validateDayShape(shape: DayShape): void {

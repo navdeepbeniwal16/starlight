@@ -1,7 +1,9 @@
 import { prisma } from "../lib/prisma";
 import type { ConfirmAssignment, DayPlan, PlanProposal, ProposalBlock, ReviewTasks } from "../types/dayPlan.types";
+import type { DayShape, ShapeBlock } from "../types/dayTemplate.types";
 import { generateSchedule, remainingMinsOf, type RawTask, type ScheduleDeps } from "./planAgent.service";
 import { getDayTemplateById } from "./dayTemplate.service";
+import { validateDayShape } from "./dayTemplate.validator";
 
 export class NoTemplateError extends Error { }
 export class NoContainerBlocksError extends Error { }
@@ -210,6 +212,17 @@ async function resolveTemplate(userId: string, templateId?: string): Promise<Res
         : resolveTemplateForUser(userId);
 }
 
+function shapeToEligibleBlocks(blocks: ShapeBlock[]): EligibleBlock[] {
+    return blocks.map(b => ({
+        id: b.id,
+        type: b.type,
+        name: b.name,
+        startTime: b.startTime,
+        endTime: b.endTime,
+        energyLevel: b.energyLevel ?? null,
+    }));
+}
+
 function eligibleBlocksOf(blocks: EligibleBlock[], nowHHmm: string): EligibleBlock[] {
     return blocks
         .filter(b => b.endTime > nowHHmm)
@@ -219,10 +232,10 @@ function eligibleBlocksOf(blocks: EligibleBlock[], nowHHmm: string): EligibleBlo
 /**
  * Generates a plan proposal for `date` and returns it to the caller.
  *
- * Pure computation — nothing is written to the database. The proposal's blocks
- * are keyed by template block id; the client holds the proposal during review
- * and sends the final placements back via confirmPlan. Abandoning the flow
- * therefore requires no cleanup and cannot affect the active plan or backlog.
+ * Runs from the client-submitted `shape` (base template + today's edits). Pure computation: nothing is written to the
+ * database. The proposal's blocks are keyed by shape block id; the client holds
+ * the proposal during review and sends the final placements back via confirmPlan.
+ * Abandoning the flow needs no cleanup and cannot affect the active plan or backlog.
  *
  * Every schedulable task appears in the proposal exactly once: either placed in
  * a block or listed as unschedulable (tasks the agent dropped entirely are
@@ -232,7 +245,7 @@ function eligibleBlocksOf(blocks: EligibleBlock[], nowHHmm: string): EligibleBlo
  * the server's current instant (ISO), handed to the agent as its urgency/staleness
  * anchor. `deps` is the agent dependency seam, forwarded for tests; production omits it.
  *
- * @throws {NoTemplateError} If the user has no day template.
+ * @throws {DayShapeValidationError} If `shape` is structurally invalid.
  * @throws {DayTemplateNotFoundError} If `templateId` isn't the caller's template.
  * @throws {NoContainerBlocksError} If no CONTAINER block remains today.
  * @throws {AgentError} If the agent call fails or returns malformed output.
@@ -242,12 +255,14 @@ export async function generatePlanProposal(
     date: string,
     nowHHmm: string,
     now: string,
-    templateId?: string,
+    templateId: string,
+    shape: DayShape,
     deps?: ScheduleDeps,
 ): Promise<PlanProposal> {
-    const template = await resolveTemplate(userId, templateId);
+    validateDayShape(shape);
+    await getDayTemplateById(userId, templateId); // ownership gate; blocks go unused
 
-    const eligible = eligibleBlocksOf(template.blocks, nowHHmm);
+    const eligible = eligibleBlocksOf(shapeToEligibleBlocks(shape.blocks), nowHHmm);
     if (!eligible.some(b => b.type === 'CONTAINER')) {
         throw new NoContainerBlocksError();
     }
@@ -317,8 +332,8 @@ export async function generatePlanProposal(
     }
 
     return {
-        wakeTime: template.wakeTime,
-        sleepTime: template.sleepTime,
+        wakeTime: shape.wakeTime,
+        sleepTime: shape.sleepTime,
         blocks,
         unschedulable,
     };

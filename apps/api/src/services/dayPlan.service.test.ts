@@ -1,5 +1,8 @@
 import { prisma } from "../lib/prisma";
 import { getDayPlan, getReviewTasks, generatePlanProposal, confirmPlan, NoTemplateError, NoContainerBlocksError, InvalidAssignmentError } from "./dayPlan.service";
+import { DayTemplateNotFoundError } from "./dayTemplate.service";
+import { DayShapeValidationError } from "./dayTemplate.validator";
+import type { DayShape } from "../types/dayTemplate.types";
 import type { Anthropic } from "@anthropic-ai/sdk";
 import type { AgentInput, AgentResult } from "./planAgent.service";
 
@@ -45,7 +48,7 @@ async function seedTemplate(blocks?: {
             blocks: {
                 create: blocks ?? [
                     { type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" },
-                    { type: "ANCHOR",    name: "Lunch",     startTime: "12:00", endTime: "13:00" },
+                    { type: "ANCHOR", name: "Lunch", startTime: "12:00", endTime: "13:00" },
                     { type: "CONTAINER", name: "Afternoon", startTime: "14:00", endTime: "17:00", energyLevel: "MEDIUM" },
                 ],
             },
@@ -58,6 +61,23 @@ function templateBlock(template: Awaited<ReturnType<typeof seedTemplate>>, name:
     const block = template.blocks.find(b => b.name === name);
     if (!block) throw new Error(`No template block named ${name}`);
     return block;
+}
+
+// Keeps the template's block ids on the shape so agent assignments, which
+// reference those ids, resolve against the shape's blocks.
+function shapeFromTemplate(template: Awaited<ReturnType<typeof seedTemplate>>): DayShape {
+    return {
+        wakeTime: template.wakeTime,
+        sleepTime: template.sleepTime,
+        blocks: template.blocks.map(b => ({
+            id: b.id,
+            type: b.type,
+            name: b.name,
+            startTime: b.startTime,
+            endTime: b.endTime,
+            ...(b.energyLevel != null ? { energyLevel: b.energyLevel } : {}),
+        })),
+    };
 }
 
 async function seedTask(title: string, overrides: Partial<{
@@ -156,23 +176,32 @@ afterAll(async () => {
 // ─── generatePlanProposal ─────────────────────────────────────────────────────
 
 describe("generatePlanProposal", () => {
-    it("throws NoTemplateError when the user has no template", async () => {
-        await expect(generatePlanProposal(userId, DATE, "08:00", NOW, undefined, noopAgent().deps))
-            .rejects.toBeInstanceOf(NoTemplateError);
+    it("throws DayShapeValidationError when the shape is structurally invalid", async () => {
+        const template = await seedTemplate();
+        const shape = shapeFromTemplate(template);
+        shape.wakeTime = "25:00";
+        await expect(generatePlanProposal(userId, DATE, "08:00", NOW, template.id, shape, noopAgent().deps))
+            .rejects.toBeInstanceOf(DayShapeValidationError);
+    });
+
+    it("throws DayTemplateNotFoundError when the templateId does not belong to the user", async () => {
+        const template = await seedTemplate();
+        await expect(generatePlanProposal(userId, DATE, "08:00", NOW, "no-such-template", shapeFromTemplate(template), noopAgent().deps))
+            .rejects.toBeInstanceOf(DayTemplateNotFoundError);
     });
 
     it("throws NoContainerBlocksError when every container block has elapsed", async () => {
-        await seedTemplate([
+        const template = await seedTemplate([
             { type: "CONTAINER", name: "Morning", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" },
             { type: "ANCHOR", name: "Dinner", startTime: "18:00", endTime: "19:00" },
         ]);
-        await expect(generatePlanProposal(userId, DATE, "13:00", NOW, undefined, noopAgent().deps))
+        await expect(generatePlanProposal(userId, DATE, "13:00", NOW, template.id, shapeFromTemplate(template), noopAgent().deps))
             .rejects.toBeInstanceOf(NoContainerBlocksError);
     });
 
-    it("returns eligible blocks keyed by template block id, clamping an in-progress block", async () => {
+    it("returns eligible blocks keyed by shape block id, clamping an in-progress block", async () => {
         const template = await seedTemplate();
-        const proposal = await generatePlanProposal(userId, DATE, "10:00", NOW, undefined, noopAgent().deps);
+        const proposal = await generatePlanProposal(userId, DATE, "10:00", NOW, template.id, shapeFromTemplate(template), noopAgent().deps);
 
         expect(proposal.wakeTime).toBe("07:00");
         expect(proposal.sleepTime).toBe("23:00");
@@ -185,11 +214,30 @@ describe("generatePlanProposal", () => {
         });
     });
 
+    it("builds the proposal from the submitted shape, not the stored template", async () => {
+        const template = await seedTemplate();
+        const shape: DayShape = {
+            wakeTime: "06:00",
+            sleepTime: "22:00",
+            blocks: [
+                { id: "edited-1", type: "CONTAINER", name: "Edited Focus", startTime: "06:00", endTime: "09:00", energyLevel: "HIGH" },
+                { id: "edited-2", type: "ANCHOR", name: "Walk", startTime: "09:00", endTime: "10:00" },
+            ],
+        };
+
+        const proposal = await generatePlanProposal(userId, DATE, "05:00", NOW, template.id, shape, noopAgent().deps);
+
+        expect(proposal.wakeTime).toBe("06:00");
+        expect(proposal.sleepTime).toBe("22:00");
+        expect(proposal.blocks.map(b => b.blockId)).toEqual(["edited-1", "edited-2"]);
+        expect(proposal.blocks.map(b => b.name)).toEqual(["Edited Focus", "Walk"]);
+    });
+
     it("writes nothing to the database", async () => {
-        await seedTemplate();
+        const template = await seedTemplate();
         const task = await seedTask("Backlog task");
 
-        await generatePlanProposal(userId, DATE, "08:00", NOW, undefined, fakeAgent({
+        await generatePlanProposal(userId, DATE, "08:00", NOW, template.id, shapeFromTemplate(template), fakeAgent({
             assignments: [{ taskId: task.id, blockId: "ignored", blockOrder: 0 }],
             unschedulable: [],
         }).deps);
@@ -205,7 +253,7 @@ describe("generatePlanProposal", () => {
         const t1 = await seedTask("First", { estimatedMins: 30 });
         const t2 = await seedTask("Second", { estimatedMins: 60, progress: 50 });
 
-        const proposal = await generatePlanProposal(userId, DATE, "08:00", NOW, undefined, fakeAgent({
+        const proposal = await generatePlanProposal(userId, DATE, "08:00", NOW, template.id, shapeFromTemplate(template), fakeAgent({
             assignments: [
                 { taskId: t2.id, blockId: deepWork.id, blockOrder: 1 },
                 { taskId: t1.id, blockId: deepWork.id, blockOrder: 0 },
@@ -224,7 +272,7 @@ describe("generatePlanProposal", () => {
         const lunch = templateBlock(template, "Lunch");
         const t1 = await seedTask("Valid");
 
-        const proposal = await generatePlanProposal(userId, DATE, "08:00", NOW, undefined, fakeAgent({
+        const proposal = await generatePlanProposal(userId, DATE, "08:00", NOW, template.id, shapeFromTemplate(template), fakeAgent({
             assignments: [
                 { taskId: t1.id, blockId: deepWork.id, blockOrder: 0 },
                 { taskId: t1.id, blockId: lunch.id, blockOrder: 0 },      // duplicate + anchor
@@ -240,11 +288,11 @@ describe("generatePlanProposal", () => {
     });
 
     it("accounts for every schedulable task: enriched unschedulable plus dropped-task fallback", async () => {
-        await seedTemplate();
+        const template = await seedTemplate();
         const noFit = await seedTask("Too big", { estimatedMins: 600 });
         const dropped = await seedTask("Forgotten by agent");
 
-        const proposal = await generatePlanProposal(userId, DATE, "08:00", NOW, undefined, fakeAgent({
+        const proposal = await generatePlanProposal(userId, DATE, "08:00", NOW, template.id, shapeFromTemplate(template), fakeAgent({
             assignments: [],
             unschedulable: [{ taskId: noFit.id, reason: "Exceeds every block's capacity" }],
         }).deps);
@@ -257,7 +305,7 @@ describe("generatePlanProposal", () => {
     });
 
     it("feeds carried-over tasks to the agent without touching the active plan", async () => {
-        await seedTemplate();
+        const template = await seedTemplate();
         const active = await seedActivePlan(DATE, [
             { name: "Morning", startTime: "09:00", endTime: "12:00" },
             { name: "Evening", startTime: "18:00", endTime: "20:00" },
@@ -266,7 +314,7 @@ describe("generatePlanProposal", () => {
         const scheduled = await seedTask("Already scheduled", { plannedBlockId: futureBlock.id, blockOrder: 0 });
         const agent = noopAgent();
 
-        await generatePlanProposal(userId, DATE, "10:00", NOW, undefined, agent.deps);
+        await generatePlanProposal(userId, DATE, "10:00", NOW, template.id, shapeFromTemplate(template), agent.deps);
 
         // The carried-over task was offered to the agent…
         expect(agent.calls[0].projects.flatMap(p => p.tasks).map(t => t.id)).toContain(scheduled.id);
@@ -279,12 +327,12 @@ describe("generatePlanProposal", () => {
     });
 
     it("threads `now` and each task's notes and createdAt through to the agent", async () => {
-        await seedTemplate();
+        const template = await seedTemplate();
         const createdAt = new Date("2026-05-01T00:00:00.000Z");
         const t = await seedTask("Backlog task", { notes: "call the vendor first", createdAt });
         const agent = noopAgent();
 
-        await generatePlanProposal(userId, DATE, "08:00", NOW, undefined, agent.deps);
+        await generatePlanProposal(userId, DATE, "08:00", NOW, template.id, shapeFromTemplate(template), agent.deps);
 
         expect(agent.calls[0].now).toBe(NOW);
         const sent = agent.calls[0].projects.flatMap(p => p.tasks).find(x => x.id === t.id)!;
@@ -293,13 +341,13 @@ describe("generatePlanProposal", () => {
     });
 
     it("nests scheduled tasks under their project and standalone tasks into Todos", async () => {
-        await seedTemplate();
+        const template = await seedTemplate();
         const project = await seedProject("Website revamp", { goal: "launch v2", notes: "ship before the conference", isInFocus: true });
         await seedTask("Design hero", { projectId: project.id });
         await seedTask("Buy milk");
         const agent = noopAgent();
 
-        await generatePlanProposal(userId, DATE, "08:00", NOW, undefined, agent.deps);
+        await generatePlanProposal(userId, DATE, "08:00", NOW, template.id, shapeFromTemplate(template), agent.deps);
 
         const projects = agent.calls[0].projects;
         const website = projects.find(p => p.name === "Website revamp")!;

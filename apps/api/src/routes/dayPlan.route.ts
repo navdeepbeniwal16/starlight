@@ -2,8 +2,10 @@ import { Router, Request, Response } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
 import { getDayPlan, getReviewTasks, generatePlanProposal, confirmPlan, NoTemplateError, NoContainerBlocksError, InvalidAssignmentError } from "../services/dayPlan.service";
 import { DayTemplateNotFoundError } from "../services/dayTemplate.service";
+import { DayShapeValidationError } from "../services/dayTemplate.validator";
 import { AgentError } from "../services/planAgent.service";
 import type { ConfirmAssignment } from "../types/dayPlan.types";
+import type { DayShape } from "../types/dayTemplate.types";
 import { dateRegex, todayDateString, nowTimeString, parseTimezoneOffset } from "../lib/clientDate";
 
 const router = Router();
@@ -42,14 +44,17 @@ router.get("/review-tasks", authenticate, async (req: Request, res: Response): P
     res.status(200).json({ success: true, data: result });
 });
 
-// Generates a plan proposal and returns it. Nothing is persisted — the client
-// holds the proposal during review and sends the final placements to /confirm.
+// Generates a plan proposal and returns it (Nothing is persisted)
 router.post("/generate", authenticate, async (req: Request, res: Response): Promise<void> => {
     res.set("Cache-Control", "no-store, private");
 
-    const { templateId } = (req.body ?? {}) as { templateId?: unknown };
-    if (templateId !== undefined && typeof templateId !== 'string') {
-        res.status(400).json({ success: false, error: 'templateId must be a string' });
+    const { templateId, shape } = (req.body ?? {}) as { templateId?: unknown; shape?: unknown };
+    if (typeof templateId !== 'string') {
+        res.status(400).json({ success: false, error: 'templateId is required' });
+        return;
+    }
+    if (!shape || typeof shape !== 'object' || Array.isArray(shape)) {
+        res.status(400).json({ success: false, error: 'shape is required' });
         return;
     }
 
@@ -59,15 +64,15 @@ router.post("/generate", authenticate, async (req: Request, res: Response): Prom
     const now = new Date().toISOString();
 
     try {
-        const result = await generatePlanProposal(req.user!.sub, date, nowHHmm, now, templateId);
+        const result = await generatePlanProposal(req.user!.sub, date, nowHHmm, now, templateId, shape as DayShape);
         res.status(200).json({ success: true, data: result });
     } catch (error) {
-        if (error instanceof DayTemplateNotFoundError) {
-            res.status(404).json({ success: false, error: 'Day template not found' });
+        if (error instanceof DayShapeValidationError) {
+            res.status(400).json({ success: false, error: error.message });
             return;
         }
-        if (error instanceof NoTemplateError) {
-            res.status(400).json({ success: false, code: 'NO_TEMPLATE', error: 'No day template found. Please set up your day template first.' });
+        if (error instanceof DayTemplateNotFoundError) {
+            res.status(404).json({ success: false, error: 'Day template not found' });
             return;
         }
         if (error instanceof NoContainerBlocksError) {
