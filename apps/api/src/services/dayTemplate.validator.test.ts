@@ -1,5 +1,5 @@
-import { validateDayTemplate, DayTemplateValidationError } from "./dayTemplate.validator";
-import { BlockInput } from "../types/dayTemplate.types";
+import { validateDayTemplate, validateDayShape, DayTemplateValidationError, DayShapeValidationError } from "./dayTemplate.validator";
+import { BlockInput, DayShape } from "../types/dayTemplate.types";
 
 // A valid baseline template; individual tests clone and mutate it to isolate one broken invariant.
 function validTemplate(): { name: string; wakeTime: string; sleepTime: string; blocks: BlockInput[] } {
@@ -24,7 +24,7 @@ describe("validateDayTemplate", () => {
 
     describe("name", () => {
         it("rejects a blank name", () => {
-            expect(() => validateDayTemplate({ ...validTemplate(), name: "   " })).toThrow(/name must not be blank/i);
+            expect(() => validateDayTemplate({ ...validTemplate(), name: "   " })).toThrow(/name must not be empty/i);
         });
 
         it("rejects an over-length name", () => {
@@ -128,6 +128,104 @@ describe("validateDayTemplate", () => {
             const t = validTemplate();
             t.blocks[2] = { type: "ANCHOR", name: "Too Late", startTime: "22:30", endTime: "23:30" };
             expect(() => validateDayTemplate({ ...t, sleepTime: "23:00" })).toThrow(/outside the wake\/sleep window/);
+        });
+    });
+});
+
+// A valid baseline shape; tests clone and mutate it to isolate one broken invariant.
+function validShape(): DayShape {
+    return {
+        wakeTime: "07:00",
+        sleepTime: "23:00",
+        blocks: [
+            { id: "b1", type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" },
+            { id: "b2", type: "ANCHOR", name: "Lunch", startTime: "12:00", endTime: "13:00" },
+        ],
+    };
+}
+
+describe("validateDayShape", () => {
+    it("accepts a well-formed shape", () => {
+        expect(() => validateDayShape(validShape())).not.toThrow();
+    });
+
+    describe("shared geometry", () => {
+        it("rejects a malformed wakeTime", () => {
+            const call = () => validateDayShape({ ...validShape(), wakeTime: "7am" });
+            expect(call).toThrow(DayShapeValidationError);
+            expect(call).toThrow(/HH:mm/);
+        });
+
+        it("rejects wakeTime not before sleepTime", () => {
+            const call = () => validateDayShape({ ...validShape(), wakeTime: "23:00" });
+            expect(call).toThrow(DayShapeValidationError);
+            expect(call).toThrow(/wakeTime must be before sleepTime/);
+        });
+
+        it("rejects an empty blocks array", () => {
+            const call = () => validateDayShape({ ...validShape(), blocks: [] });
+            expect(call).toThrow(DayShapeValidationError);
+            expect(call).toThrow(/non-empty/);
+        });
+
+        it("rejects a block whose startTime is not before its endTime", () => {
+            const s = validShape();
+            s.blocks[0] = { ...s.blocks[0], startTime: "12:00", endTime: "12:00" };
+            const call = () => validateDayShape(s);
+            expect(call).toThrow(DayShapeValidationError);
+            expect(call).toThrow(/start before it ends/);
+        });
+
+        it("rejects a CONTAINER block without an energyLevel", () => {
+            const s = validShape();
+            s.blocks[0] = { id: "b1", type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00" };
+            const call = () => validateDayShape(s);
+            expect(call).toThrow(DayShapeValidationError);
+            expect(call).toThrow(/CONTAINER.*energyLevel/);
+        });
+
+        it("rejects a block outside the wake/sleep window", () => {
+            const s = validShape();
+            s.blocks[1] = { id: "b2", type: "ANCHOR", name: "Too Late", startTime: "22:30", endTime: "23:30" };
+            const call = () => validateDayShape({ ...s, sleepTime: "23:00" });
+            expect(call).toThrow(DayShapeValidationError);
+            expect(call).toThrow(/outside the wake\/sleep window/);
+        });
+    });
+
+    describe("block ids", () => {
+        it("rejects a blank id", () => {
+            const s = validShape();
+            s.blocks[0] = { ...s.blocks[0], id: "   " };
+            const call = () => validateDayShape(s);
+            expect(call).toThrow(DayShapeValidationError);
+            expect(call).toThrow(/non-empty id/);
+        });
+
+        it("rejects duplicate ids", () => {
+            const s = validShape();
+            s.blocks[1] = { ...s.blocks[1], id: "b1" };
+            const call = () => validateDayShape(s);
+            expect(call).toThrow(DayShapeValidationError);
+            expect(call).toThrow(/duplicate id/);
+        });
+    });
+
+    describe("shares the template's structural rules", () => {
+        it("rejects overlapping blocks", () => {
+            const s = validShape();
+            s.blocks.push({ id: "b3", type: "ANCHOR", name: "Overlap", startTime: "11:30", endTime: "12:30" });
+            const call = () => validateDayShape(s);
+            expect(call).toThrow(DayShapeValidationError);
+            expect(call).toThrow(/overlap/);
+        });
+
+        it("rejects a shape with no CONTAINER block", () => {
+            const s = validShape();
+            s.blocks = s.blocks.filter((b) => b.type !== "CONTAINER");
+            const call = () => validateDayShape(s);
+            expect(call).toThrow(DayShapeValidationError);
+            expect(call).toThrow(/at least one CONTAINER/i);
         });
     });
 });
