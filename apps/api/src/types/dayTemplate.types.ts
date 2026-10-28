@@ -8,3 +8,11 @@ export type BlockInput = {
     endTime: string;
     energyLevel?: EnergyLevel;
 };
+
+export type ShapeBlock = BlockInput & { id: string };
+
+export type DayShape = {
+    wakeTime: string;
+    sleepTime: string;
+    blocks: ShapeBlock[];
+};

@@ -1,6 +1,7 @@
 import { BlockType, EnergyLevel, DayPlanStatus, TaskStatus } from '@prisma/client';
 export { BlockType, EnergyLevel, DayPlanStatus, TaskStatus } from '@prisma/client';
 import type { BacklogTask } from './task.types';
+import type { ShapeBlock } from './dayTemplate.types';
 
 export type ReviewTasks = {
     carriedOver: BacklogTask[];
@@ -52,9 +53,8 @@ export type ProposalTask = {
     status: TaskStatus;
 };
 
-// A block of the proposed plan. `blockId` is the *template* block id — the
-// proposal is never persisted, so template blocks are the only stable keys the
-// client and confirm endpoint can agree on.
+// `blockId` is the submitted shape block's id — the key the client and the
+// confirm endpoint agree on for task placements.
 export type ProposalBlock = {
     blockId: string;
     type: BlockType;
@@ -72,10 +72,11 @@ export type PlanProposal = {
     unschedulable: UnschedulableTask[];
 };
 
-// One task placement sent back by the client at confirm time.
-// `blockId` references a template block, matching ProposalBlock.blockId.
-export type ConfirmAssignment = {
-    taskId: string;
-    blockId: string;
-    blockOrder: number;
+//`taskIds` order IS blockOrder (the array index) and is present only on CONTAINER blocks
+export type ConfirmBlock = ShapeBlock & { taskIds?: string[] };
+
+export type ConfirmPlan = {
+    wakeTime: string;
+    sleepTime: string;
+    blocks: ConfirmBlock[];
 };

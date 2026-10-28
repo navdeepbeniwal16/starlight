@@ -1,5 +1,9 @@
 import { prisma } from "../lib/prisma";
-import { getDayPlan, getReviewTasks, generatePlanProposal, confirmPlan, NoTemplateError, NoContainerBlocksError, InvalidAssignmentError } from "./dayPlan.service";
+import { getDayPlan, getReviewTasks, generatePlanProposal, confirmPlan, NoContainerBlocksError, InvalidPlacementError } from "./dayPlan.service";
+import { DayTemplateNotFoundError } from "./dayTemplate.service";
+import { DayShapeValidationError } from "./dayTemplate.validator";
+import type { DayShape } from "../types/dayTemplate.types";
+import type { ConfirmPlan } from "../types/dayPlan.types";
 import type { Anthropic } from "@anthropic-ai/sdk";
 import type { AgentInput, AgentResult } from "./planAgent.service";
 
@@ -45,7 +49,7 @@ async function seedTemplate(blocks?: {
             blocks: {
                 create: blocks ?? [
                     { type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" },
-                    { type: "ANCHOR",    name: "Lunch",     startTime: "12:00", endTime: "13:00" },
+                    { type: "ANCHOR", name: "Lunch", startTime: "12:00", endTime: "13:00" },
                     { type: "CONTAINER", name: "Afternoon", startTime: "14:00", endTime: "17:00", energyLevel: "MEDIUM" },
                 ],
             },
@@ -58,6 +62,36 @@ function templateBlock(template: Awaited<ReturnType<typeof seedTemplate>>, name:
     const block = template.blocks.find(b => b.name === name);
     if (!block) throw new Error(`No template block named ${name}`);
     return block;
+}
+
+// Keeps the template's block ids on the shape so agent assignments, which
+// reference those ids, resolve against the shape's blocks.
+function shapeFromTemplate(template: Awaited<ReturnType<typeof seedTemplate>>): DayShape {
+    return {
+        wakeTime: template.wakeTime,
+        sleepTime: template.sleepTime,
+        blocks: template.blocks.map(b => ({
+            id: b.id,
+            type: b.type,
+            name: b.name,
+            startTime: b.startTime,
+            endTime: b.endTime,
+            ...(b.energyLevel != null ? { energyLevel: b.energyLevel } : {}),
+        })),
+    };
+}
+
+// The client's confirm payload derived from a template, with task placements
+// nested per block. `placements` maps a block name to its ordered taskIds.
+function planFromTemplate(
+    template: Awaited<ReturnType<typeof seedTemplate>>,
+    placements: Record<string, string[]> = {},
+): ConfirmPlan {
+    const shape = shapeFromTemplate(template);
+    return {
+        ...shape,
+        blocks: shape.blocks.map(b => (placements[b.name] ? { ...b, taskIds: placements[b.name] } : b)),
+    };
 }
 
 async function seedTask(title: string, overrides: Partial<{
@@ -156,23 +190,32 @@ afterAll(async () => {
 // ─── generatePlanProposal ─────────────────────────────────────────────────────
 
 describe("generatePlanProposal", () => {
-    it("throws NoTemplateError when the user has no template", async () => {
-        await expect(generatePlanProposal(userId, DATE, "08:00", NOW, undefined, noopAgent().deps))
-            .rejects.toBeInstanceOf(NoTemplateError);
+    it("throws DayShapeValidationError when the shape is structurally invalid", async () => {
+        const template = await seedTemplate();
+        const shape = shapeFromTemplate(template);
+        shape.wakeTime = "25:00";
+        await expect(generatePlanProposal(userId, DATE, "08:00", NOW, template.id, shape, noopAgent().deps))
+            .rejects.toBeInstanceOf(DayShapeValidationError);
+    });
+
+    it("throws DayTemplateNotFoundError when the templateId does not belong to the user", async () => {
+        const template = await seedTemplate();
+        await expect(generatePlanProposal(userId, DATE, "08:00", NOW, "no-such-template", shapeFromTemplate(template), noopAgent().deps))
+            .rejects.toBeInstanceOf(DayTemplateNotFoundError);
     });
 
     it("throws NoContainerBlocksError when every container block has elapsed", async () => {
-        await seedTemplate([
+        const template = await seedTemplate([
             { type: "CONTAINER", name: "Morning", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" },
             { type: "ANCHOR", name: "Dinner", startTime: "18:00", endTime: "19:00" },
         ]);
-        await expect(generatePlanProposal(userId, DATE, "13:00", NOW, undefined, noopAgent().deps))
+        await expect(generatePlanProposal(userId, DATE, "13:00", NOW, template.id, shapeFromTemplate(template), noopAgent().deps))
             .rejects.toBeInstanceOf(NoContainerBlocksError);
     });
 
-    it("returns eligible blocks keyed by template block id, clamping an in-progress block", async () => {
+    it("returns eligible blocks keyed by shape block id, clamping an in-progress block", async () => {
         const template = await seedTemplate();
-        const proposal = await generatePlanProposal(userId, DATE, "10:00", NOW, undefined, noopAgent().deps);
+        const proposal = await generatePlanProposal(userId, DATE, "10:00", NOW, template.id, shapeFromTemplate(template), noopAgent().deps);
 
         expect(proposal.wakeTime).toBe("07:00");
         expect(proposal.sleepTime).toBe("23:00");
@@ -185,11 +228,30 @@ describe("generatePlanProposal", () => {
         });
     });
 
+    it("builds the proposal from the submitted shape, not the stored template", async () => {
+        const template = await seedTemplate();
+        const shape: DayShape = {
+            wakeTime: "06:00",
+            sleepTime: "22:00",
+            blocks: [
+                { id: "edited-1", type: "CONTAINER", name: "Edited Focus", startTime: "06:00", endTime: "09:00", energyLevel: "HIGH" },
+                { id: "edited-2", type: "ANCHOR", name: "Walk", startTime: "09:00", endTime: "10:00" },
+            ],
+        };
+
+        const proposal = await generatePlanProposal(userId, DATE, "05:00", NOW, template.id, shape, noopAgent().deps);
+
+        expect(proposal.wakeTime).toBe("06:00");
+        expect(proposal.sleepTime).toBe("22:00");
+        expect(proposal.blocks.map(b => b.blockId)).toEqual(["edited-1", "edited-2"]);
+        expect(proposal.blocks.map(b => b.name)).toEqual(["Edited Focus", "Walk"]);
+    });
+
     it("writes nothing to the database", async () => {
-        await seedTemplate();
+        const template = await seedTemplate();
         const task = await seedTask("Backlog task");
 
-        await generatePlanProposal(userId, DATE, "08:00", NOW, undefined, fakeAgent({
+        await generatePlanProposal(userId, DATE, "08:00", NOW, template.id, shapeFromTemplate(template), fakeAgent({
             assignments: [{ taskId: task.id, blockId: "ignored", blockOrder: 0 }],
             unschedulable: [],
         }).deps);
@@ -205,7 +267,7 @@ describe("generatePlanProposal", () => {
         const t1 = await seedTask("First", { estimatedMins: 30 });
         const t2 = await seedTask("Second", { estimatedMins: 60, progress: 50 });
 
-        const proposal = await generatePlanProposal(userId, DATE, "08:00", NOW, undefined, fakeAgent({
+        const proposal = await generatePlanProposal(userId, DATE, "08:00", NOW, template.id, shapeFromTemplate(template), fakeAgent({
             assignments: [
                 { taskId: t2.id, blockId: deepWork.id, blockOrder: 1 },
                 { taskId: t1.id, blockId: deepWork.id, blockOrder: 0 },
@@ -224,7 +286,7 @@ describe("generatePlanProposal", () => {
         const lunch = templateBlock(template, "Lunch");
         const t1 = await seedTask("Valid");
 
-        const proposal = await generatePlanProposal(userId, DATE, "08:00", NOW, undefined, fakeAgent({
+        const proposal = await generatePlanProposal(userId, DATE, "08:00", NOW, template.id, shapeFromTemplate(template), fakeAgent({
             assignments: [
                 { taskId: t1.id, blockId: deepWork.id, blockOrder: 0 },
                 { taskId: t1.id, blockId: lunch.id, blockOrder: 0 },      // duplicate + anchor
@@ -240,11 +302,11 @@ describe("generatePlanProposal", () => {
     });
 
     it("accounts for every schedulable task: enriched unschedulable plus dropped-task fallback", async () => {
-        await seedTemplate();
+        const template = await seedTemplate();
         const noFit = await seedTask("Too big", { estimatedMins: 600 });
         const dropped = await seedTask("Forgotten by agent");
 
-        const proposal = await generatePlanProposal(userId, DATE, "08:00", NOW, undefined, fakeAgent({
+        const proposal = await generatePlanProposal(userId, DATE, "08:00", NOW, template.id, shapeFromTemplate(template), fakeAgent({
             assignments: [],
             unschedulable: [{ taskId: noFit.id, reason: "Exceeds every block's capacity" }],
         }).deps);
@@ -257,7 +319,7 @@ describe("generatePlanProposal", () => {
     });
 
     it("feeds carried-over tasks to the agent without touching the active plan", async () => {
-        await seedTemplate();
+        const template = await seedTemplate();
         const active = await seedActivePlan(DATE, [
             { name: "Morning", startTime: "09:00", endTime: "12:00" },
             { name: "Evening", startTime: "18:00", endTime: "20:00" },
@@ -266,7 +328,7 @@ describe("generatePlanProposal", () => {
         const scheduled = await seedTask("Already scheduled", { plannedBlockId: futureBlock.id, blockOrder: 0 });
         const agent = noopAgent();
 
-        await generatePlanProposal(userId, DATE, "10:00", NOW, undefined, agent.deps);
+        await generatePlanProposal(userId, DATE, "10:00", NOW, template.id, shapeFromTemplate(template), agent.deps);
 
         // The carried-over task was offered to the agent…
         expect(agent.calls[0].projects.flatMap(p => p.tasks).map(t => t.id)).toContain(scheduled.id);
@@ -279,12 +341,12 @@ describe("generatePlanProposal", () => {
     });
 
     it("threads `now` and each task's notes and createdAt through to the agent", async () => {
-        await seedTemplate();
+        const template = await seedTemplate();
         const createdAt = new Date("2026-05-01T00:00:00.000Z");
         const t = await seedTask("Backlog task", { notes: "call the vendor first", createdAt });
         const agent = noopAgent();
 
-        await generatePlanProposal(userId, DATE, "08:00", NOW, undefined, agent.deps);
+        await generatePlanProposal(userId, DATE, "08:00", NOW, template.id, shapeFromTemplate(template), agent.deps);
 
         expect(agent.calls[0].now).toBe(NOW);
         const sent = agent.calls[0].projects.flatMap(p => p.tasks).find(x => x.id === t.id)!;
@@ -293,13 +355,13 @@ describe("generatePlanProposal", () => {
     });
 
     it("nests scheduled tasks under their project and standalone tasks into Todos", async () => {
-        await seedTemplate();
+        const template = await seedTemplate();
         const project = await seedProject("Website revamp", { goal: "launch v2", notes: "ship before the conference", isInFocus: true });
         await seedTask("Design hero", { projectId: project.id });
         await seedTask("Buy milk");
         const agent = noopAgent();
 
-        await generatePlanProposal(userId, DATE, "08:00", NOW, undefined, agent.deps);
+        await generatePlanProposal(userId, DATE, "08:00", NOW, template.id, shapeFromTemplate(template), agent.deps);
 
         const projects = agent.calls[0].projects;
         const website = projects.find(p => p.name === "Website revamp")!;
@@ -316,37 +378,47 @@ describe("generatePlanProposal", () => {
 // ─── confirmPlan ──────────────────────────────────────────────────────────────
 
 describe("confirmPlan", () => {
-    it("throws NoTemplateError when the user has no template", async () => {
-        await expect(confirmPlan(userId, DATE, "08:00", []))
-            .rejects.toBeInstanceOf(NoTemplateError);
+    it("throws DayShapeValidationError when the plan is structurally invalid", async () => {
+        const template = await seedTemplate();
+        const plan = planFromTemplate(template);
+        plan.wakeTime = "25:00";
+        await expect(confirmPlan(userId, DATE, "08:00", template.id, plan))
+            .rejects.toBeInstanceOf(DayShapeValidationError);
     });
 
-    it("rejects assignments referencing unknown or non-container blocks", async () => {
+    it("throws DayTemplateNotFoundError when the templateId does not belong to the user", async () => {
         const template = await seedTemplate();
-        const lunch = templateBlock(template, "Lunch");
+        await expect(confirmPlan(userId, DATE, "08:00", "no-such-template", planFromTemplate(template)))
+            .rejects.toBeInstanceOf(DayTemplateNotFoundError);
+    });
+
+    it("rejects taskIds placed on a non-CONTAINER block", async () => {
+        const template = await seedTemplate();
         const task = await seedTask("A task");
 
-        await expect(confirmPlan(userId, DATE, "08:00", [
-            { taskId: task.id, blockId: "not-a-block", blockOrder: 0 },
-        ])).rejects.toBeInstanceOf(InvalidAssignmentError);
-
-        await expect(confirmPlan(userId, DATE, "08:00", [
-            { taskId: task.id, blockId: lunch.id, blockOrder: 0 },
-        ])).rejects.toBeInstanceOf(InvalidAssignmentError);
+        await expect(confirmPlan(userId, DATE, "08:00", template.id, planFromTemplate(template, { Lunch: [task.id] })))
+            .rejects.toBeInstanceOf(InvalidPlacementError);
     });
 
-    it("creates an ACTIVE plan spanning the whole day and applies renumbered placements", async () => {
+    it("rejects the same task placed more than once", async () => {
         const template = await seedTemplate();
-        const afternoon = templateBlock(template, "Afternoon");
+        const task = await seedTask("A task");
+
+        await expect(confirmPlan(userId, DATE, "08:00", template.id, planFromTemplate(template, {
+            "Deep Work": [task.id],
+            Afternoon: [task.id],
+        }))).rejects.toBeInstanceOf(InvalidPlacementError);
+    });
+
+    it("creates an ACTIVE plan spanning the whole day and places tasks in positional order", async () => {
+        const template = await seedTemplate();
         const t1 = await seedTask("First");
         const t2 = await seedTask("Second");
         const unplaced = await seedTask("Stays in backlog");
 
         // 13:00 — Deep Work and Lunch have elapsed, Afternoon is upcoming.
-        const plan = await confirmPlan(userId, DATE, "13:00", [
-            { taskId: t2.id, blockId: afternoon.id, blockOrder: 7 },  // sparse orders
-            { taskId: t1.id, blockId: afternoon.id, blockOrder: 3 },
-        ]);
+        const plan = await confirmPlan(userId, DATE, "13:00", template.id,
+            planFromTemplate(template, { Afternoon: [t1.id, t2.id] }));
 
         expect(plan.status).toBe("ACTIVE");
         expect(plan.date).toBe(DATE);
@@ -363,35 +435,34 @@ describe("confirmPlan", () => {
     });
 
     it("clamps an in-progress block's startTime but keeps elapsed blocks' original times", async () => {
-        await seedTemplate();
-        const plan = await confirmPlan(userId, DATE, "10:00", []);
+        const template = await seedTemplate();
+        const plan = await confirmPlan(userId, DATE, "10:00", template.id, planFromTemplate(template));
 
         const deepWork = plan.blocks.find(b => b.name === "Deep Work")!;
         expect(deepWork.startTime).toBe("10:00");
 
-        const early = await confirmPlan(userId, DATE, "15:00", []);
+        const early = await confirmPlan(userId, DATE, "15:00", template.id, planFromTemplate(template));
         expect(early.blocks.find(b => b.name === "Deep Work")!.startTime).toBe("09:00");
         expect(early.blocks.find(b => b.name === "Afternoon")!.startTime).toBe("15:00");
     });
 
-    it("silently drops assignments to blocks that elapsed during review", async () => {
+    it("honors a placement in a block that elapsed during review", async () => {
         const template = await seedTemplate();
-        const deepWork = templateBlock(template, "Deep Work");
-        const task = await seedTask("Was placed in a now-elapsed block");
+        const task = await seedTask("Placed in a block that elapsed mid-review");
 
-        // Proposal was generated before 12:00; the user confirms at 12:30.
-        const plan = await confirmPlan(userId, DATE, "12:30", [
-            { taskId: task.id, blockId: deepWork.id, blockOrder: 0 },
-        ]);
+        // Proposal was generated before 12:00; the user confirms at 12:30, by which
+        // point Deep Work (09:00–12:00) has elapsed. The task stays where it was put.
+        const plan = await confirmPlan(userId, DATE, "12:30", template.id,
+            planFromTemplate(template, { "Deep Work": [task.id] }));
 
-        expect(plan.blocks.find(b => b.name === "Deep Work")!.tasks).toHaveLength(0);
+        const deepWork = plan.blocks.find(b => b.name === "Deep Work")!;
+        expect(deepWork.tasks.map(t => t.id)).toEqual([task.id]);
         const after = await prisma.task.findUnique({ where: { id: task.id } });
-        expect(after!.plannedBlockId).toBeNull(); // back in the backlog, not lost
+        expect(after!.plannedBlockId).toBe(deepWork.id); // honored, not bounced to backlog
     });
 
-    it("silently drops assignments for tasks that vanished, moved on, or belong to someone else", async () => {
+    it("silently drops placements for tasks that vanished, moved on, or belong to someone else", async () => {
         const template = await seedTemplate();
-        const deepWork = templateBlock(template, "Deep Work");
         const done = await seedTask("Completed during review", { status: "DONE", progress: 100 });
 
         const otherUser = await prisma.user.create({
@@ -402,11 +473,8 @@ describe("confirmPlan", () => {
         });
 
         try {
-            const plan = await confirmPlan(userId, DATE, "08:00", [
-                { taskId: done.id, blockId: deepWork.id, blockOrder: 0 },
-                { taskId: "ghost-task", blockId: deepWork.id, blockOrder: 1 },
-                { taskId: foreign.id, blockId: deepWork.id, blockOrder: 2 },
-            ]);
+            const plan = await confirmPlan(userId, DATE, "08:00", template.id,
+                planFromTemplate(template, { "Deep Work": [done.id, "ghost-task", foreign.id] }));
 
             expect(plan.blocks.find(b => b.name === "Deep Work")!.tasks).toHaveLength(0);
             const foreignAfter = await prisma.task.findUnique({ where: { id: foreign.id } });
@@ -419,7 +487,6 @@ describe("confirmPlan", () => {
 
     it("re-plan: replaces the same-day ACTIVE plan, carrying elapsed history and releasing unplaced tasks", async () => {
         const template = await seedTemplate();
-        const afternoon = templateBlock(template, "Afternoon");
 
         // Old plan mirrors the template names/times, as real plans do.
         const old = await seedActivePlan(DATE, [
@@ -434,9 +501,8 @@ describe("confirmPlan", () => {
         const notReplanned = await seedTask("Dropped from plan", { plannedBlockId: oldAfternoon.id, blockOrder: 1 });
 
         // Confirm at 13:00: Deep Work has elapsed, Afternoon is upcoming.
-        const plan = await confirmPlan(userId, DATE, "13:00", [
-            { taskId: rescheduled.id, blockId: afternoon.id, blockOrder: 0 },
-        ]);
+        const plan = await confirmPlan(userId, DATE, "13:00", template.id,
+            planFromTemplate(template, { Afternoon: [rescheduled.id] }));
 
         // Old plan is gone; exactly one plan remains for the date.
         expect(await prisma.dayPlan.count({ where: { userId, date: DATE } })).toBe(1);
@@ -457,16 +523,14 @@ describe("confirmPlan", () => {
 
     it("the confirmed placement wins over elapsed history for the same task", async () => {
         const template = await seedTemplate();
-        const afternoon = templateBlock(template, "Afternoon");
 
         const old = await seedActivePlan(DATE, [
             { name: "Deep Work", startTime: "09:00", endTime: "12:00" },
         ]);
         const inElapsed = await seedTask("Started this morning", { progress: 40, plannedBlockId: old.blocks[0].id, blockOrder: 0 });
 
-        const plan = await confirmPlan(userId, DATE, "13:00", [
-            { taskId: inElapsed.id, blockId: afternoon.id, blockOrder: 0 },
-        ]);
+        const plan = await confirmPlan(userId, DATE, "13:00", template.id,
+            planFromTemplate(template, { Afternoon: [inElapsed.id] }));
 
         const newMorning = plan.blocks.find(b => b.name === "Deep Work")!;
         const newAfternoon = plan.blocks.find(b => b.name === "Afternoon")!;
@@ -475,7 +539,7 @@ describe("confirmPlan", () => {
     });
 
     it("retires past-date ACTIVE plans: not-DONE tasks return to the backlog, DONE tasks keep their history", async () => {
-        await seedTemplate();
+        const template = await seedTemplate();
         const yesterdays = await seedActivePlan(YESTERDAY, [
             { name: "Old block", startTime: "09:00", endTime: "12:00" },
         ]);
@@ -483,7 +547,7 @@ describe("confirmPlan", () => {
         const unfinished = await seedTask("Unfinished from yesterday", { plannedBlockId: oldBlock.id, blockOrder: 0 });
         const finished = await seedTask("Finished yesterday", { status: "DONE", progress: 100, plannedBlockId: oldBlock.id, blockOrder: 1 });
 
-        await confirmPlan(userId, DATE, "08:00", []);
+        await confirmPlan(userId, DATE, "08:00", template.id, planFromTemplate(template));
 
         const retired = await prisma.dayPlan.findUnique({ where: { id: yesterdays.id } });
         expect(retired!.status).toBe("COMPLETED");
@@ -496,7 +560,7 @@ describe("confirmPlan", () => {
     });
 
     it("retires a past ACTIVE plan even when a COMPLETED plan already exists for that date", async () => {
-        await seedTemplate();
+        const template = await seedTemplate();
 
         // Precondition for the @@unique([userId,date,status]) collision: a COMPLETED
         // and an ACTIVE plan on the same past date. seedActivePlan only makes ACTIVE
@@ -514,7 +578,7 @@ describe("confirmPlan", () => {
         const unfinished = await seedTask("Unfinished on active", { plannedBlockId: active.blocks[0].id, blockOrder: 0 });
 
         // Must not throw a unique-constraint error while retiring ACTIVE(YESTERDAY).
-        await expect(confirmPlan(userId, DATE, "08:00", [])).resolves.toBeDefined();
+        await expect(confirmPlan(userId, DATE, "08:00", template.id, planFromTemplate(template))).resolves.toBeDefined();
 
         const yPlans = await prisma.dayPlan.findMany({ where: { userId, date: YESTERDAY } });
         expect(yPlans).toHaveLength(1);

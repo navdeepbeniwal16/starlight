@@ -1,9 +1,11 @@
 import { Router, Request, Response } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
-import { getDayPlan, getReviewTasks, generatePlanProposal, confirmPlan, NoTemplateError, NoContainerBlocksError, InvalidAssignmentError } from "../services/dayPlan.service";
+import { getDayPlan, getReviewTasks, generatePlanProposal, confirmPlan, NoContainerBlocksError, InvalidPlacementError } from "../services/dayPlan.service";
 import { DayTemplateNotFoundError } from "../services/dayTemplate.service";
+import { DayShapeValidationError } from "../services/dayTemplate.validator";
 import { AgentError } from "../services/planAgent.service";
-import type { ConfirmAssignment } from "../types/dayPlan.types";
+import type { ConfirmPlan } from "../types/dayPlan.types";
+import type { DayShape } from "../types/dayTemplate.types";
 import { dateRegex, todayDateString, nowTimeString, parseTimezoneOffset } from "../lib/clientDate";
 
 const router = Router();
@@ -42,14 +44,17 @@ router.get("/review-tasks", authenticate, async (req: Request, res: Response): P
     res.status(200).json({ success: true, data: result });
 });
 
-// Generates a plan proposal and returns it. Nothing is persisted — the client
-// holds the proposal during review and sends the final placements to /confirm.
+// Generates a plan proposal and returns it (Nothing is persisted)
 router.post("/generate", authenticate, async (req: Request, res: Response): Promise<void> => {
     res.set("Cache-Control", "no-store, private");
 
-    const { templateId } = (req.body ?? {}) as { templateId?: unknown };
-    if (templateId !== undefined && typeof templateId !== 'string') {
-        res.status(400).json({ success: false, error: 'templateId must be a string' });
+    const { templateId, shape } = (req.body ?? {}) as { templateId?: unknown; shape?: unknown };
+    if (typeof templateId !== 'string') {
+        res.status(400).json({ success: false, error: 'templateId is required' });
+        return;
+    }
+    if (!shape || typeof shape !== 'object' || Array.isArray(shape)) {
+        res.status(400).json({ success: false, error: 'shape is required' });
         return;
     }
 
@@ -59,15 +64,15 @@ router.post("/generate", authenticate, async (req: Request, res: Response): Prom
     const now = new Date().toISOString();
 
     try {
-        const result = await generatePlanProposal(req.user!.sub, date, nowHHmm, now, templateId);
+        const result = await generatePlanProposal(req.user!.sub, date, nowHHmm, now, templateId, shape as DayShape);
         res.status(200).json({ success: true, data: result });
     } catch (error) {
-        if (error instanceof DayTemplateNotFoundError) {
-            res.status(404).json({ success: false, error: 'Day template not found' });
+        if (error instanceof DayShapeValidationError) {
+            res.status(400).json({ success: false, error: error.message });
             return;
         }
-        if (error instanceof NoTemplateError) {
-            res.status(400).json({ success: false, code: 'NO_TEMPLATE', error: 'No day template found. Please set up your day template first.' });
+        if (error instanceof DayTemplateNotFoundError) {
+            res.status(404).json({ success: false, error: 'Day template not found' });
             return;
         }
         if (error instanceof NoContainerBlocksError) {
@@ -85,27 +90,14 @@ router.post("/generate", authenticate, async (req: Request, res: Response): Prom
 router.post("/confirm", authenticate, async (req: Request, res: Response): Promise<void> => {
     res.set("Cache-Control", "no-store, private");
 
-    const { assignments, templateId } = (req.body ?? {}) as { assignments?: unknown; templateId?: unknown };
-
-    if (!Array.isArray(assignments)) {
-        res.status(400).json({ success: false, error: 'assignments must be an array' });
+    const { templateId, plan } = (req.body ?? {}) as { templateId?: unknown; plan?: unknown };
+    if (typeof templateId !== 'string') {
+        res.status(400).json({ success: false, error: 'templateId is required' });
         return;
     }
-    if (templateId !== undefined && typeof templateId !== 'string') {
-        res.status(400).json({ success: false, error: 'templateId must be a string' });
+    if (!plan || typeof plan !== 'object' || Array.isArray(plan)) {
+        res.status(400).json({ success: false, error: 'plan is required' });
         return;
-    }
-    for (const a of assignments) {
-        const item = a as Partial<ConfirmAssignment> | null;
-        if (
-            !item || typeof item !== 'object' ||
-            typeof item.taskId !== 'string' ||
-            typeof item.blockId !== 'string' ||
-            !Number.isInteger(item.blockOrder) || (item.blockOrder as number) < 0
-        ) {
-            res.status(400).json({ success: false, error: 'Each assignment must have a taskId, blockId, and non-negative integer blockOrder' });
-            return;
-        }
     }
 
     const utcOffsetMins = parseTimezoneOffset(req);
@@ -113,19 +105,19 @@ router.post("/confirm", authenticate, async (req: Request, res: Response): Promi
     const nowHHmm = nowTimeString(utcOffsetMins);
 
     try {
-        const plan = await confirmPlan(req.user!.sub, date, nowHHmm, assignments as ConfirmAssignment[], templateId);
-        res.status(200).json({ success: true, data: plan });
+        const result = await confirmPlan(req.user!.sub, date, nowHHmm, templateId, plan as ConfirmPlan);
+        res.status(200).json({ success: true, data: result });
     } catch (error) {
+        if (error instanceof DayShapeValidationError) {
+            res.status(400).json({ success: false, error: error.message });
+            return;
+        }
         if (error instanceof DayTemplateNotFoundError) {
             res.status(404).json({ success: false, error: 'Day template not found' });
             return;
         }
-        if (error instanceof NoTemplateError) {
-            res.status(400).json({ success: false, error: 'No day template found. Please set up your day template first.' });
-            return;
-        }
-        if (error instanceof InvalidAssignmentError) {
-            res.status(400).json({ success: false, error: 'An assignment references a block that is not a schedulable block of your template' });
+        if (error instanceof InvalidPlacementError) {
+            res.status(400).json({ success: false, error: 'A task is placed on a block that cannot hold tasks, or the same task appears more than once' });
             return;
         }
         throw error;

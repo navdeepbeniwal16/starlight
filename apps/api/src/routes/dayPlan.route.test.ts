@@ -41,6 +41,14 @@ const ALL_DAY_BLOCK = {
     energyLevel: "HIGH" as const,
 };
 
+// A whole-day 00:00–23:59 container so the shape survives elapsed-block
+// filtering whatever the wall-clock time is when the test runs.
+const validShape = () => ({
+    wakeTime: "00:00",
+    sleepTime: "23:59",
+    blocks: [{ id: "shape-block-1", ...ALL_DAY_BLOCK }],
+});
+
 async function seedUser(clerkUserId: string) {
     return prisma.user.upsert({ where: { clerkUserId }, update: {}, create: { clerkUserId } });
 }
@@ -86,68 +94,59 @@ afterAll(async () => {
 
 const auth = () => ({ Authorization: "Bearer test-token" });
 
-describe("day-plan routes: multi-template resolution", () => {
-    it("POST /generate builds the proposal from the last-used template, not the most-recently-updated one", async () => {
-        const lastUsed = await seedTemplate(userId, "Weekend", "09:00");
-        const recentlyEdited = await seedTemplate(userId, "Workday", "06:00");
-        await prisma.dayTemplate.update({ where: { id: recentlyEdited.id }, data: { wakeTime: "06:00" } });
-        await prisma.dayPlan.create({
-            data: { userId, date: "2026-09-01", status: "COMPLETED", wakeTime: "09:00", sleepTime: "23:59", dayTemplateId: lastUsed.id },
-        });
+describe("day-plan routes", () => {
+    it("POST /generate builds the proposal from the submitted shape, not the stored template", async () => {
+        const template = await seedTemplate(userId, "My Day", "07:00");
+        const shape = {
+            wakeTime: "00:00",
+            sleepTime: "23:59",
+            blocks: [{ id: "edited-1", type: "CONTAINER", name: "Edited Focus", startTime: "00:00", endTime: "23:59", energyLevel: "HIGH" }],
+        };
 
-        const res = await request(app).post("/day-plan/generate").set(auth());
+        const res = await request(app).post("/day-plan/generate").set(auth()).send({ templateId: template.id, shape });
 
         expect(res.status).toBe(200);
-        expect(res.body.data.wakeTime).toBe("09:00"); // Weekend (last used), not Workday's 06:00
+        expect(res.body.data.wakeTime).toBe("00:00");
+        expect((res.body.data.blocks as Array<{ name: string }>).map(b => b.name)).toEqual(["Edited Focus"]);
     });
 
-    it("POST /generate resolves last-used by plan date, not by plan creation time", async () => {
-        // The plan dates and createdAt timestamps are inverted on purpose: the
-        // later-dated plan was created first, the earlier-dated plan created later.
-        const newerDated = await seedTemplate(userId, "Weekend", "09:00");
-        const backdated = await seedTemplate(userId, "Workday", "06:00");
-        await prisma.dayPlan.create({
-            data: { userId, date: "2026-09-10", status: "COMPLETED", wakeTime: "09:00", sleepTime: "23:59", dayTemplateId: newerDated.id, createdAt: new Date("2026-09-10T08:00:00Z") },
-        });
-        await prisma.dayPlan.create({
-            data: { userId, date: "2026-09-01", status: "COMPLETED", wakeTime: "06:00", sleepTime: "23:59", dayTemplateId: backdated.id, createdAt: new Date("2026-09-15T08:00:00Z") },
-        });
+    it("POST /generate rejects a missing templateId with 400", async () => {
+        const res = await request(app).post("/day-plan/generate").set(auth()).send({ shape: validShape() });
 
-        const res = await request(app).post("/day-plan/generate").set(auth());
-
-        expect(res.status).toBe(200);
-        expect(res.body.data.wakeTime).toBe("09:00"); // Weekend (later-dated plan), though it was created earlier
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/templateId is required/);
     });
 
-    it("POST /generate falls back to the most-recently-updated template when no plan carries one", async () => {
-        await seedTemplate(userId, "Weekend", "09:00");
-        const workday = await seedTemplate(userId, "Workday", "06:00");
-        await prisma.dayTemplate.update({ where: { id: workday.id }, data: { wakeTime: "06:00" } });
+    it("POST /generate rejects a non-string templateId with 400", async () => {
+        const res = await request(app).post("/day-plan/generate").set(auth()).send({ templateId: 123, shape: validShape() });
 
-        const res = await request(app).post("/day-plan/generate").set(auth());
-
-        expect(res.status).toBe(200);
-        expect(res.body.data.wakeTime).toBe("06:00"); // Workday (most recently updated)
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/templateId is required/);
     });
 
-    it("POST /generate builds from an explicitly chosen owned template, overriding last-used", async () => {
-        const weekend = await seedTemplate(userId, "Weekend", "09:00");
-        const workday = await seedTemplate(userId, "Workday", "06:00");
-        await prisma.dayPlan.create({
-            data: { userId, date: "2026-09-01", status: "COMPLETED", wakeTime: "09:00", sleepTime: "23:59", dayTemplateId: weekend.id },
-        });
+    it("POST /generate rejects a missing shape with 400", async () => {
+        const template = await seedTemplate(userId, "My Day", "07:00");
 
-        const res = await request(app).post("/day-plan/generate").set(auth()).send({ templateId: workday.id });
+        const res = await request(app).post("/day-plan/generate").set(auth()).send({ templateId: template.id });
 
-        expect(res.status).toBe(200);
-        expect(res.body.data.wakeTime).toBe("06:00");
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/shape is required/);
+    });
+
+    it("POST /generate rejects a structurally invalid shape with 400", async () => {
+        const template = await seedTemplate(userId, "My Day", "07:00");
+
+        const res = await request(app).post("/day-plan/generate").set(auth()).send({ templateId: template.id, shape: { ...validShape(), wakeTime: "25:00" } });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/HH:mm/);
     });
 
     it("POST /generate rejects a templateId belonging to another user with 404", async () => {
         await seedTemplate(userId, "Mine", "07:00");
         const foreign = await seedTemplate(otherUserId, "Theirs", "08:00");
 
-        const res = await request(app).post("/day-plan/generate").set(auth()).send({ templateId: foreign.id });
+        const res = await request(app).post("/day-plan/generate").set(auth()).send({ templateId: foreign.id, shape: validShape() });
 
         expect(res.status).toBe(404);
     });
@@ -155,69 +154,85 @@ describe("day-plan routes: multi-template resolution", () => {
     it("POST /generate rejects a nonexistent templateId with 404", async () => {
         await seedTemplate(userId, "Mine", "07:00");
 
-        const res = await request(app).post("/day-plan/generate").set(auth()).send({ templateId: "no-such-template" });
+        const res = await request(app).post("/day-plan/generate").set(auth()).send({ templateId: "no-such-template", shape: validShape() });
 
         expect(res.status).toBe(404);
     });
 
-    it("POST /generate rejects a non-string templateId with 400", async () => {
-        const res = await request(app).post("/day-plan/generate").set(auth()).send({ templateId: 123 });
-
-        expect(res.status).toBe(400);
-    });
-
-    it("POST /generate returns NO_TEMPLATE when the user has no template", async () => {
-        const res = await request(app).post("/day-plan/generate").set(auth());
-
-        expect(res.status).toBe(400);
-        expect(res.body.code).toBe("NO_TEMPLATE");
-    });
-
-    it("POST /confirm stores the id of the template the plan was built from", async () => {
+    it("POST /confirm records templateId as provenance", async () => {
         const template = await seedTemplate(userId, "My Day", "07:00");
 
-        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ assignments: [] });
+        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ templateId: template.id, plan: validShape() });
 
         expect(res.status).toBe(200);
         const stored = await prisma.dayPlan.findFirst({ where: { userId, status: "ACTIVE" }, select: { dayTemplateId: true } });
         expect(stored?.dayTemplateId).toBe(template.id);
     });
 
-    it("POST /confirm stores the last-used template id when the user has several", async () => {
-        const lastUsed = await seedTemplate(userId, "Weekend", "09:00");
-        const other = await seedTemplate(userId, "Workday", "06:00");
-        await prisma.dayTemplate.update({ where: { id: other.id }, data: { wakeTime: "06:00" } });
-        await prisma.dayPlan.create({
-            data: { userId, date: "2026-09-01", status: "COMPLETED", wakeTime: "09:00", sleepTime: "23:59", dayTemplateId: lastUsed.id },
-        });
+    it("POST /confirm persists the submitted plan, not the stored template, and places tasks in order", async () => {
+        const template = await seedTemplate(userId, "My Day", "07:00");
+        const task = await prisma.task.create({ data: { userId, title: "Focus task", estimatedMins: 60, status: "TODO", progress: 0 } });
+        const plan = {
+            wakeTime: "00:00",
+            sleepTime: "23:59",
+            blocks: [{ id: "c1", type: "CONTAINER", name: "Focus", startTime: "00:00", endTime: "23:59", energyLevel: "HIGH", taskIds: [task.id] }],
+        };
 
-        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ assignments: [] });
+        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ templateId: template.id, plan });
 
         expect(res.status).toBe(200);
+        expect(res.body.data.wakeTime).toBe("00:00");
+        const block = (res.body.data.blocks as Array<{ name: string; tasks: Array<{ id: string; blockOrder: number }> }>).find(b => b.name === "Focus")!;
+        expect(block.tasks.map(t => t.id)).toEqual([task.id]);
+        expect(block.tasks[0].blockOrder).toBe(0);
         const stored = await prisma.dayPlan.findFirst({ where: { userId, status: "ACTIVE" }, select: { dayTemplateId: true } });
-        expect(stored?.dayTemplateId).toBe(lastUsed.id);
+        expect(stored?.dayTemplateId).toBe(template.id);
     });
 
-    it("POST /confirm records the client-sent templateId, not a re-resolved one", async () => {
-        const lastUsed = await seedTemplate(userId, "Weekend", "09:00");
-        const chosen = await seedTemplate(userId, "Workday", "06:00");
-        await prisma.dayPlan.create({
-            data: { userId, date: "2026-09-01", status: "COMPLETED", wakeTime: "09:00", sleepTime: "23:59", dayTemplateId: lastUsed.id },
-        });
+    it("POST /confirm rejects a missing templateId with 400", async () => {
+        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ plan: validShape() });
 
-        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ assignments: [], templateId: chosen.id });
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/templateId is required/);
+    });
 
-        expect(res.status).toBe(200);
-        expect(res.body.data.wakeTime).toBe("06:00"); // built from Workday (chosen), not Weekend (last used)
-        const stored = await prisma.dayPlan.findFirst({ where: { userId, status: "ACTIVE" }, select: { dayTemplateId: true } });
-        expect(stored?.dayTemplateId).toBe(chosen.id);
+    it("POST /confirm rejects a non-string templateId with 400", async () => {
+        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ templateId: 123, plan: validShape() });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/templateId is required/);
+    });
+
+    it("POST /confirm rejects a missing plan with 400", async () => {
+        const template = await seedTemplate(userId, "My Day", "07:00");
+
+        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ templateId: template.id });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/plan is required/);
+    });
+
+    it("POST /confirm rejects taskIds on a non-container block with 400", async () => {
+        const template = await seedTemplate(userId, "My Day", "07:00");
+        const plan = {
+            wakeTime: "00:00",
+            sleepTime: "23:59",
+            blocks: [
+                { id: "c1", type: "CONTAINER", name: "Focus", startTime: "00:00", endTime: "12:00", energyLevel: "HIGH" },
+                { id: "a1", type: "ANCHOR", name: "Break", startTime: "12:00", endTime: "13:00", taskIds: ["t1"] },
+            ],
+        };
+
+        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ templateId: template.id, plan });
+
+        expect(res.status).toBe(400);
     });
 
     it("POST /confirm rejects a templateId belonging to another user with 404", async () => {
         await seedTemplate(userId, "Mine", "07:00");
         const foreign = await seedTemplate(otherUserId, "Theirs", "08:00");
 
-        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ assignments: [], templateId: foreign.id });
+        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ templateId: foreign.id, plan: validShape() });
 
         expect(res.status).toBe(404);
         expect(await prisma.dayPlan.count({ where: { userId } })).toBe(0);
@@ -226,20 +241,14 @@ describe("day-plan routes: multi-template resolution", () => {
     it("POST /confirm rejects a nonexistent templateId with 404", async () => {
         await seedTemplate(userId, "Mine", "07:00");
 
-        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ assignments: [], templateId: "no-such-template" });
+        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ templateId: "no-such-template", plan: validShape() });
 
         expect(res.status).toBe(404);
     });
 
-    it("POST /confirm rejects a non-string templateId with 400", async () => {
-        const res = await request(app).post("/day-plan/confirm").set(auth()).send({ assignments: [], templateId: 123 });
-
-        expect(res.status).toBe(400);
-    });
-
     it("deleting the source template nulls the plan's link but keeps its snapshotted blocks", async () => {
         const template = await seedTemplate(userId, "My Day", "07:00");
-        await request(app).post("/day-plan/confirm").set(auth()).send({ assignments: [] });
+        await request(app).post("/day-plan/confirm").set(auth()).send({ templateId: template.id, plan: validShape() });
 
         const before = await prisma.dayPlan.findFirst({
             where: { userId, status: "ACTIVE" },

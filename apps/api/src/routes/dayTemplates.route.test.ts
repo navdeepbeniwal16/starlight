@@ -96,6 +96,30 @@ describe("day-templates routes", () => {
         expect(byId[unused.body.data.id]).toBeNull();
     });
 
+    it("GET list attributes lastUsedOn to the base template after an adjusted-and-confirmed day", async () => {
+        const base = await request(app).post("/day-templates").set(auth()).send(validBody("Workday"));
+        const unused = await request(app).post("/day-templates").set(auth()).send(validBody("Weekend"));
+
+        // Confirm a plan whose shape diverges from the stored template (today's edits),
+        // tagged with the base template as provenance. lastUsedOn must still key off
+        // the base template, not the adjusted shape.
+        const adjustedPlan = {
+            wakeTime: "00:00",
+            sleepTime: "23:59",
+            blocks: [{ id: "c1", type: "CONTAINER", name: "Adjusted Focus", startTime: "00:00", endTime: "23:59", energyLevel: "HIGH" }],
+        };
+        const confirmed = await request(app).post("/day-plan/confirm").set(auth()).send({ templateId: base.body.data.id, plan: adjustedPlan });
+        expect(confirmed.status).toBe(200);
+
+        const list = await request(app).get("/day-templates").set(auth());
+        expect(list.status).toBe(200);
+        const byId = Object.fromEntries(
+            list.body.data.map((t: { id: string; lastUsedOn: string | null }) => [t.id, t.lastUsedOn]),
+        );
+        expect(byId[base.body.data.id]).toBe(confirmed.body.data.date); // base template, despite the adjusted shape
+        expect(byId[unused.body.data.id]).toBeNull();
+    });
+
     it("GET returns a template by id and rejects an unknown id with 404", async () => {
         const created = await request(app).post("/day-templates").set(auth()).send(validBody("Workday"));
         const id = created.body.data.id;

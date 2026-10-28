@@ -1,11 +1,12 @@
 import { prisma } from "../lib/prisma";
-import type { ConfirmAssignment, DayPlan, PlanProposal, ProposalBlock, ReviewTasks } from "../types/dayPlan.types";
+import type { ConfirmPlan, DayPlan, PlanProposal, ProposalBlock, ReviewTasks } from "../types/dayPlan.types";
+import type { DayShape, ShapeBlock } from "../types/dayTemplate.types";
 import { generateSchedule, remainingMinsOf, type RawTask, type ScheduleDeps } from "./planAgent.service";
 import { getDayTemplateById } from "./dayTemplate.service";
+import { validateDayShape } from "./dayTemplate.validator";
 
-export class NoTemplateError extends Error { }
 export class NoContainerBlocksError extends Error { }
-export class InvalidAssignmentError extends Error { }
+export class InvalidPlacementError extends Error { }
 
 // The plan whose unfinished tasks carry over into a new plan: the most recent
 // ACTIVE plan dated on or before `onOrBeforeDate`. On a same-day re-plan that's
@@ -164,50 +165,15 @@ type EligibleBlock = {
     energyLevel: 'HIGH' | 'MEDIUM' | 'LOW' | null;
 };
 
-type ResolvedTemplate = {
-    id: string;
-    wakeTime: string;
-    sleepTime: string;
-    blocks: EligibleBlock[];
-};
-
-async function resolveTemplateForUser(userId: string) {
-    const templateSelect = {
-        id: true,
-        wakeTime: true,
-        sleepTime: true,
-        blocks: {
-            select: { id: true, type: true, name: true, startTime: true, endTime: true, energyLevel: true },
-        },
-    } as const;
-
-    const lastPlan = await prisma.dayPlan.findFirst({
-        where: { userId, dayTemplateId: { not: null } },
-        orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
-        select: { dayTemplateId: true },
-    });
-
-    if (lastPlan?.dayTemplateId) {
-        const lastUsed = await prisma.dayTemplate.findUnique({
-            where: { id: lastPlan.dayTemplateId },
-            select: templateSelect,
-        });
-        if (lastUsed) return lastUsed;
-    }
-
-    const fallback = await prisma.dayTemplate.findFirst({
-        where: { userId },
-        orderBy: { updatedAt: 'desc' },
-        select: templateSelect,
-    });
-    if (!fallback) throw new NoTemplateError();
-    return fallback;
-}
-
-async function resolveTemplate(userId: string, templateId?: string): Promise<ResolvedTemplate> {
-    return templateId
-        ? getDayTemplateById(userId, templateId)
-        : resolveTemplateForUser(userId);
+function shapeToEligibleBlocks(blocks: ShapeBlock[]): EligibleBlock[] {
+    return blocks.map(b => ({
+        id: b.id,
+        type: b.type,
+        name: b.name,
+        startTime: b.startTime,
+        endTime: b.endTime,
+        energyLevel: b.energyLevel ?? null,
+    }));
 }
 
 function eligibleBlocksOf(blocks: EligibleBlock[], nowHHmm: string): EligibleBlock[] {
@@ -219,10 +185,10 @@ function eligibleBlocksOf(blocks: EligibleBlock[], nowHHmm: string): EligibleBlo
 /**
  * Generates a plan proposal for `date` and returns it to the caller.
  *
- * Pure computation — nothing is written to the database. The proposal's blocks
- * are keyed by template block id; the client holds the proposal during review
- * and sends the final placements back via confirmPlan. Abandoning the flow
- * therefore requires no cleanup and cannot affect the active plan or backlog.
+ * Runs from the client-submitted `shape` (base template + today's edits). Pure computation: nothing is written to the
+ * database. The proposal's blocks are keyed by shape block id; the client holds
+ * the proposal during review and sends the final placements back via confirmPlan.
+ * Abandoning the flow needs no cleanup and cannot affect the active plan or backlog.
  *
  * Every schedulable task appears in the proposal exactly once: either placed in
  * a block or listed as unschedulable (tasks the agent dropped entirely are
@@ -232,7 +198,7 @@ function eligibleBlocksOf(blocks: EligibleBlock[], nowHHmm: string): EligibleBlo
  * the server's current instant (ISO), handed to the agent as its urgency/staleness
  * anchor. `deps` is the agent dependency seam, forwarded for tests; production omits it.
  *
- * @throws {NoTemplateError} If the user has no day template.
+ * @throws {DayShapeValidationError} If `shape` is structurally invalid.
  * @throws {DayTemplateNotFoundError} If `templateId` isn't the caller's template.
  * @throws {NoContainerBlocksError} If no CONTAINER block remains today.
  * @throws {AgentError} If the agent call fails or returns malformed output.
@@ -242,12 +208,14 @@ export async function generatePlanProposal(
     date: string,
     nowHHmm: string,
     now: string,
-    templateId?: string,
+    templateId: string,
+    shape: DayShape,
     deps?: ScheduleDeps,
 ): Promise<PlanProposal> {
-    const template = await resolveTemplate(userId, templateId);
+    validateDayShape(shape);
+    await getDayTemplateById(userId, templateId); // ownership gate; blocks go unused
 
-    const eligible = eligibleBlocksOf(template.blocks, nowHHmm);
+    const eligible = eligibleBlocksOf(shapeToEligibleBlocks(shape.blocks), nowHHmm);
     if (!eligible.some(b => b.type === 'CONTAINER')) {
         throw new NoContainerBlocksError();
     }
@@ -317,8 +285,8 @@ export async function generatePlanProposal(
     }
 
     return {
-        wakeTime: template.wakeTime,
-        sleepTime: template.sleepTime,
+        wakeTime: shape.wakeTime,
+        sleepTime: shape.sleepTime,
         blocks,
         unschedulable,
     };
@@ -328,64 +296,69 @@ export async function generatePlanProposal(
  * Persists a confirmed plan for `date` in a single transaction. This is the
  * only mutation point of the planning flow.
  *
- * `assignments` maps tasks to template block ids (as returned in the proposal).
- * The server re-derives everything it needs from the template rather than
- * trusting client-sent blocks:
- *   - An assignment naming a block that is not a CONTAINER block of the user's
- *     template is rejected (client bug or forgery) with InvalidAssignmentError.
- *   - An assignment whose block has fully elapsed since the proposal was
- *     generated is silently dropped — the task simply stays in the backlog.
- *   - Assignments for tasks that vanished or were completed during review are
- *     silently dropped for the same reason: the world moved on, the task is
- *     still reachable.
- *   - Duplicate task ids keep the first occurrence.
+ * `plan` is the client's edited proposal — the resolved day shape with each
+ * CONTAINER block's task placements nested as `taskIds` (array index = the
+ * intended blockOrder). The server persists from that plan, trusting only task
+ * ids (task content is re-read from the DB) and `templateId` as provenance:
+ *   - `taskIds` on a non-CONTAINER block, or the same task placed more than once
+ *     (within or across blocks), is a client bug → InvalidPlacementError.
+ *   - Placements are honored as submitted, including into a block that elapsed
+ *     during review — that block is still part of the persisted day, so the task
+ *     stays where the user put it rather than silently bouncing to the backlog.
+ *   - Placements for tasks that vanished, were completed, or aren't the caller's
+ *     are silently dropped: those tasks genuinely can't be placed.
  *
- * The confirmed plan spans the whole day. Elapsed template blocks are included
- * as history: on a same-day re-plan their task placements are carried over from
- * the superseded ACTIVE plan (matched by name + endTime); on a fresh plan they
- * are empty. Tasks still attached to the superseded plan's non-elapsed blocks
- * that were not re-assigned return to the backlog.
+ * The confirmed plan spans the whole day. Elapsed blocks are included as history:
+ * on a same-day re-plan their task placements carry over from the superseded
+ * ACTIVE plan (matched by name + endTime); on a fresh plan they are empty. Tasks
+ * still attached to the superseded plan's non-elapsed blocks that were not
+ * re-placed return to the backlog.
  *
  * Finally, ACTIVE plans from *earlier* dates are retired: their not-DONE tasks
  * return to the backlog (so nothing is stranded on an old plan) and the plans
  * are marked COMPLETED. DONE tasks keep their placement as history.
  *
- * @throws {NoTemplateError} If the user has no day template.
+ * @throws {DayShapeValidationError} If `plan` is structurally invalid.
  * @throws {DayTemplateNotFoundError} If `templateId` isn't the caller's template.
- * @throws {InvalidAssignmentError} If an assignment references a block that is
- *         not a CONTAINER block of the user's template.
+ * @throws {InvalidPlacementError} If a placement is structurally illegal: a task
+ *         on a non-CONTAINER block, or the same task placed more than once.
  */
 export async function confirmPlan(
     userId: string,
     date: string,
     nowHHmm: string,
-    assignments: ConfirmAssignment[],
-    templateId?: string,
+    templateId: string,
+    plan: ConfirmPlan,
 ): Promise<DayPlan> {
-    const template = await resolveTemplate(userId, templateId);
+    validateDayShape(plan);
+    await getDayTemplateById(userId, templateId); // ownership gate; blocks go unused
 
-    const templateBlockById = new Map(template.blocks.map(b => [b.id, b]));
-    for (const a of assignments) {
-        const block = templateBlockById.get(a.blockId);
-        if (!block || block.type !== 'CONTAINER') throw new InvalidAssignmentError();
+    const blockById = new Map(plan.blocks.map(b => [b.id, b]));
+
+    // Flatten the nested plan to (blockId, taskId, blockOrder) placements while
+    // enforcing placement legality: tasks ride only on CONTAINER blocks, and no
+    // task is placed twice. Array index is the intended blockOrder.
+    type Placement = { taskId: string; blockId: string; blockOrder: number };
+    const placements: Placement[] = [];
+    const placed = new Set<string>();
+    for (const block of plan.blocks) {
+        const taskIds = block.taskIds ?? [];
+        if (taskIds.length > 0 && block.type !== 'CONTAINER') throw new InvalidPlacementError();
+        taskIds.forEach((taskId, blockOrder) => {
+            if (placed.has(taskId)) throw new InvalidPlacementError();
+            placed.add(taskId);
+            placements.push({ taskId, blockId: block.id, blockOrder });
+        });
     }
 
-    // Drop assignments to blocks that elapsed during review, dedupe task ids,
-    // and drop tasks that no longer exist / no longer belong / are DONE.
-    const stillOpen = assignments.filter(a => templateBlockById.get(a.blockId)!.endTime > nowHHmm);
-    const seen = new Set<string>();
-    const deduped = stillOpen.filter(a => {
-        if (seen.has(a.taskId)) return false;
-        seen.add(a.taskId);
-        return true;
-    });
+    // Only drop tasks that cannot be placed: vanished, done or does not belong with requesting user
     const validTasks = await prisma.task.findMany({
-        where: { id: { in: deduped.map(a => a.taskId) }, userId, status: { not: 'DONE' } },
+        where: { id: { in: placements.map(p => p.taskId) }, userId, status: { not: 'DONE' } },
         select: { id: true },
     });
     const validTaskIds = new Set(validTasks.map(t => t.id));
-    const confirmed = deduped.filter(a => validTaskIds.has(a.taskId));
-    const confirmedTaskIds = new Set(confirmed.map(a => a.taskId));
+    const confirmed = placements.filter(p => validTaskIds.has(p.taskId));
+    const confirmedTaskIds = new Set(confirmed.map(p => p.taskId));
 
     const planId = await prisma.$transaction(async (tx) => {
         // ── Capture and release the superseded same-day ACTIVE plan ──
@@ -427,8 +400,8 @@ export async function confirmPlan(
             where: { userId, status: 'ACTIVE', date: { lt: date } },
             select: { id: true, date: true, blocks: { select: { id: true } } },
         });
-        for (const plan of pastActives) {
-            const blockIds = plan.blocks.map(b => b.id);
+        for (const pastPlan of pastActives) {
+            const blockIds = pastPlan.blocks.map(b => b.id);
             if (blockIds.length > 0) {
                 await tx.task.updateMany({
                     where: { plannedBlockId: { in: blockIds }, status: { not: 'DONE' } },
@@ -439,7 +412,7 @@ export async function confirmPlan(
             // moved backwards between confirms), which would collide with @@unique
             // on the ACTIVE→COMPLETED update — so drop the stale COMPLETED row first.
             const staleCompleted = await tx.dayPlan.findFirst({
-                where: { userId, date: plan.date, status: 'COMPLETED' },
+                where: { userId, date: pastPlan.date, status: 'COMPLETED' },
                 select: { id: true, blocks: { select: { id: true } } },
             });
             if (staleCompleted) {
@@ -453,27 +426,27 @@ export async function confirmPlan(
                 }
                 await tx.dayPlan.delete({ where: { id: staleCompleted.id } });
             }
-            await tx.dayPlan.update({ where: { id: plan.id }, data: { status: 'COMPLETED' } });
+            await tx.dayPlan.update({ where: { id: pastPlan.id }, data: { status: 'COMPLETED' } });
         }
 
         // ── Create the new plan spanning the whole day ──
-        // Elapsed blocks keep their template times (history); open blocks are
-        // clamped to start no earlier than now, mirroring the proposal.
-        const plan = await tx.dayPlan.create({
+        // Snapshot the submitted plan's blocks. Elapsed blocks keep their times
+        // (history); an in-progress block is clamped to start no earlier than now.
+        const created = await tx.dayPlan.create({
             data: {
                 userId,
                 date,
-                dayTemplateId: template.id,
-                wakeTime: template.wakeTime,
-                sleepTime: template.sleepTime,
+                dayTemplateId: templateId,
+                wakeTime: plan.wakeTime,
+                sleepTime: plan.sleepTime,
                 status: 'ACTIVE',
                 blocks: {
-                    create: template.blocks.map(b => ({
+                    create: plan.blocks.map(b => ({
                         type: b.type,
                         name: b.name,
                         startTime: b.endTime > nowHHmm && b.startTime < nowHHmm ? nowHHmm : b.startTime,
                         endTime: b.endTime,
-                        energyLevel: b.energyLevel,
+                        energyLevel: b.energyLevel ?? null,
                     })),
                 },
             },
@@ -483,16 +456,16 @@ export async function confirmPlan(
             },
         });
 
-        // Template block id → created block id, via the template ordering (the
-        // created blocks come back in insertion order is not guaranteed, so match
-        // by name + endTime which is unique within a valid template).
-        const createdByKey = new Map(plan.blocks.map(b => [`${b.name}|${b.endTime}`, b.id]));
+        // Submitted block → created block, matched by name + endTime (unique
+        // within a valid, non-overlapping plan since insertion order isn't
+        // guaranteed). Also keys the cross-re-plan elapsed-history restore.
+        const createdByKey = new Map(created.blocks.map(b => [`${b.name}|${b.endTime}`, b.id]));
 
         // ── Restore elapsed history from the superseded plan ──
-        for (const [key, placements] of elapsedHistory) {
+        for (const [key, oldPlacements] of elapsedHistory) {
             const newBlockId = createdByKey.get(key);
             if (!newBlockId) continue;
-            for (const p of placements) {
+            for (const p of oldPlacements) {
                 if (confirmedTaskIds.has(p.id)) continue; // the confirmed placement wins
                 await tx.task.update({
                     where: { id: p.id },
@@ -502,17 +475,17 @@ export async function confirmPlan(
         }
 
         // ── Apply the confirmed placements ──
-        // Renumber per block so blockOrder is a contiguous 0..n-1 regardless of
-        // what the client sent.
-        const byBlock = new Map<string, ConfirmAssignment[]>();
-        for (const a of confirmed) {
-            const list = byBlock.get(a.blockId) ?? [];
-            list.push(a);
-            byBlock.set(a.blockId, list);
+        // Renumber per block so blockOrder is a contiguous 0..n-1 after any
+        // elapsed/invalid placements were dropped above.
+        const byBlock = new Map<string, Placement[]>();
+        for (const p of confirmed) {
+            const list = byBlock.get(p.blockId) ?? [];
+            list.push(p);
+            byBlock.set(p.blockId, list);
         }
-        for (const [templateBlockId, list] of byBlock) {
-            const tb = templateBlockById.get(templateBlockId)!;
-            const newBlockId = createdByKey.get(`${tb.name}|${tb.endTime}`);
+        for (const [blockId, list] of byBlock) {
+            const block = blockById.get(blockId)!;
+            const newBlockId = createdByKey.get(`${block.name}|${block.endTime}`);
             if (!newBlockId) continue;
             list.sort((a, b) => a.blockOrder - b.blockOrder);
             for (let i = 0; i < list.length; i++) {
@@ -523,7 +496,7 @@ export async function confirmPlan(
             }
         }
 
-        return plan.id;
+        return created.id;
     });
 
     const populated = await fetchPopulatedPlan({ id: planId });
