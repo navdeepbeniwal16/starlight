@@ -23,7 +23,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "../lib/api";
-import type { ConfirmAssignment, PlanProposal } from "../lib/api.types";
+import type { ConfirmBlock, ConfirmPlan, PlanProposal } from "../lib/api.types";
 import { usePlanningStore } from "../stores/planning.store";
 import { useOnboardingTasksStore } from "../stores/onboardingTasks.store";
 import { useSessionStore } from "../stores/session.store";
@@ -135,12 +135,26 @@ function boardFromProposal(proposal: PlanProposal): Board {
     };
 }
 
-// Flattens the board into the confirm payload: every scheduled task with its
-// block (template block id) and position.
-function assignmentsFromBoard(board: Board): ConfirmAssignment[] {
-    return board.blocks.flatMap(block =>
-        block.tasks.map((task, i) => ({ taskId: task.id, blockId: block.id, blockOrder: i }))
-    );
+// The proposal is the submitted shape post-generation (elapsed blocks dropped, in-progress
+// clamped), so it — not the board — owns the day's blocks; the board only orders CONTAINER tasks.
+function planFromProposalAndBoard(proposal: PlanProposal, board: Board): ConfirmPlan {
+    return {
+        wakeTime: proposal.wakeTime,
+        sleepTime: proposal.sleepTime,
+        blocks: proposal.blocks.map((b): ConfirmBlock => {
+            const base: ConfirmBlock = {
+                id: b.blockId,
+                type: b.type,
+                name: b.name,
+                startTime: b.startTime,
+                endTime: b.endTime,
+                ...(b.energyLevel ? { energyLevel: b.energyLevel } : {}),
+            };
+            if (b.type !== 'CONTAINER') return base;
+            const placed = board.blocks.find(bl => bl.id === b.blockId);
+            return { ...base, taskIds: placed ? placed.tasks.map(t => t.id) : [] };
+        }),
+    };
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -150,6 +164,7 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
     const insets = useSafeAreaInsets();
     const isOnboarding = onboarding;
     const proposal = usePlanningStore(s => s.proposal);
+    const templateId = usePlanningStore(s => s.templateId);
     const clearProposal = usePlanningStore(s => s.clear);
 
     // The board is derived from the store-held proposal once on mount; edits
@@ -301,9 +316,9 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
     // offer a retry (the board is untouched, so retrying just resends).
     const handleConfirm = useCallback(async () => {
         const snapshot = boardRef.current;
-        if (!snapshot || confirming) return;
+        if (!snapshot || !proposal || !templateId || confirming) return;
         setConfirming(true);
-        const res = await api.confirmPlan(assignmentsFromBoard(snapshot));
+        const res = await api.confirmPlan({ templateId, plan: planFromProposalAndBoard(proposal, snapshot) });
         if (res.ok) {
             // Stamp completion server-side before tearing down, so any future
             // sign-in (this device or another) resolves straight to Today.
@@ -321,7 +336,7 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
             { text: 'Cancel', style: 'cancel' },
             { text: 'Retry', onPress: () => handleConfirm() },
         ]);
-    }, [confirming, dismissFlow, isOnboarding]);
+    }, [confirming, dismissFlow, isOnboarding, proposal, templateId]);
 
     if (!board) {
         return (
@@ -438,16 +453,14 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
                             : <Text style={s.confirmButtonLabel}>Confirm my plan</Text>
                         }
                     </TouchableOpacity>
-                    {isOnboarding && (
-                        <TouchableOpacity
-                            style={s.footerBack}
-                            onPress={handleClose}
-                            disabled={confirming}
-                            activeOpacity={0.8}
-                        >
-                            <Text style={s.footerBackLabel}>Back</Text>
-                        </TouchableOpacity>
-                    )}
+                    <TouchableOpacity
+                        style={s.footerBack}
+                        onPress={() => router.back()}
+                        disabled={confirming}
+                        activeOpacity={0.8}
+                    >
+                        <Text style={s.footerBackLabel}>Back</Text>
+                    </TouchableOpacity>
                 </View>
             </SafeAreaView>
         </GestureHandlerRootView>
@@ -470,8 +483,9 @@ function Header({ onClose, onboarding }: { onClose: () => void; onboarding?: boo
                 ) : (
                     <>
                         <View style={[s.stepPip, s.stepPipDone]} />
+                        <View style={[s.stepPip, s.stepPipDone]} />
                         <View style={[s.stepPip, s.stepPipActive]} />
-                        <Text style={s.stepLabel}>Step 2 of 2</Text>
+                        <Text style={s.stepLabel}>Step 3 of 3</Text>
                     </>
                 )}
             </View>

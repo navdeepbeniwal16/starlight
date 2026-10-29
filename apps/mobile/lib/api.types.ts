@@ -28,6 +28,20 @@ export type DayTemplate = {
     sleepTime: string;
     blocks: DayTemplateBlock[];
     updatedAt: string;
+    // Latest plan date (YYYY-MM-DD) this template was planned from, else null.
+    lastUsedOn: string | null;
+};
+
+// A block in a client-submitted day shape. `id` is a client-stable key the generate proposal
+// echoes back as `blockId` and confirm references — the thread tying placements to blocks.
+export type ShapeBlock = BlockInput & { id: string };
+
+// The day the plan is built from, owned and edited by the client. Sent to both
+// generate and confirm; the server does not resolve a template-derived shape.
+export type DayShape = {
+    wakeTime: string;
+    sleepTime: string;
+    blocks: ShapeBlock[];
 };
 
 export type GetDayTemplatesResponse = ApiResult<DayTemplate[]>;
@@ -109,12 +123,25 @@ export type PlanProposal = {
 };
 export type GeneratePlanResponse = ApiResult<PlanProposal>;
 
-// One task placement sent to the confirm endpoint. `blockId` references a
-// template block, matching ProposalBlock.blockId.
-export type ConfirmAssignment = {
-    taskId: string;
-    blockId: string;
-    blockOrder: number;
+// Generate is driven by the client-submitted shape, not the stored template.
+export type GeneratePlanRequest = {
+    templateId: string;
+    shape: DayShape;
+};
+
+// Confirm sends the arranged plan as the shape plus placements: `taskIds` carries a CONTAINER
+// block's tasks in display order (index = position). Only CONTAINER blocks may carry it.
+export type ConfirmBlock = ShapeBlock & { taskIds?: string[] };
+
+export type ConfirmPlan = {
+    wakeTime: string;
+    sleepTime: string;
+    blocks: ConfirmBlock[];
+};
+
+export type ConfirmPlanRequest = {
+    templateId: string;
+    plan: ConfirmPlan;
 };
 
 export type Priority = 'HIGH' | 'MEDIUM' | 'LOW';

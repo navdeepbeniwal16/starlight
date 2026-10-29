@@ -4,9 +4,11 @@ import { hasContainer, isWakeBeforeSleep, type TemplateDraft } from "../lib/temp
 
 // Whole-template failures only. Per-block bounds problems are deliberately called out on the
 // block itself, so editing the sleep boundary at the bottom never hides the reason above the fold.
-export function TemplateValidationBanner({ draft }: { draft: TemplateDraft }) {
+// `showContainerWarning` lets a caller own the missing-Time-Block prompt elsewhere (the planning
+// Step 2 surfaces it at its disabled action instead).
+export function TemplateValidationBanner({ draft, showContainerWarning = true }: { draft: TemplateDraft; showContainerWarning?: boolean }) {
     const wakeBeforeSleep = isWakeBeforeSleep(draft);
-    const noContainer = draft.blocks.length > 0 && !hasContainer(draft);
+    const noContainer = showContainerWarning && draft.blocks.length > 0 && !hasContainer(draft);
 
     if (wakeBeforeSleep && !noContainer) return null;
 
