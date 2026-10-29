@@ -8,6 +8,7 @@ const source: DayTemplate = {
     wakeTime: "06:30",
     sleepTime: "22:30",
     updatedAt: "2026-10-01T08:00:00.000Z",
+    lastUsedOn: null,
     blocks: [
         { id: "blk_1", type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" },
         { id: "blk_2", type: "ANCHOR", name: "Lunch", startTime: "12:00", endTime: "13:00" },

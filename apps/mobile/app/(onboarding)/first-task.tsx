@@ -17,6 +17,7 @@ import { api } from "../../lib/api";
 import { colors, radius, spacing, shadow, typography } from "../../lib/theme";
 import { canPlanFirstTask, canPlanTasks, type FirstTaskDraft } from "../../lib/firstTaskDraft";
 import { usePlanGeneration } from "../../lib/usePlanGeneration";
+import { templateToShape } from "../../lib/planTemplate";
 import { ESTIMATE_OPTIONS, getEstimateLabel } from "../../components/TaskFields";
 import { StepEyebrow } from "../../components/StepEyebrow";
 import { PressableScale } from "../../components/PressableScale";
@@ -108,8 +109,18 @@ export default function FirstTaskScreen() {
     }, [router]);
 
     const goToPayoff = useCallback(() => router.push('/(onboarding)/review'), [router]);
+
+    // Onboarding has exactly one template — the one just built — so plan from it directly.
+    const runGenerate = useCallback(async () => {
+        const res = await api.listDayTemplates();
+        if (!res.ok) { setCreateError(res.error); return; }
+        const template = res.data[0];
+        if (!template) { setCreateError('Your day template is missing. Go back a step to build it.'); return; }
+        generate({ templateId: template.id, shape: templateToShape(template) }, goToPayoff);
+    }, [generate, goToPayoff]);
+
     // Retry re-runs generation only — the tasks are already created by this point.
-    const retryGenerate = useCallback(() => generate(goToPayoff), [generate, goToPayoff]);
+    const retryGenerate = useCallback(() => { runGenerate(); }, [runGenerate]);
 
     const handlePlanMyDay = useCallback(async () => {
         if (!canPlan || submitting || generating) return;
@@ -130,8 +141,8 @@ export default function FirstTaskScreen() {
         }
 
         setSubmitting(false);
-        generate(goToPayoff);
-    }, [canPlan, submitting, generating, pool, markCreated, generate, goToPayoff]);
+        runGenerate();
+    }, [canPlan, submitting, generating, pool, markCreated, runGenerate]);
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>

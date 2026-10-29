@@ -1,4 +1,4 @@
-import { ApiResult, BlockInput, ConfirmAssignment, ConfirmPlanResponse, CreateDayTemplateResponse, CreateProjectInput, CreateTaskInput, CreateTaskResponse, GeneratePlanResponse, GetAllTasksResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, GetDayTemplatesResponse, GetProjectsResponse, GetReviewTasksResponse, GetTaskDetailResponse, OnboardingResponse, ProjectResponse, UpdateDayTemplateResponse, UpdateProjectInput, UpdateTaskInput, UpdateTaskResponse } from "./api.types";
+import { ApiResult, BlockInput, ConfirmPlanRequest, ConfirmPlanResponse, CreateDayTemplateResponse, CreateProjectInput, CreateTaskInput, CreateTaskResponse, GeneratePlanRequest, GeneratePlanResponse, GetAllTasksResponse, GetBacklogResponse, GetDayPlanResponse, GetDayTemplateResponse, GetDayTemplatesResponse, GetProjectsResponse, GetReviewTasksResponse, GetTaskDetailResponse, OnboardingResponse, ProjectResponse, UpdateDayTemplateResponse, UpdateProjectInput, UpdateTaskInput, UpdateTaskResponse } from "./api.types";
 import { getToken } from "./clerk";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
@@ -307,9 +307,9 @@ export const api = {
     }
   },
 
-  // Returns a plan proposal; nothing is persisted server-side. The proposal is
-  // held client-side during review and sent back via confirmPlan.
-  generatePlan: async (signal?: AbortSignal): Promise<GeneratePlanResponse> => {
+  // Returns a plan proposal built from the submitted shape; nothing is persisted server-side.
+  // The proposal is held client-side during review and sent back via confirmPlan.
+  generatePlan: async (req: GeneratePlanRequest, signal?: AbortSignal): Promise<GeneratePlanResponse> => {
     const token = await getToken();
     if (!token) return { ok: false, error: 'No token found' };
     try {
@@ -317,8 +317,10 @@ export const api = {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
           'X-Timezone-Offset': String(-new Date().getTimezoneOffset()),
         },
+        body: JSON.stringify(req),
         signal,
       });
       const responseJson = await response.json();
@@ -331,7 +333,7 @@ export const api = {
     }
   },
 
-  confirmPlan: async (assignments: ConfirmAssignment[]): Promise<ConfirmPlanResponse> => {
+  confirmPlan: async (req: ConfirmPlanRequest): Promise<ConfirmPlanResponse> => {
     const token = await getToken();
     if (!token) return { ok: false, error: 'No token found' };
     try {
@@ -342,7 +344,7 @@ export const api = {
           'Content-Type': 'application/json',
           'X-Timezone-Offset': String(-new Date().getTimezoneOffset()),
         },
-        body: JSON.stringify({ assignments }),
+        body: JSON.stringify(req),
       });
       const responseJson = await response.json();
       if (!response.ok) {

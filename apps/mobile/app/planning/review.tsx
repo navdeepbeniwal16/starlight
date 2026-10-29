@@ -23,9 +23,8 @@ import { api } from "../../lib/api";
 import { formatTime } from "../../lib/time";
 import type { BacklogBuckets, BacklogTask, ScheduledTask, TaskDetail } from "../../lib/api.types";
 import { applyCreated, applyProgress, applyToggle, createSequencer, groupForReconcile, patchTask, restoreTask, withoutTask } from "../../lib/backlogState";
-import { usePlanGeneration } from "../../lib/usePlanGeneration";
+import { useTemplateStore } from "../../stores/template.store";
 import CreateTaskModal from "../../components/CreateTaskModal";
-import { PlanGeneratingOverlay } from "../../components/PlanGeneratingOverlay";
 import CircularProgress from "../../components/CircularProgress";
 import ReanimatedSwipeable, { SwipeDirection, type SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 
@@ -300,11 +299,12 @@ export default function PlanningReviewScreen() {
 
     const [openOverrides, setOpenOverrides] = useState<Partial<Record<GroupKey, boolean>>>({});
 
-    // Agent plan generation: full-screen while the agent runs, retry on error.
-    const { generating, generateError, generateErrorCode, generate, cancel, dismissError } = usePlanGeneration();
-
     // Gates out slow responses that would otherwise clobber an optimistic update.
     const seq = useRef(createSequencer()).current;
+
+    // Bottom of the planning stack, so this unmount is flow-end (Step 2/3 push on top without
+    // unmounting it): adjustments survive in-flow nav but drop when the flow closes.
+    useEffect(() => () => useTemplateStore.getState().clear(), []);
 
     const loadBuckets = useCallback((showLoading: boolean) => {
         const token = seq.next();
@@ -316,17 +316,16 @@ export default function PlanningReviewScreen() {
         });
     }, [seq]);
 
-    const planDay = useCallback(() => {
-        generate(() => router.push('/planning/plan'));
-    }, [generate, router]);
+    // Advance to Step 2 (pick & adjust the day); generation runs from the adjusted
+    // shape there, not here.
+    const continueToTemplate = useCallback(() => {
+        router.push('/planning/template-pick');
+    }, [router]);
 
-    // Shared by the footer button and the generation-error overlay's "Adjust my day".
-    // Dismiss the error before pushing: review stays mounted under the sheet, so a
-    // lingering overlay would still cover it when the editor is popped back.
+    // Permanent template editing, distinct from Step 2's today-only adjustments.
     const adjustDay = useCallback(() => {
-        dismissError();
         router.push('/day-templates');
-    }, [dismissError, router]);
+    }, [router]);
 
     // Refetch on focus so edits made on the task detail screen reflect here.
     useFocusEffect(
@@ -387,7 +386,8 @@ export default function PlanningReviewScreen() {
                 <View style={s.stepEyebrow}>
                     <View style={[s.stepPip, s.stepPipActive]} />
                     <View style={s.stepPip} />
-                    <Text style={s.stepLabel}>Step 1 of 2</Text>
+                    <View style={s.stepPip} />
+                    <Text style={s.stepLabel}>Step 1 of 3</Text>
                 </View>
                 <View style={s.headerRow}>
                     <Text style={s.headerTitle}>Let's plan your day</Text>
@@ -488,9 +488,9 @@ export default function PlanningReviewScreen() {
                     </PressableScale>
                     <PressableScale
                         style={s.doneButton}
-                        onPress={planDay}
+                        onPress={continueToTemplate}
                     >
-                        <Text style={s.doneButtonLabel}>Plan my day</Text>
+                        <Text style={s.doneButtonLabel}>Continue</Text>
                     </PressableScale>
                 </View>
             )}
@@ -503,16 +503,6 @@ export default function PlanningReviewScreen() {
                     loadBuckets(false);
                     setShowCreateModal(false);
                 }}
-            />
-
-            <PlanGeneratingOverlay
-                generating={generating}
-                error={generateError}
-                errorCode={generateErrorCode}
-                onRetry={planDay}
-                onDismiss={dismissError}
-                onCancel={cancel}
-                onAdjust={adjustDay}
             />
         </SafeAreaView>
     );
