@@ -154,6 +154,23 @@ describe("listDayTemplates", () => {
         expect(template.lastUsedOn).toBe("2026-09-20");
     });
 
+    it("reports lastUsedAt as the creation instant of the most recent plan", async () => {
+        const workday = await createDayTemplate({ userId, name: "Workday", ...validTemplate() });
+        const usedAt = new Date("2026-09-20T08:30:00.000Z");
+        await seedPlan(workday.id, "2026-09-10", new Date("2026-09-10T08:00:00.000Z"));
+        await seedPlan(workday.id, "2026-09-20", usedAt);
+
+        const [template] = await listDayTemplates(userId);
+        expect(template.lastUsedAt).toEqual(usedAt);
+    });
+
+    it("reports lastUsedAt as null for a template never used in a plan", async () => {
+        await createDayTemplate({ userId, name: "Workday", ...validTemplate() });
+
+        const [template] = await listDayTemplates(userId);
+        expect(template.lastUsedAt).toBeNull();
+    });
+
     it("derives lastUsedOn per template without bleeding across them", async () => {
         const used = await createDayTemplate({ userId, name: "Used", ...validTemplate() });
         const unused = await createDayTemplate({ userId, name: "Unused", ...validTemplate() });

@@ -30,6 +30,9 @@ export type DayTemplate = {
     updatedAt: string;
     // Latest plan date (YYYY-MM-DD) this template was planned from, else null.
     lastUsedOn: string | null;
+    // ISO timestamp of that most recent plan's creation — the actual moment of use,
+    // so the recency line can read true sub-day precision ("30m ago"). Null if unused.
+    lastUsedAt: string | null;
 };
 
 // A block in a client-submitted day shape. `id` is a client-stable key the generate proposal

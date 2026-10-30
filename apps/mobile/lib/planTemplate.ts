@@ -1,6 +1,6 @@
 import type { DayShape, DayTemplate, ShapeBlock } from "./api.types";
 import type { TemplateDraft } from "./templateDraft";
-import { toMins } from "./time";
+import { formatRelative, toMins } from "./time";
 
 // Picks the template Step 2 opens on: most recent by last planned-from date (lastUsedOn),
 // falling back to most recently edited when none was ever used. Null when the user has none.
@@ -16,12 +16,19 @@ export function resolveDefaultTemplate(templates: DayTemplate[]): DayTemplate | 
 
 export type RecencyBasis = { kind: "lastUsed"; date: string } | { kind: "updated"; date: string };
 
-// Which date a template's recency label should read from: its last planned-from
-// date if it has one, else its last edit. The caller formats the date.
+// Which instant a template's recency label reads from: when it was last used if ever,
+// else when it was last edited. Both are full ISO timestamps, so the formatter can
+// speak in real minutes/hours — not the day-granularity lastUsedOn.
 export function templateRecencyBasis(template: DayTemplate): RecencyBasis {
-    return template.lastUsedOn !== null
-        ? { kind: "lastUsed", date: template.lastUsedOn }
+    return template.lastUsedAt !== null
+        ? { kind: "lastUsed", date: template.lastUsedAt }
         : { kind: "updated", date: template.updatedAt };
+}
+
+export function templateRecencyLabel(template: DayTemplate): string {
+    const basis = templateRecencyBasis(template);
+    const lead = basis.kind === "lastUsed" ? "Last used" : "Updated";
+    return `${lead} ${formatRelative(basis.date)}`;
 }
 
 // Builds the generate/confirm shape from the editable draft, drawing each block's

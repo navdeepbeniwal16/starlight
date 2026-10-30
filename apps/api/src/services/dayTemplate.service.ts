@@ -34,11 +34,14 @@ export async function listDayTemplates(userId: string) {
     const usage = await prisma.dayPlan.groupBy({
         by: ["dayTemplateId"],
         where: { userId, dayTemplateId: { in: templates.map((t) => t.id) } },
-        _max: { date: true },
+        _max: { date: true, createdAt: true },
     });
-    const lastUsedByTemplate = new Map(usage.map((row) => [row.dayTemplateId, row._max.date]));
+    const usageByTemplate = new Map(usage.map((row) => [row.dayTemplateId, row._max]));
 
-    return templates.map((t) => ({ ...t, lastUsedOn: lastUsedByTemplate.get(t.id) ?? null }));
+    return templates.map((t) => {
+        const max = usageByTemplate.get(t.id);
+        return { ...t, lastUsedOn: max?.date ?? null, lastUsedAt: max?.createdAt ?? null };
+    });
 }
 
 export async function getDayTemplateById(userId: string, id: string) {

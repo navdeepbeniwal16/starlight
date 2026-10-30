@@ -15,7 +15,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { api } from "../../lib/api";
 import { colors, radius, spacing, shadow } from "../../lib/theme";
-import type { BlockInput } from "../../lib/api.types";
+import type { BlockInput, DayTemplate } from "../../lib/api.types";
 import {
     blocksOutOfBounds,
     isTemplateDirty,
@@ -24,12 +24,13 @@ import {
     POINTS_PER_HOUR,
     type OverlapChange,
 } from "../../lib/templateDraft";
-import { toHHmm, toMins } from "../../lib/time";
-import { draftToShape, hasSchedulableBlock, resolveDefaultTemplate } from "../../lib/planTemplate";
+import { formatTime, toHHmm, toMins } from "../../lib/time";
+import { draftToShape, hasSchedulableBlock, resolveDefaultTemplate, templateRecencyLabel } from "../../lib/planTemplate";
 import { useTemplateStore } from "../../stores/template.store";
 import { usePlanGeneration } from "../../lib/usePlanGeneration";
 import { BlockEditorModal } from "../../components/BlockEditorModal";
 import { TemplateTimeline } from "../../components/TemplateTimeline";
+import { TemplatePickerSheet } from "../../components/TemplatePickerSheet";
 import { TemplateValidationBanner } from "../../components/TemplateValidationBanner";
 import { UndoSnackbar, useUndoableEdit } from "../../components/UndoSnackbar";
 import { PlanGeneratingOverlay } from "../../components/PlanGeneratingOverlay";
@@ -43,7 +44,7 @@ export default function TemplatePickScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
 
-    const { baseline, draft, blockKeys, hydrate, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap } = useTemplateStore();
+    const { templateId, name, baseline, draft, blockKeys, hydrate, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap } = useTemplateStore();
     const { undoLabel, offerUndo, undo } = useUndoableEdit();
     const { generating, generateError, generateErrorCode, generate, cancel, dismissError } = usePlanGeneration();
 
@@ -52,26 +53,36 @@ export default function TemplatePickScreen() {
     const [editor, setEditor] = useState<Editor | null>(null);
     const [entering, setEntering] = useState(false);
     const [footerHeight, setFooterHeight] = useState(0);
+    // Full list backing the picker and the base chip's recency line. Fetched even on
+    // re-entry (when the draft is already hydrated) so the chip can show the base's dates.
+    const [templates, setTemplates] = useState<DayTemplate[]>([]);
+    const [pickerOpen, setPickerOpen] = useState(false);
     // Soft client-side mirror of the server's elapsed-block guard; ticks so a block
     // crossing "now" while the user lingers flips the button without a reload.
     const [now, setNow] = useState(() => toHHmm(new Date()));
 
-    // The store survives navigation, so only a cold entry resolves and hydrates the
-    // default; re-entry with a draft already present keeps the adjusted draft.
+    // The store survives navigation, so only a cold entry resolves and hydrates the default;
+    // re-entry with a draft already present keeps the adjusted draft and just refetches the list.
     const load = useCallback(async () => {
-        if (useTemplateStore.getState().draft) {
+        const hasDraft = !!useTemplateStore.getState().draft;
+        if (hasDraft) {
             setEntering(true);
             setLoading(false);
-            return;
+        } else {
+            setLoading(true);
         }
-        setLoading(true);
         setError(null);
         const result = await api.listDayTemplates();
         if (!result.ok) {
-            setError(result.error);
-            setLoading(false);
+            if (!hasDraft) {
+                setError(result.error);
+                setLoading(false);
+            }
             return;
         }
+        setTemplates(result.data);
+        if (hasDraft) return;
+
         const def = resolveDefaultTemplate(result.data);
         if (!def) {
             setError('You have no day templates yet. Create one to plan your day.');
@@ -82,6 +93,20 @@ export default function TemplatePickScreen() {
         setEntering(true);
         setLoading(false);
     }, [hydrate]);
+
+    // Switching the base silently starts fresh from it — hydrate resets both draft and
+    // baseline, so the "unsaved changes" notice clears and current adjustments are dropped.
+    const handleSelectTemplate = useCallback((template: DayTemplate) => {
+        setPickerOpen(false);
+        if (template.id === useTemplateStore.getState().templateId) return;
+        hydrate(template);
+        setEntering(true);
+    }, [hydrate]);
+
+    const selectedTemplate = useMemo(
+        () => templates.find((t) => t.id === templateId) ?? null,
+        [templates, templateId],
+    );
 
     useEffect(() => { load(); }, [load]);
 
@@ -169,7 +194,13 @@ export default function TemplatePickScreen() {
                 </View>
                 <View style={styles.headerRow}>
                     <Text style={styles.headerTitle}>Pick & adjust your day template</Text>
-                    <TouchableOpacity onPress={() => router.dismissTo('/(main)')} activeOpacity={0.6} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <TouchableOpacity
+                        onPress={() => router.dismissTo('/(main)')}
+                        activeOpacity={0.6}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Close planning"
+                    >
                         <Ionicons name="close" size={22} color={colors.text.primary} />
                     </TouchableOpacity>
                 </View>
@@ -193,6 +224,36 @@ export default function TemplatePickScreen() {
 
             {!loading && !error && draft && (
                 <Animated.View style={styles.contentFill} entering={entering ? FadeIn.duration(240) : undefined}>
+                    <TouchableOpacity
+                        style={styles.baseChip}
+                        onPress={() => setPickerOpen(true)}
+                        activeOpacity={0.7}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Base template: ${selectedTemplate?.name ?? name}. Change`}
+                        accessibilityHint="Opens a picker to build the day from a different template"
+                    >
+                        <View style={styles.baseChipText}>
+                            <Text style={styles.baseChipName} numberOfLines={1}>{selectedTemplate?.name ?? name}</Text>
+                            <View style={styles.baseChipMeta}>
+                                <Ionicons name="time-outline" size={12} color={colors.text.muted} />
+                                <Text style={styles.baseChipMetaText}>
+                                    {formatTime((selectedTemplate ?? draft).wakeTime)}–{formatTime((selectedTemplate ?? draft).sleepTime)}
+                                </Text>
+                                {selectedTemplate && (
+                                    <>
+                                        <Text style={styles.baseChipDot}>·</Text>
+                                        <Text style={styles.baseChipMetaText}>{templateRecencyLabel(selectedTemplate)}</Text>
+                                    </>
+                                )}
+                            </View>
+                        </View>
+                        <View style={styles.baseChipChange}>
+                            <Text style={styles.baseChipChangeText}>Change</Text>
+                            <Ionicons name="chevron-down" size={14} color={colors.accent.strong} />
+                        </View>
+                    </TouchableOpacity>
+
+                    <View style={styles.scrollArea}>
                     <Animated.View pointerEvents="none" style={[styles.scrollEdge, scrollEdgeStyle]} />
                     <Animated.ScrollView
                         ref={scrollRef}
@@ -227,6 +288,7 @@ export default function TemplatePickScreen() {
                             onLiveEdit={(snapshot, label) => offerUndo(snapshot, label)}
                         />
                     </Animated.ScrollView>
+                    </View>
 
                     <View
                         style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 24) }]}
@@ -276,6 +338,14 @@ export default function TemplatePickScreen() {
                 sleepTime={draft?.sleepTime ?? null}
             />
 
+            <TemplatePickerSheet
+                visible={pickerOpen}
+                onClose={() => setPickerOpen(false)}
+                templates={templates}
+                selectedId={templateId}
+                onSelect={handleSelectTemplate}
+            />
+
             <PlanGeneratingOverlay
                 generating={generating}
                 error={generateError}
@@ -315,7 +385,23 @@ const styles = StyleSheet.create({
     },
 
     contentFill: { flex: 1 },
+    scrollArea: { flex: 1 },
     scroll: { flex: 1 },
+
+    baseChip: {
+        flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+        marginHorizontal: spacing.lg, marginTop: spacing.md, marginBottom: spacing.md,
+        paddingVertical: 10, paddingHorizontal: 14,
+        backgroundColor: colors.surface.raised,
+        borderWidth: 1, borderColor: colors.border.hairline, borderRadius: radius.md,
+    },
+    baseChipText: { flex: 1, gap: 3 },
+    baseChipName: { fontSize: 14, fontWeight: '600', color: colors.text.primary, letterSpacing: -0.2 },
+    baseChipMeta: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    baseChipMetaText: { fontSize: 12, color: colors.text.secondary, letterSpacing: -0.1, fontVariant: ['tabular-nums'] },
+    baseChipDot: { fontSize: 12, color: colors.text.muted },
+    baseChipChange: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+    baseChipChangeText: { fontSize: 13, fontWeight: '600', color: colors.accent.strong, letterSpacing: -0.1 },
     content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
     timeline: { paddingTop: spacing.lg, paddingBottom: spacing.lg },
 
