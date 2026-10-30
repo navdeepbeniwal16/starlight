@@ -90,10 +90,13 @@ describe("day-templates routes", () => {
         const list = await request(app).get("/day-templates").set(auth());
         expect(list.status).toBe(200);
         const byId = Object.fromEntries(
-            list.body.data.map((t: { id: string; lastUsedOn: string | null }) => [t.id, t.lastUsedOn]),
+            list.body.data.map((t: { id: string; lastUsedOn: string | null; lastUsedAt: string | null }) => [t.id, t]),
         );
-        expect(byId[used.body.data.id]).toBe("2026-09-15");
-        expect(byId[unused.body.data.id]).toBeNull();
+        expect(byId[used.body.data.id].lastUsedOn).toBe("2026-09-15");
+        // lastUsedAt crosses the wire as a serialized ISO timestamp, not a Date.
+        expect(byId[used.body.data.id].lastUsedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+        expect(byId[unused.body.data.id].lastUsedOn).toBeNull();
+        expect(byId[unused.body.data.id].lastUsedAt).toBeNull();
     });
 
     it("GET list attributes lastUsedOn to the base template after an adjusted-and-confirmed day", async () => {

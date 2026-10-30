@@ -22,6 +22,10 @@ export function PressableScale({
     hitSlop,
     activeScale = 0.96,
     static: isStatic = false,
+    accessibilityRole = "button",
+    accessibilityLabel,
+    accessibilityHint,
+    accessibilityState,
 }: {
     children: ReactNode;
     onPress?: () => void;
@@ -33,6 +37,10 @@ export function PressableScale({
     hitSlop?: PressableProps['hitSlop'];
     activeScale?: number;
     static?: boolean;
+    accessibilityRole?: PressableProps['accessibilityRole'];
+    accessibilityLabel?: PressableProps['accessibilityLabel'];
+    accessibilityHint?: PressableProps['accessibilityHint'];
+    accessibilityState?: PressableProps['accessibilityState'];
 }) {
     const scale = useSharedValue(1);
     const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
@@ -47,6 +55,11 @@ export function PressableScale({
             disabled={disabled}
             hitSlop={hitSlop}
             style={containerStyle}
+            accessibilityRole={accessibilityRole}
+            accessibilityLabel={accessibilityLabel}
+            accessibilityHint={accessibilityHint}
+            // Merge the caller's selected/checked flags with disabled so SRs announce both.
+            accessibilityState={{ disabled, ...accessibilityState }}
             onPressIn={isStatic ? undefined : () => animate(activeScale)}
             onPressOut={isStatic ? undefined : () => animate(1)}
         >

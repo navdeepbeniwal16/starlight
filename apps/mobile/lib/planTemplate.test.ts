@@ -1,6 +1,7 @@
 import {
     resolveDefaultTemplate,
     templateRecencyBasis,
+    templateRecencyLabel,
     draftToShape,
     templateToShape,
     hasSchedulableBlock,
@@ -16,6 +17,7 @@ function template(over: Partial<DayTemplate> = {}): DayTemplate {
         sleepTime: "22:00",
         updatedAt: "2026-10-01T08:00:00.000Z",
         lastUsedOn: null,
+        lastUsedAt: null,
         blocks: [
             { id: "b1", type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00", energyLevel: "HIGH" },
             { id: "b2", type: "ANCHOR", name: "Lunch", startTime: "12:00", endTime: "13:00" },
@@ -62,18 +64,42 @@ describe("resolveDefaultTemplate", () => {
 });
 
 describe("templateRecencyBasis", () => {
-    it("reads from lastUsedOn when present", () => {
-        expect(templateRecencyBasis(template({ lastUsedOn: "2026-09-20" }))).toEqual({
+    it("reads from lastUsedAt when present", () => {
+        expect(templateRecencyBasis(template({ lastUsedAt: "2026-09-20T10:00:00.000Z" }))).toEqual({
             kind: "lastUsed",
-            date: "2026-09-20",
+            date: "2026-09-20T10:00:00.000Z",
         });
     });
 
     it("reads from updatedAt when never used", () => {
-        expect(templateRecencyBasis(template({ lastUsedOn: null, updatedAt: "2026-10-01T08:00:00.000Z" }))).toEqual({
+        expect(templateRecencyBasis(template({ lastUsedAt: null, updatedAt: "2026-10-01T08:00:00.000Z" }))).toEqual({
             kind: "updated",
             date: "2026-10-01T08:00:00.000Z",
         });
+    });
+});
+
+describe("templateRecencyLabel", () => {
+    afterEach(() => jest.useRealTimers());
+
+    it("reads a template used minutes ago in minutes", () => {
+        jest.useFakeTimers().setSystemTime(new Date("2026-10-30T09:05:00.000Z"));
+        expect(templateRecencyLabel(template({ lastUsedAt: "2026-10-30T08:35:00.000Z" }))).toBe("Last used 30m ago");
+    });
+
+    it("reads a template used hours-ago-today in hours, not a timezone artifact", () => {
+        jest.useFakeTimers().setSystemTime(new Date("2026-10-30T09:05:00.000Z"));
+        expect(templateRecencyLabel(template({ lastUsedAt: "2026-10-30T01:05:00.000Z" }))).toBe("Last used 8h ago");
+    });
+
+    it("reads older use in days", () => {
+        jest.useFakeTimers().setSystemTime(new Date("2026-10-30T09:05:00.000Z"));
+        expect(templateRecencyLabel(template({ lastUsedAt: "2026-10-27T09:05:00.000Z" }))).toBe("Last used 3d ago");
+    });
+
+    it("keeps timestamp precision for the never-used 'Updated' line", () => {
+        jest.useFakeTimers().setSystemTime(new Date("2026-10-30T09:05:00.000Z"));
+        expect(templateRecencyLabel(template({ lastUsedAt: null, updatedAt: "2026-10-30T08:51:00.000Z" }))).toBe("Updated 14m ago");
     });
 });
 

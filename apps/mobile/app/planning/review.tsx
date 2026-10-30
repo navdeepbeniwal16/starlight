@@ -36,9 +36,9 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 type GroupKey = 'pickUp' | 'everythingElse' | 'doneToday';
 
 const GROUPS: Array<{ key: GroupKey; label: string; description: string; collapsible: boolean }> = [
-    { key: 'pickUp',         label: 'Pick up where you left off', description: 'Carried over, scheduled, or in progress', collapsible: false },
-    { key: 'everythingElse', label: 'Everything else',            description: 'Other tasks still on your backlog',      collapsible: true  },
-    { key: 'doneToday',      label: 'Done today',                 description: 'Finished today',                          collapsible: true  },
+    { key: 'pickUp', label: 'Pick up where you left off', description: 'Carried over, scheduled, or in progress', collapsible: false },
+    { key: 'everythingElse', label: 'Everything else', description: 'Other tasks still on your backlog', collapsible: true },
+    { key: 'doneToday', label: 'Done today', description: 'Finished today', collapsible: true },
 ];
 
 // Above this, "Everything else" defaults collapsed so the backlog isn't a wall.
@@ -137,7 +137,7 @@ function StatusBadge({ status }: { status: BacklogTask['status'] }) {
 
 function formatDeadline(iso: string): string {
     const d = new Date(iso);
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return `Due ${months[d.getMonth()]} ${d.getDate()}`;
 }
 
@@ -316,15 +316,8 @@ export default function PlanningReviewScreen() {
         });
     }, [seq]);
 
-    // Advance to Step 2 (pick & adjust the day); generation runs from the adjusted
-    // shape there, not here.
     const continueToTemplate = useCallback(() => {
         router.push('/planning/template-pick');
-    }, [router]);
-
-    // Permanent template editing, distinct from Step 2's today-only adjustments.
-    const adjustDay = useCallback(() => {
-        router.push('/day-templates');
     }, [router]);
 
     // Refetch on focus so edits made on the task detail screen reflect here.
@@ -482,10 +475,6 @@ export default function PlanningReviewScreen() {
 
             {!loading && !error && (
                 <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-                    <PressableScale style={s.adjustButton} onPress={adjustDay}>
-                        <Text style={s.adjustPrompt}>Need to reshape your day first?</Text>
-                        <Text style={s.adjustButtonLabel}>Adjust my day</Text>
-                    </PressableScale>
                     <PressableScale
                         style={s.doneButton}
                         onPress={continueToTemplate}
@@ -728,24 +717,8 @@ const s = StyleSheet.create({
     footer: {
         paddingHorizontal: 16,
         paddingTop: 16,
-        gap: 16,
         borderTopWidth: 1,
         borderTopColor: 'rgba(42,38,33,0.06)',
-    },
-    adjustButton: {
-        alignItems: 'center',
-        gap: 3,
-    },
-    adjustPrompt: {
-        fontSize: 12,
-        color: 'rgba(122,115,106,0.7)',
-        letterSpacing: -0.1,
-    },
-    adjustButtonLabel: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#5c5248',
-        letterSpacing: -0.2,
     },
     doneButton: {
         backgroundColor: '#2a2621',
