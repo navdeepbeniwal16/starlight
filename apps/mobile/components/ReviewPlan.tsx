@@ -28,6 +28,8 @@ import { usePlanningStore } from "../stores/planning.store";
 import { useOnboardingTasksStore } from "../stores/onboardingTasks.store";
 import { useSessionStore } from "../stores/session.store";
 import { formatTime, toMins } from "../lib/time";
+import { colors, spacing, typography } from "../lib/theme";
+import { StepEyebrow } from "./StepEyebrow";
 
 // ─── Local board model ────────────────────────────────────────────────────────
 
@@ -366,47 +368,47 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
                         const used = block.tasks.reduce((sum, t) => sum + t.remainingMins, 0);
                         const remaining = capacity - used;
                         return (
-                        <DropZone
-                            key={block.id}
-                            zoneId={block.id}
-                            hoveredZone={hoveredZone}
-                            registerRef={(v) => { if (v) zoneRefs.current.set(block.id, v); else zoneRefs.current.delete(block.id); }}
-                        >
-                            <View style={s.blockHeader}>
-                                <View style={s.blockHeaderLeft}>
-                                    <Text style={s.blockName}>{block.name}</Text>
-                                    <Text style={s.blockTime}>
-                                        {formatTime(block.startTime)} – {formatTime(block.endTime)}
-                                        {'  ·  '}
-                                        <Text style={remaining < 0 ? s.blockCapacityOver : s.blockCapacityLeft}>
-                                            {remaining >= 0 ? `${formatMins(remaining)} left` : `over by ${formatMins(-remaining)}`}
+                            <DropZone
+                                key={block.id}
+                                zoneId={block.id}
+                                hoveredZone={hoveredZone}
+                                registerRef={(v) => { if (v) zoneRefs.current.set(block.id, v); else zoneRefs.current.delete(block.id); }}
+                            >
+                                <View style={s.blockHeader}>
+                                    <View style={s.blockHeaderLeft}>
+                                        <Text style={s.blockName}>{block.name}</Text>
+                                        <Text style={s.blockTime}>
+                                            {formatTime(block.startTime)} – {formatTime(block.endTime)}
+                                            {'  ·  '}
+                                            <Text style={remaining < 0 ? s.blockCapacityOver : s.blockCapacityLeft}>
+                                                {remaining >= 0 ? `${formatMins(remaining)} left` : `over by ${formatMins(-remaining)}`}
+                                            </Text>
                                         </Text>
-                                    </Text>
+                                    </View>
+                                    {energyLabel(block.energyLevel) && (
+                                        <View style={s.energyBadge}><Text style={s.energyBadgeText}>{energyLabel(block.energyLevel)}</Text></View>
+                                    )}
                                 </View>
-                                {energyLabel(block.energyLevel) && (
-                                    <View style={s.energyBadge}><Text style={s.energyBadgeText}>{energyLabel(block.energyLevel)}</Text></View>
+                                {block.tasks.length === 0 ? (
+                                    <Text style={s.emptyZone}>Drop a task here</Text>
+                                ) : (
+                                    <View style={s.taskList}>
+                                        {block.tasks.map(task => (
+                                            <DraggableTask
+                                                key={task.id}
+                                                task={task}
+                                                sourceZone={block.id}
+                                                drag={dragShared}
+                                                onDragStart={prepareDrag}
+                                                onDrop={handleDrop}
+                                                onReorder={handleReorder}
+                                                onFinalize={endDrag}
+                                                registerRef={(v) => { if (v) cardRefs.current.set(task.id, v); else cardRefs.current.delete(task.id); }}
+                                            />
+                                        ))}
+                                    </View>
                                 )}
-                            </View>
-                            {block.tasks.length === 0 ? (
-                                <Text style={s.emptyZone}>Drop a task here</Text>
-                            ) : (
-                                <View style={s.taskList}>
-                                    {block.tasks.map(task => (
-                                        <DraggableTask
-                                            key={task.id}
-                                            task={task}
-                                            sourceZone={block.id}
-                                            drag={dragShared}
-                                            onDragStart={prepareDrag}
-                                            onDrop={handleDrop}
-                                            onReorder={handleReorder}
-                                            onFinalize={endDrag}
-                                            registerRef={(v) => { if (v) cardRefs.current.set(task.id, v); else cardRefs.current.delete(task.id); }}
-                                        />
-                                    ))}
-                                </View>
-                            )}
-                        </DropZone>
+                            </DropZone>
                         );
                     })}
 
@@ -470,32 +472,23 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function Header({ onClose, onboarding }: { onClose: () => void; onboarding?: boolean }) {
+    if (onboarding) {
+        return (
+            <View style={s.onboardingHeader}>
+                <StepEyebrow step={3} total={3} />
+                <Text style={s.onboardingTitle}>Here's your day</Text>
+                <Text style={s.onboardingSubtitle}>Rearrange anything, then confirm.</Text>
+            </View>
+        );
+    }
     return (
         <View style={s.header}>
-            <View style={s.stepEyebrow}>
-                {onboarding ? (
-                    <>
-                        <View style={[s.stepPip, s.stepPipDone]} />
-                        <View style={[s.stepPip, s.stepPipDone]} />
-                        <View style={[s.stepPip, s.stepPipActive]} />
-                        <Text style={s.stepLabel}>Step 3 of 3</Text>
-                    </>
-                ) : (
-                    <>
-                        <View style={[s.stepPip, s.stepPipDone]} />
-                        <View style={[s.stepPip, s.stepPipDone]} />
-                        <View style={[s.stepPip, s.stepPipActive]} />
-                        <Text style={s.stepLabel}>Step 3 of 3</Text>
-                    </>
-                )}
-            </View>
+            <StepEyebrow step={3} total={3} />
             <View style={s.headerRow}>
-                <Text style={s.headerTitle}>{onboarding ? "Here's your day" : 'Review your plan'}</Text>
-                {!onboarding && (
-                    <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} activeOpacity={0.6}>
-                        <Ionicons name="close" size={22} color="#2a2621" />
-                    </TouchableOpacity>
-                )}
+                <Text style={s.headerTitle}>Review your plan</Text>
+                <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} activeOpacity={0.6}>
+                    <Ionicons name="close" size={22} color="#2a2621" />
+                </TouchableOpacity>
             </View>
             <Text style={s.headerSubtitle}>Rearrange anything, then confirm.</Text>
         </View>
@@ -739,34 +732,9 @@ const s = StyleSheet.create({
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(42,38,33,0.06)',
     },
-    stepEyebrow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        marginBottom: 10,
-    },
-    stepPip: {
-        width: 5,
-        height: 5,
-        borderRadius: 2.5,
-        backgroundColor: 'rgba(42,38,33,0.14)',
-    },
-    stepPipDone: {
-        backgroundColor: '#d4a574',
-    },
-    stepPipActive: {
-        width: 14,
-        backgroundColor: '#d4a574',
-    },
-    stepLabel: {
-        fontSize: 11,
-        fontWeight: '600',
-        color: 'rgba(122,115,106,0.5)',
-        letterSpacing: 0.5,
-        textTransform: 'uppercase',
-        marginLeft: 2,
-        fontVariant: ['tabular-nums'],
-    },
+    onboardingHeader: { paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.md },
+    onboardingTitle: { ...typography.title, color: colors.text.primary, letterSpacing: 0.07, marginTop: 4 },
+    onboardingSubtitle: { fontSize: 15, color: colors.text.secondary, lineHeight: 22, letterSpacing: -0.2, marginTop: spacing.sm },
     headerRow: {
         flexDirection: 'row',
         alignItems: 'center',
