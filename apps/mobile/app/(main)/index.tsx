@@ -727,7 +727,6 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
     containerCard: {
-        backgroundColor: colors.surface.block,
         borderWidth: 1.5,
         borderColor: 'rgba(42,38,33,0.16)',
         borderStyle: 'dashed',

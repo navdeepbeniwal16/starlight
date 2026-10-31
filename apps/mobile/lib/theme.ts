@@ -44,6 +44,9 @@ export const colors = {
         tint: 'rgba(94,140,106,0.14)',
         strong: '#4a7458',
     },
+    warning: {
+        strong: '#a5573f',
+    },
     scrim: 'rgba(0,0,0,0.3)',
 } as const;
 
