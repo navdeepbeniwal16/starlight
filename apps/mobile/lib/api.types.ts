@@ -105,7 +105,8 @@ export type ProposalTask = {
 
 // A block of the proposed plan. `blockId` is the template block id — the
 // proposal is never persisted, so template blocks are the only stable keys
-// shared with the confirm endpoint.
+// shared with the confirm endpoint. `elapsed` flags blocks whose window closed
+// before now; it rides on the proposal only.
 export type ProposalBlock = {
     blockId: string;
     type: BlockType;
@@ -114,6 +115,7 @@ export type ProposalBlock = {
     endTime: string;
     energyLevel: EnergyLevel | null;
     tasks: ProposalTask[];
+    elapsed: boolean;
 };
 
 // The full output of plan generation. Held client-side during review;

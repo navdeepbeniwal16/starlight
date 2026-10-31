@@ -213,7 +213,7 @@ describe("generatePlanProposal", () => {
             .rejects.toBeInstanceOf(NoContainerBlocksError);
     });
 
-    it("returns eligible blocks keyed by shape block id, clamping an in-progress block", async () => {
+    it("returns blocks keyed by shape block id, clamping an in-progress block without flagging it elapsed", async () => {
         const template = await seedTemplate();
         const proposal = await generatePlanProposal(userId, DATE, "10:00", NOW, template.id, shapeFromTemplate(template), noopAgent().deps);
 
@@ -225,7 +225,47 @@ describe("generatePlanProposal", () => {
             blockId: templateBlock(template, "Deep Work").id,
             startTime: "10:00",
             endTime: "12:00",
+            elapsed: false,
         });
+        expect(proposal.blocks.every(b => b.elapsed === false)).toBe(true);
+    });
+
+    it("retains elapsed blocks flagged elapsed, with original times and no tasks", async () => {
+        const template = await seedTemplate();
+        const afternoon = templateBlock(template, "Afternoon");
+        const task = await seedTask("Afternoon work");
+
+        // 12:30 — Deep Work (09–12) has elapsed, Lunch (12–13) is in progress,
+        // Afternoon (14–17) is upcoming.
+        const proposal = await generatePlanProposal(userId, DATE, "12:30", NOW, template.id, shapeFromTemplate(template), fakeAgent({
+            assignments: [{ taskId: task.id, blockId: afternoon.id, blockOrder: 0 }],
+            unschedulable: [],
+        }).deps);
+
+        // The whole day is retained in chronological order.
+        expect(proposal.blocks.map(b => b.name)).toEqual(["Deep Work", "Lunch", "Afternoon"]);
+
+        const deepWork = proposal.blocks.find(b => b.name === "Deep Work")!;
+        expect(deepWork).toMatchObject({ elapsed: true, startTime: "09:00", endTime: "12:00" });
+        expect(deepWork.tasks).toHaveLength(0);
+
+        // The in-progress Lunch block is clamped to now and not flagged elapsed.
+        expect(proposal.blocks.find(b => b.name === "Lunch")).toMatchObject({ elapsed: false, startTime: "12:30" });
+
+        // Upcoming blocks are unflagged and still carry their placements.
+        const afternoonBlock = proposal.blocks.find(b => b.name === "Afternoon")!;
+        expect(afternoonBlock).toMatchObject({ elapsed: false, startTime: "14:00" });
+        expect(afternoonBlock.tasks.map(t => t.id)).toEqual([task.id]);
+    });
+
+    it("offers only non-elapsed blocks to the agent", async () => {
+        const template = await seedTemplate();
+        const agent = noopAgent();
+
+        // 12:30 — only Afternoon (14–17) is a schedulable CONTAINER; Deep Work elapsed.
+        await generatePlanProposal(userId, DATE, "12:30", NOW, template.id, shapeFromTemplate(template), agent.deps);
+
+        expect(agent.calls[0].blocks.map(b => b.name)).toEqual(["Afternoon"]);
     });
 
     it("builds the proposal from the submitted shape, not the stored template", async () => {

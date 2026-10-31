@@ -236,15 +236,29 @@ export async function generatePlanProposal(
         byBlock.set(a.blockId, list);
     }
 
-    const blocks: ProposalBlock[] = eligible.map(b => {
-        const placements = (byBlock.get(b.id) ?? []).sort((x, y) => x.blockOrder - y.blockOrder);
+    const eligibleById = new Map(eligible.map(b => [b.id, b]));
+    const blocks: ProposalBlock[] = shape.blocks.map(sb => {
+        const elig = eligibleById.get(sb.id);
+        if (!elig) {
+            return {
+                blockId: sb.id,
+                type: sb.type,
+                name: sb.name,
+                startTime: sb.startTime,
+                endTime: sb.endTime,
+                energyLevel: sb.energyLevel ?? null,
+                tasks: [],
+                elapsed: true,
+            };
+        }
+        const placements = (byBlock.get(elig.id) ?? []).sort((x, y) => x.blockOrder - y.blockOrder);
         return {
-            blockId: b.id,
-            type: b.type,
-            name: b.name,
-            startTime: b.startTime,
-            endTime: b.endTime,
-            energyLevel: b.energyLevel,
+            blockId: elig.id,
+            type: elig.type,
+            name: elig.name,
+            startTime: elig.startTime,
+            endTime: elig.endTime,
+            energyLevel: elig.energyLevel,
             tasks: placements.map(p => {
                 const t = taskById.get(p.taskId)!;
                 return {
@@ -255,6 +269,7 @@ export async function generatePlanProposal(
                     status: t.status,
                 };
             }),
+            elapsed: false,
         };
     });
 
