@@ -8,6 +8,7 @@ import {
     ScrollView,
     ActivityIndicator,
     KeyboardAvoidingView,
+    Keyboard,
     Platform,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -46,6 +47,7 @@ export default function FirstTaskScreen() {
     const [usedSuggestions, setUsedSuggestions] = useState<string[]>([]);
     const [submitting, setSubmitting] = useState(false);
     const [createError, setCreateError] = useState<string | null>(null);
+    const [keyboardUp, setKeyboardUp] = useState(false);
 
     const { generating, generateError, generateErrorCode, generate, dismissError } = usePlanGeneration();
 
@@ -63,6 +65,16 @@ export default function FirstTaskScreen() {
         return () => { cancelled = true; };
     }, [hydratePool]);
 
+    // Drives hiding the footer while the keyboard is up, so the CTA doesn't show
+    // behind the keyboard's input accessory bar.
+    useEffect(() => {
+        const show = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+        const hide = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+        const showSub = Keyboard.addListener(show, () => setKeyboardUp(true));
+        const hideSub = Keyboard.addListener(hide, () => setKeyboardUp(false));
+        return () => { showSub.remove(); hideSub.remove(); };
+    }, []);
+
     const draftReady = canPlanFirstTask(draft);
     const canPlan = canPlanTasks(pool);
     const visibleSuggestions = SUGGESTIONS.filter(
@@ -76,6 +88,7 @@ export default function FirstTaskScreen() {
 
     const setDraftEstimate = useCallback((estimatedMins: number) => {
         setDraft(d => ({ ...d, estimatedMins }));
+        setCreateError(null);
     }, []);
 
     const applySuggestion = useCallback((s: (typeof SUGGESTIONS)[number]) => {
@@ -195,17 +208,17 @@ export default function FirstTaskScreen() {
                                 })}
                             </View>
                         </View>
-                    </View>
 
-                    <TouchableOpacity
-                        style={[styles.addButton, !draftReady && styles.addButtonDisabled]}
-                        onPress={addToPool}
-                        disabled={!draftReady}
-                        activeOpacity={0.7}
-                    >
-                        <Ionicons name="add" size={17} color={colors.text.secondary} />
-                        <Text style={styles.addButtonText}>Add</Text>
-                    </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.addButton, !draftReady && styles.addButtonDisabled]}
+                            onPress={addToPool}
+                            disabled={!draftReady}
+                            activeOpacity={0.7}
+                        >
+                            <Ionicons name="add" size={16} color={draftReady ? colors.surface.page : colors.text.muted} />
+                            <Text style={[styles.addButtonText, !draftReady && styles.addButtonTextDisabled]}>Add task</Text>
+                        </TouchableOpacity>
+                    </View>
 
                     {pool.length > 0 && (
                         <View style={styles.poolList}>
@@ -229,7 +242,7 @@ export default function FirstTaskScreen() {
 
                     {visibleSuggestions.length > 0 && (
                         <View style={styles.suggestionBlock}>
-                            <Text style={styles.suggestionLabel}>Need a nudge? Tap to add</Text>
+                            <Text style={styles.suggestionLabel}>Need a nudge? Tap to fill</Text>
                             <View style={styles.suggestionChips}>
                                 {visibleSuggestions.map((s) => (
                                     <TouchableOpacity
@@ -246,26 +259,31 @@ export default function FirstTaskScreen() {
                     )}
                 </ScrollView>
 
-                <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>
-                    {createError && <Text style={styles.errorText}>{createError}</Text>}
-                    <PressableScale
-                        style={[styles.planButton, !canPlan && styles.planButtonDisabled]}
-                        onPress={handlePlanMyDay}
-                        disabled={!canPlan || submitting}
-                    >
-                        {submitting
-                            ? <ActivityIndicator color={colors.surface.page} />
-                            : <Text style={styles.planButtonText}>Plan my day</Text>}
-                    </PressableScale>
-                    <TouchableOpacity
-                        style={styles.backButton}
-                        onPress={handleBack}
-                        disabled={submitting || generating}
-                        activeOpacity={0.8}
-                    >
-                        <Text style={styles.backLabel}>Back</Text>
-                    </TouchableOpacity>
-                </View>
+                {!keyboardUp && (
+                    <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>
+                        {createError && <Text style={styles.errorText}>{createError}</Text>}
+                        {!canPlan && !submitting && (
+                            <Text style={styles.footerHint}>Add at least one task to continue</Text>
+                        )}
+                        <PressableScale
+                            style={[styles.planButton, !canPlan && styles.planButtonDisabled]}
+                            onPress={handlePlanMyDay}
+                            disabled={!canPlan || submitting}
+                        >
+                            {submitting
+                                ? <ActivityIndicator color={colors.surface.page} />
+                                : <Text style={styles.planButtonText}>Plan my day</Text>}
+                        </PressableScale>
+                        <TouchableOpacity
+                            style={styles.backButton}
+                            onPress={handleBack}
+                            disabled={submitting || generating}
+                            activeOpacity={0.8}
+                        >
+                            <Text style={styles.backLabel}>Back</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
             </KeyboardAvoidingView>
 
             <PlanGeneratingOverlay
@@ -315,11 +333,14 @@ const styles = StyleSheet.create({
     estimatePillTextOn: { color: colors.surface.page },
 
     addButton: {
-        flexDirection: 'row', alignItems: 'center', gap: 4,
-        alignSelf: 'flex-start', paddingVertical: 4,
+        flexDirection: 'row', alignItems: 'center', gap: 3,
+        alignSelf: 'flex-end',
+        backgroundColor: colors.text.primary,
+        borderRadius: 999, paddingLeft: 10, paddingRight: 14, paddingVertical: 7,
     },
-    addButtonDisabled: { opacity: 0.35 },
-    addButtonText: { fontSize: 14, fontWeight: '500', color: colors.text.secondary, letterSpacing: -0.2 },
+    addButtonDisabled: { backgroundColor: 'rgba(42,38,33,0.05)' },
+    addButtonText: { fontSize: 13, fontWeight: '600', color: colors.surface.page, letterSpacing: -0.1 },
+    addButtonTextDisabled: { color: colors.text.muted },
 
     poolList: { gap: spacing.sm },
     poolCard: {
@@ -350,6 +371,7 @@ const styles = StyleSheet.create({
         ...shadow.footer,
     },
     errorText: { fontSize: 13, color: colors.danger.default, textAlign: 'center' },
+    footerHint: { fontSize: 13, fontWeight: '500', color: colors.text.secondary, textAlign: 'center', letterSpacing: -0.1, lineHeight: 18 },
     planButton: { height: 52, backgroundColor: colors.text.primary, borderRadius: radius.md, justifyContent: 'center', alignItems: 'center' },
     planButtonDisabled: { opacity: 0.4 },
     planButtonText: { fontSize: 15, fontWeight: '600', color: colors.surface.page, letterSpacing: -0.1 },
