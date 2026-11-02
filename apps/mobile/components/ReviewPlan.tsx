@@ -1,34 +1,44 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
     ActivityIndicator,
     Alert,
-    Modal,
     ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
-    TouchableWithoutFeedback,
     View,
+    useWindowDimensions,
     type AccessibilityActionEvent,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import {
+    BottomSheetBackdrop,
+    BottomSheetModal,
+    BottomSheetScrollView,
+    type BottomSheetBackdropProps,
+} from "@gorhom/bottom-sheet";
 import { api } from "../lib/api";
 import type { PlanProposal, ProposalBlock } from "../lib/api.types";
 import {
-    UNSCHEDULED_ZONE,
+    UNSCHEDULED,
     blockRemainingMins,
+    blockZone,
     boardFromProposal,
     eligibleTargets,
     moveTask,
     planFromProposalAndBoard,
+    targetZone,
+    zoneFromActionName,
+    zoneToActionName,
     type MoveTarget,
     type ReviewBlock,
     type ReviewBoard,
     type ReviewTask,
     type UnscheduledTask,
+    type Zone,
 } from "../lib/reviewBoard";
 import { buildReviewTimeline } from "../lib/reviewTimeline";
 import { usePlanningStore } from "../stores/planning.store";
@@ -54,19 +64,14 @@ function moveFitLabel(remainingAfterMoveMins: number): string {
         : `Over by ${formatDuration(-remainingAfterMoveMins)}`;
 }
 
-function moveActionsFor(board: ReviewBoard, taskId: string, fromZone: string) {
-    return eligibleTargets(board, taskId, fromZone).map((t) =>
-        t.kind === "block"
-            ? { name: `block:${t.id}`, label: `Move to ${t.name}` }
-            : { name: UNSCHEDULED_ZONE, label: "Move to Not scheduled" },
-    );
+function moveActionsFor(board: ReviewBoard, taskId: string, from: Zone) {
+    return eligibleTargets(board, taskId, from).map((t) => ({
+        name: zoneToActionName(targetZone(t)),
+        label: t.kind === "block" ? `Move to ${t.name}` : "Move to Not scheduled",
+    }));
 }
 
-function zoneFromAction(actionName: string): string {
-    return actionName === UNSCHEDULED_ZONE ? UNSCHEDULED_ZONE : actionName.slice("block:".length);
-}
-
-type Moving = { taskId: string; fromZone: string; title: string; mins: number };
+type Moving = { taskId: string; fromZone: Zone; title: string; mins: number };
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -88,15 +93,11 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
     const now = useMemo(() => toHHmm(new Date()), []);
     const timeline = useMemo(() => (proposal ? buildReviewTimeline(proposal, now) : []), [proposal, now]);
 
-    const handleRemove = useCallback((taskId: string, fromZone: string) => {
-        setBoard(prev => (prev ? moveTask(prev, taskId, fromZone, UNSCHEDULED_ZONE) : prev));
-    }, []);
-
     const [moving, setMoving] = useState<Moving | null>(null);
-    const openMove = useCallback((taskId: string, fromZone: string, title: string, mins: number) => {
+    const openMove = useCallback((taskId: string, fromZone: Zone, title: string, mins: number) => {
         setMoving({ taskId, fromZone, title, mins });
     }, []);
-    const handleMove = useCallback((taskId: string, fromZone: string, toZone: string) => {
+    const handleMove = useCallback((taskId: string, fromZone: Zone, toZone: Zone) => {
         setBoard(prev => (prev ? moveTask(prev, taskId, fromZone, toZone) : prev));
         Haptics.selectionAsync();
         setMoving(null);
@@ -184,7 +185,6 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
                     key={`item-${i}`}
                     block={live ?? emptyBlockFrom(item.block)}
                     board={board}
-                    onRemove={handleRemove}
                     onOpenMove={openMove}
                     onMove={handleMove}
                 />,
@@ -260,7 +260,7 @@ function Header({ onClose, onboarding }: { onClose: () => void; onboarding?: boo
             <View style={s.onboardingHeader}>
                 <StepEyebrow step={3} total={3} />
                 <Text style={s.onboardingTitle}>Here's your day</Text>
-                <Text style={s.onboardingSubtitle}>Review your day, then confirm.</Text>
+                <Text style={s.onboardingSubtitle}>Tap a task to move it, then confirm.</Text>
             </View>
         );
     }
@@ -273,7 +273,7 @@ function Header({ onClose, onboarding }: { onClose: () => void; onboarding?: boo
                     <Ionicons name="close" size={22} color="#2a2621" />
                 </TouchableOpacity>
             </View>
-            <Text style={s.headerSubtitle}>Review your day, then confirm.</Text>
+            <Text style={s.headerSubtitle}>Tap a task to move it, then confirm.</Text>
         </View>
     );
 }
@@ -293,8 +293,11 @@ function FreeSlot({ start, end, elapsed }: { start: string; end: string; elapsed
         <View style={[s.freeSlotRow, elapsed && s.elapsed]}>
             <View style={s.freeSlotThread} />
             <View style={s.freeSlotPill}>
-                <Ionicons name="chevron-expand-outline" size={11} color="rgba(122,115,106,0.7)" />
-                <Text style={s.freeSlotText}>{formatDuration(Math.max(0, toMins(end) - toMins(start)))} available</Text>
+                {!elapsed && <Ionicons name="cafe-outline" size={11} color="rgba(122,115,106,0.7)" />}
+                <Text style={s.freeSlotText}>
+                    {formatDuration(Math.max(0, toMins(end) - toMins(start)))}
+                    {!elapsed && ' free'}
+                </Text>
             </View>
         </View>
     );
@@ -327,17 +330,16 @@ function ElapsedContainerCard({ block }: { block: ProposalBlock }) {
 
 type RowMoveProps = {
     board: ReviewBoard;
-    onOpenMove: (taskId: string, fromZone: string, title: string, mins: number) => void;
-    onMove: (taskId: string, fromZone: string, toZone: string) => void;
+    onOpenMove: (taskId: string, fromZone: Zone, title: string, mins: number) => void;
+    onMove: (taskId: string, fromZone: Zone, toZone: Zone) => void;
 };
 
 function ContainerCard({
     block,
     board,
-    onRemove,
     onOpenMove,
     onMove,
-}: { block: ReviewBlock; onRemove: (taskId: string, fromZone: string) => void } & RowMoveProps) {
+}: { block: ReviewBlock } & RowMoveProps) {
     const remaining = blockRemainingMins(block);
     const label = energyLabel(block.energyLevel);
     return (
@@ -366,11 +368,10 @@ function ContainerCard({
                         <ScheduledRow
                             key={task.id}
                             task={task}
-                            fromZone={block.id}
+                            fromZone={blockZone(block.id)}
                             board={board}
                             onOpenMove={onOpenMove}
                             onMove={onMove}
-                            onRemove={() => onRemove(task.id, block.id)}
                         />
                     ))}
                 </View>
@@ -385,8 +386,7 @@ function ScheduledRow({
     board,
     onOpenMove,
     onMove,
-    onRemove,
-}: { task: ReviewTask; fromZone: string; onRemove: () => void } & RowMoveProps) {
+}: { task: ReviewTask; fromZone: Zone } & RowMoveProps) {
     const actions = useMemo(() => moveActionsFor(board, task.id, fromZone), [board, task.id, fromZone]);
     return (
         <TouchableOpacity
@@ -398,39 +398,31 @@ function ScheduledRow({
             accessibilityHint="Opens options to move this task"
             accessibilityActions={actions}
             onAccessibilityAction={(e: AccessibilityActionEvent) =>
-                onMove(task.id, fromZone, zoneFromAction(e.nativeEvent.actionName))
+                onMove(task.id, fromZone, zoneFromActionName(e.nativeEvent.actionName))
             }
         >
             <View style={s.taskContent}>
                 <Text style={s.taskTitle} numberOfLines={2}>{task.title}</Text>
             </View>
             <Text style={s.taskMins}>{formatDuration(task.remainingMins)}</Text>
-            <TouchableOpacity
-                onPress={onRemove}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityRole="button"
-                accessibilityLabel={`Remove ${task.title} from the plan`}
-                style={s.removeButton}
-            >
-                <Ionicons name="remove" size={16} color="rgba(122,115,106,0.7)" />
-            </TouchableOpacity>
+            <MoveHint />
         </TouchableOpacity>
     );
 }
 
 function UnscheduledRow({ task, board, onOpenMove, onMove }: { task: UnscheduledTask } & RowMoveProps) {
-    const actions = useMemo(() => moveActionsFor(board, task.id, UNSCHEDULED_ZONE), [board, task.id]);
+    const actions = useMemo(() => moveActionsFor(board, task.id, UNSCHEDULED), [board, task.id]);
     return (
         <TouchableOpacity
             style={s.taskCard}
             activeOpacity={0.7}
-            onPress={() => onOpenMove(task.id, UNSCHEDULED_ZONE, task.title, task.remainingMins)}
+            onPress={() => onOpenMove(task.id, UNSCHEDULED, task.title, task.remainingMins)}
             accessibilityRole="button"
             accessibilityLabel={`${task.title}, ${formatDuration(task.remainingMins)}, not scheduled`}
             accessibilityHint="Opens options to schedule this task"
             accessibilityActions={actions}
             onAccessibilityAction={(e: AccessibilityActionEvent) =>
-                onMove(task.id, UNSCHEDULED_ZONE, zoneFromAction(e.nativeEvent.actionName))
+                onMove(task.id, UNSCHEDULED, zoneFromActionName(e.nativeEvent.actionName))
             }
         >
             <View style={s.taskContent}>
@@ -438,7 +430,18 @@ function UnscheduledRow({ task, board, onOpenMove, onMove }: { task: Unscheduled
                 {task.reason ? <Text style={s.taskReason} numberOfLines={2}>{task.reason}</Text> : null}
             </View>
             <Text style={s.taskMins}>{formatDuration(task.remainingMins)}</Text>
+            <MoveHint />
         </TouchableOpacity>
+    );
+}
+
+// Decorative: the whole row is the button and carries the move hint and actions, so the
+// icon is hidden from the screen reader.
+function MoveHint() {
+    return (
+        <View style={s.moveHint} accessible={false} importantForAccessibility="no-hide-descendants">
+            <Ionicons name="swap-vertical" size={14} color={colors.text.secondary} />
+        </View>
     );
 }
 
@@ -452,69 +455,96 @@ function MoveSheet({
 }: {
     board: ReviewBoard;
     moving: Moving | null;
-    onMove: (taskId: string, fromZone: string, toZone: string) => void;
+    onMove: (taskId: string, fromZone: Zone, toZone: Zone) => void;
     onClose: () => void;
 }) {
     const insets = useSafeAreaInsets();
-    const targets = moving ? eligibleTargets(board, moving.taskId, moving.fromZone) : [];
+    const { height: windowHeight } = useWindowDimensions();
+    const sheetRef = useRef<BottomSheetModal>(null);
+
+    // `moving` clears the moment a choice is made, but the sheet is still animating out —
+    // keep rendering the last task so the content doesn't blank mid-dismiss.
+    const [shown, setShown] = useState(moving);
+    if (moving && moving !== shown) setShown(moving);
+
+    // Only dismiss a sheet that's still open: dismissing one that never opened, or already
+    // closed itself, leaves @gorhom/bottom-sheet stuck DISMISSING and blocks every later present.
+    const presented = useRef(false);
+    useEffect(() => {
+        if (moving) {
+            presented.current = true;
+            sheetRef.current?.present();
+        } else if (presented.current) {
+            presented.current = false;
+            sheetRef.current?.dismiss();
+        }
+    }, [moving]);
+
+    const renderBackdrop = useCallback(
+        (props: BottomSheetBackdropProps) => (
+            <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} opacity={0.3} pressBehavior="close" />
+        ),
+        [],
+    );
+
+    const targets = shown ? eligibleTargets(board, shown.taskId, shown.fromZone) : [];
     // The current location is marked here rather than offered as a target — `eligibleTargets`
     // already excludes it, so moving a task onto itself can't happen.
-    const currentName = moving
-        ? moving.fromZone === UNSCHEDULED_ZONE
+    const from = shown?.fromZone;
+    const currentName = !from
+        ? ""
+        : from.kind === "unscheduled"
             ? "Not scheduled"
-            : board.blocks.find(b => b.id === moving.fromZone)?.name ?? "Not scheduled"
-        : "";
+            : board.blocks.find(b => b.id === from.blockId)?.name ?? "Not scheduled";
 
     return (
-        <Modal visible={!!moving} animationType="slide" transparent onRequestClose={onClose}>
-            <TouchableWithoutFeedback onPress={onClose}>
-                <View style={s.sheetOverlay}>
-                    <TouchableWithoutFeedback>
-                        <View style={s.sheet}>
-                            <View style={s.sheetHandle} />
-                            <View style={s.sheetHeader}>
-                                <Text style={s.sheetTitle} numberOfLines={1} accessibilityRole="header">
-                                    Move “{moving?.title}”
-                                </Text>
-                                <TouchableOpacity
-                                    onPress={onClose}
-                                    hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
-                                    activeOpacity={0.6}
-                                    accessibilityRole="button"
-                                    accessibilityLabel="Close move options"
-                                >
-                                    <Ionicons name="close" size={20} color={colors.text.primary} />
-                                </TouchableOpacity>
-                            </View>
-                            <Text style={s.sheetCurrent}>{moving ? formatDuration(moving.mins) : ""}  ·  Currently in {currentName}</Text>
-                            <ScrollView
-                                contentContainerStyle={[s.sheetContent, { paddingBottom: Math.max(insets.bottom, 24) }]}
-                                showsVerticalScrollIndicator={false}
-                            >
-                                {targets.length === 0 ? (
-                                    <Text style={s.emptyHint}>No other place to move this task.</Text>
-                                ) : (
-                                    targets.map(target => (
-                                        <MoveTargetRow
-                                            key={target.kind === "block" ? target.id : UNSCHEDULED_ZONE}
-                                            target={target}
-                                            onPress={() =>
-                                                moving &&
-                                                onMove(
-                                                    moving.taskId,
-                                                    moving.fromZone,
-                                                    target.kind === "block" ? target.id : UNSCHEDULED_ZONE,
-                                                )
-                                            }
-                                        />
-                                    ))
-                                )}
-                            </ScrollView>
-                        </View>
-                    </TouchableWithoutFeedback>
+        <BottomSheetModal
+            ref={sheetRef}
+            enableDynamicSizing
+            maxDynamicContentSize={windowHeight * 0.8}
+            enablePanDownToClose
+            backdropComponent={renderBackdrop}
+            backgroundStyle={s.sheet}
+            handleIndicatorStyle={s.sheetHandle}
+            onDismiss={() => {
+                presented.current = false;
+                onClose();
+            }}
+        >
+            <BottomSheetScrollView
+                contentContainerStyle={[s.sheetBody, { paddingBottom: Math.max(insets.bottom, 24) }]}
+                showsVerticalScrollIndicator={false}
+            >
+                <View style={s.sheetHeader}>
+                    <Text style={s.sheetTitle} numberOfLines={1} accessibilityRole="header">
+                        Move “{shown?.title}”
+                    </Text>
+                    <TouchableOpacity
+                        onPress={onClose}
+                        hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
+                        activeOpacity={0.6}
+                        accessibilityRole="button"
+                        accessibilityLabel="Close move options"
+                    >
+                        <Ionicons name="close" size={20} color={colors.text.primary} />
+                    </TouchableOpacity>
                 </View>
-            </TouchableWithoutFeedback>
-        </Modal>
+                <Text style={s.sheetCurrent}>{shown ? formatDuration(shown.mins) : ""}  ·  Currently in {currentName}</Text>
+                <View style={s.sheetContent}>
+                    {targets.length === 0 ? (
+                        <Text style={s.emptyHint}>No other place to move this task.</Text>
+                    ) : (
+                        targets.map(target => (
+                            <MoveTargetRow
+                                key={target.kind === "block" ? target.id : "unscheduled"}
+                                target={target}
+                                onPress={() => shown && onMove(shown.taskId, shown.fromZone, targetZone(target))}
+                            />
+                        ))
+                    )}
+                </View>
+            </BottomSheetScrollView>
+        </BottomSheetModal>
     );
 }
 
@@ -522,12 +552,15 @@ function MoveTargetRow({ target, onPress }: { target: MoveTarget; onPress: () =>
     if (target.kind === "unscheduled") {
         return (
             <TouchableOpacity
-                style={s.targetRow}
+                style={[s.targetRow, s.targetRowUnscheduled]}
                 onPress={onPress}
                 activeOpacity={0.7}
                 accessibilityRole="button"
                 accessibilityLabel="Move to Not scheduled"
             >
+                <View style={s.targetIcon}>
+                    <Ionicons name="file-tray-outline" size={16} color={colors.text.secondary} />
+                </View>
                 <View style={s.targetMain}>
                     <Text style={s.targetName}>Not scheduled</Text>
                     <Text style={s.targetMeta}>Set aside for later</Text>
@@ -655,13 +688,11 @@ const s = StyleSheet.create({
     taskTitle: { fontSize: 14, color: '#2a2621', letterSpacing: -0.15 },
     taskReason: { fontSize: 12, color: '#9a8d6f' },
     taskMins: { fontSize: 13, color: '#7a736a', fontVariant: ['tabular-nums'] },
-    removeButton: {
+    moveHint: {
         width: 24,
         height: 24,
-        borderRadius: 12,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(232,228,221,0.5)',
     },
 
     // Not-scheduled section
@@ -682,16 +713,10 @@ const s = StyleSheet.create({
     footerBackLabel: { fontSize: 15, fontWeight: '500', color: '#7a736a', letterSpacing: -0.1 },
 
     // Move-to sheet
-    sheetOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.scrim },
-    sheet: {
-        backgroundColor: colors.surface.page,
-        borderTopLeftRadius: radius.xxl,
-        borderTopRightRadius: radius.xxl,
-        maxHeight: '80%',
-        paddingHorizontal: 20,
-    },
-    sheetHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border.strong, alignSelf: 'center', marginTop: 10 },
-    sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 16 },
+    sheet: { backgroundColor: colors.surface.page, borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl },
+    sheetHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border.strong },
+    sheetBody: { paddingHorizontal: 20 },
+    sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 6 },
     sheetTitle: { flex: 1, marginRight: 12, fontSize: 17, fontWeight: '600', color: colors.text.primary, letterSpacing: -0.3 },
     sheetCurrent: { fontSize: 13, color: colors.text.secondary, marginTop: 4, marginBottom: 12 },
     sheetContent: { gap: 6 },
@@ -705,6 +730,20 @@ const s = StyleSheet.create({
         borderRadius: 14,
         paddingHorizontal: 16,
         paddingVertical: 13,
+    },
+    // "Not scheduled" isn't a place in the day, so it's set apart from the block targets.
+    targetRowUnscheduled: {
+        marginTop: 10,
+        backgroundColor: colors.surface.sunken,
+        borderColor: 'transparent',
+    },
+    targetIcon: {
+        width: 32,
+        height: 32,
+        borderRadius: radius.pill,
+        backgroundColor: colors.surface.raised,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     targetMain: { flex: 1, gap: 3 },
     targetName: { fontSize: 15, fontWeight: '500', color: colors.text.primary, letterSpacing: -0.2 },

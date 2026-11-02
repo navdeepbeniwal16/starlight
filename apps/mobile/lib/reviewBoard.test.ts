@@ -1,11 +1,16 @@
 import type { PlanProposal, ProposalBlock } from "./api.types";
 import {
     blockRemainingMins,
+    blockZone,
     boardFromProposal,
     eligibleTargets,
     moveTask,
     planFromProposalAndBoard,
-    UNSCHEDULED_ZONE,
+    targetZone,
+    UNSCHEDULED,
+    zoneFromActionName,
+    zoneToActionName,
+    zonesEqual,
     type ReviewBoard,
 } from "./reviewBoard";
 
@@ -86,35 +91,35 @@ describe("moveTask", () => {
     };
 
     it("appends the task to the end of the target block", () => {
-        const next = moveTask(board, "t1", "a", "b");
+        const next = moveTask(board, "t1", blockZone("a"), blockZone("b"));
         expect(next.blocks.find((x) => x.id === "a")!.tasks).toEqual([]);
         expect(next.blocks.find((x) => x.id === "b")!.tasks.map((t) => t.id)).toEqual(["t2", "t1"]);
     });
 
     it("demotes a scheduled task to unscheduled, dropping its reason", () => {
-        const next = moveTask(board, "t1", "a", UNSCHEDULED_ZONE);
+        const next = moveTask(board, "t1", blockZone("a"), UNSCHEDULED);
         expect(next.blocks.find((x) => x.id === "a")!.tasks).toEqual([]);
         expect(next.unscheduled.map((t) => t.id)).toEqual(["u1", "t1"]);
         expect(next.unscheduled.find((t) => t.id === "t1")!.reason).toBeNull();
     });
 
     it("rescues an unscheduled task into a block", () => {
-        const next = moveTask(board, "u1", UNSCHEDULED_ZONE, "a");
+        const next = moveTask(board, "u1", UNSCHEDULED, blockZone("a"));
         expect(next.unscheduled).toEqual([]);
         expect(next.blocks.find((x) => x.id === "a")!.tasks.map((t) => t.id)).toEqual(["t1", "u1"]);
     });
 
     it("is a no-op when source and target are the same zone", () => {
-        expect(moveTask(board, "t1", "a", "a")).toBe(board);
+        expect(moveTask(board, "t1", blockZone("a"), blockZone("a"))).toBe(board);
     });
 
     it("is a no-op when the task isn't in the source zone", () => {
-        expect(moveTask(board, "ghost", "a", "b")).toBe(board);
+        expect(moveTask(board, "ghost", blockZone("a"), blockZone("b"))).toBe(board);
     });
 
     it("never mutates the input board", () => {
         const snapshot = JSON.stringify(board);
-        moveTask(board, "t1", "a", "b");
+        moveTask(board, "t1", blockZone("a"), blockZone("b"));
         expect(JSON.stringify(board)).toBe(snapshot);
     });
 });
@@ -130,7 +135,7 @@ describe("eligibleTargets", () => {
     };
 
     it("offers the other blocks plus Not scheduled, excluding the current block", () => {
-        const targets = eligibleTargets(board, "t1", "a");
+        const targets = eligibleTargets(board, "t1", blockZone("a"));
         expect(targets).toEqual([
             { kind: "block", id: "b", name: "B", startTime: "13:00", endTime: "14:00", remainingAfterMoveMins: -60 },
             { kind: "block", id: "c", name: "C", startTime: "15:00", endTime: "16:00", remainingAfterMoveMins: 30 },
@@ -139,17 +144,17 @@ describe("eligibleTargets", () => {
     });
 
     it("reports capacity as it would be after the move, so a block with room the task would overflow reads as over", () => {
-        const target = eligibleTargets(board, "u1", UNSCHEDULED_ZONE).find((t) => t.kind === "block" && t.id === "c");
+        const target = eligibleTargets(board, "u1", UNSCHEDULED).find((t) => t.kind === "block" && t.id === "c");
         expect(target).toMatchObject({ remainingAfterMoveMins: -30 });
     });
 
     it("still offers blocks that are already over capacity", () => {
-        const target = eligibleTargets(board, "t1", "a").find((t) => t.kind === "block" && t.id === "b");
+        const target = eligibleTargets(board, "t1", blockZone("a")).find((t) => t.kind === "block" && t.id === "b");
         expect(target).toMatchObject({ remainingAfterMoveMins: -60 });
     });
 
     it("does not offer Not scheduled to a task that's already unscheduled", () => {
-        const targets = eligibleTargets(board, "u1", UNSCHEDULED_ZONE);
+        const targets = eligibleTargets(board, "u1", UNSCHEDULED);
         expect(targets.every((t) => t.kind === "block")).toBe(true);
         expect(targets.map((t) => (t.kind === "block" ? t.id : "x"))).toEqual(["a", "b", "c"]);
     });
@@ -165,7 +170,7 @@ describe("planFromProposalAndBoard", () => {
             ],
         });
         const board = boardFromProposal(p);
-        const moved = moveTask(board, "t1", "work", UNSCHEDULED_ZONE);
+        const moved = moveTask(board, "t1", blockZone("work"), UNSCHEDULED);
         const plan = planFromProposalAndBoard(p, moved);
 
         expect(plan.blocks.map((b) => b.id)).toEqual(["past", "lunch", "work"]);
@@ -191,5 +196,24 @@ describe("planFromProposalAndBoard", () => {
         const plan = planFromProposalAndBoard(p, boardFromProposal(p));
         expect(plan).toMatchObject({ wakeTime: "06:30", sleepTime: "23:00" });
         expect(plan.blocks[0]).not.toHaveProperty("energyLevel");
+    });
+});
+
+describe("zones", () => {
+    it("zonesEqual matches blocks by id and the unscheduled case to itself", () => {
+        expect(zonesEqual(blockZone("a"), blockZone("a"))).toBe(true);
+        expect(zonesEqual(blockZone("a"), blockZone("b"))).toBe(false);
+        expect(zonesEqual(UNSCHEDULED, UNSCHEDULED)).toBe(true);
+        expect(zonesEqual(blockZone("a"), UNSCHEDULED)).toBe(false);
+    });
+
+    it("targetZone maps a chosen target back to its zone", () => {
+        expect(targetZone({ kind: "block", id: "a", name: "A", startTime: "09:00", endTime: "11:00", remainingAfterMoveMins: 30 })).toEqual(blockZone("a"));
+        expect(targetZone({ kind: "unscheduled" })).toEqual(UNSCHEDULED);
+    });
+
+    it("round-trips a zone through the accessibility-action encoding", () => {
+        expect(zoneFromActionName(zoneToActionName(blockZone("a")))).toEqual(blockZone("a"));
+        expect(zoneFromActionName(zoneToActionName(UNSCHEDULED))).toEqual(UNSCHEDULED);
     });
 });

@@ -55,7 +55,7 @@ export type ProposalTask = {
 
 // `blockId` is the submitted shape block's id — the key the client and the
 // confirm endpoint agree on for task placements. `elapsed` rides on the proposal
-// only (there is no persisted column): it flags blocks whose window closed before `now` 
+// only (there is no persisted column): it flags blocks whose window closed before `now`.
 export type ProposalBlock = {
     blockId: string;
     type: BlockType;

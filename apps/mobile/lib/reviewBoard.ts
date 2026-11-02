@@ -1,8 +1,17 @@
 import type { ConfirmBlock, ConfirmPlan, EnergyLevel, PlanProposal } from "./api.types";
 import { toMins } from "./time";
 
-// Sentinel zone id for the unscheduled list, passed wherever a block id would go.
-export const UNSCHEDULED_ZONE = "unscheduled";
+// A task lives in exactly one zone: an upcoming CONTAINER block (by id) or the unscheduled
+// list. A tagged union keeps the unscheduled case distinct from a block id, so no caller has
+// to reserve a magic string.
+export type Zone = { kind: "block"; blockId: string } | { kind: "unscheduled" };
+
+export const UNSCHEDULED: Zone = { kind: "unscheduled" };
+export const blockZone = (blockId: string): Zone => ({ kind: "block", blockId });
+
+export function zonesEqual(a: Zone, b: Zone): boolean {
+    return a.kind === "unscheduled" ? b.kind === "unscheduled" : b.kind === "block" && a.blockId === b.blockId;
+}
 
 export type ReviewTask = { id: string; title: string; remainingMins: number };
 
@@ -55,31 +64,30 @@ export function blockRemainingMins(block: ReviewBlock): number {
     return capacity - used;
 }
 
-// Pure — never mutates the input board. Appends the moved task to the target's end; moving to
-// UNSCHEDULED_ZONE is the inline remove (−). A no-op (same zone, or the task isn't in the
-// source) returns the board unchanged.
-export function moveTask(board: ReviewBoard, taskId: string, fromZone: string, toZone: string): ReviewBoard {
-    if (fromZone === toZone) return board;
+// Pure — never mutates the input board. Appends the moved task to the target's end. A no-op
+// (same zone, or the task isn't in the source) returns the board unchanged.
+export function moveTask(board: ReviewBoard, taskId: string, from: Zone, to: Zone): ReviewBoard {
+    if (zonesEqual(from, to)) return board;
 
     let moved: ReviewTask | undefined;
-    if (fromZone === UNSCHEDULED_ZONE) {
+    if (from.kind === "unscheduled") {
         const item = board.unscheduled.find((t) => t.id === taskId);
         if (item) moved = { id: item.id, title: item.title, remainingMins: item.remainingMins };
     } else {
-        moved = board.blocks.find((b) => b.id === fromZone)?.tasks.find((t) => t.id === taskId);
+        moved = board.blocks.find((b) => b.id === from.blockId)?.tasks.find((t) => t.id === taskId);
     }
     if (!moved) return board;
     const task = moved;
 
     const blocks = board.blocks.map((b) => {
-        if (b.id === fromZone) return { ...b, tasks: b.tasks.filter((t) => t.id !== taskId) };
-        if (b.id === toZone) return { ...b, tasks: [...b.tasks, task] };
+        if (from.kind === "block" && b.id === from.blockId) return { ...b, tasks: b.tasks.filter((t) => t.id !== taskId) };
+        if (to.kind === "block" && b.id === to.blockId) return { ...b, tasks: [...b.tasks, task] };
         return b;
     });
 
     let unscheduled = board.unscheduled;
-    if (fromZone === UNSCHEDULED_ZONE) unscheduled = unscheduled.filter((t) => t.id !== taskId);
-    if (toZone === UNSCHEDULED_ZONE) unscheduled = [...unscheduled, { ...task, reason: null }];
+    if (from.kind === "unscheduled") unscheduled = unscheduled.filter((t) => t.id !== taskId);
+    if (to.kind === "unscheduled") unscheduled = [...unscheduled, { ...task, reason: null }];
 
     return { blocks, unscheduled };
 }
@@ -92,12 +100,12 @@ export type MoveTarget =
 // overflowed by the incoming task, and that's what the user is deciding. Over-capacity blocks
 // are deliberately still offered — their negative value lets the caller annotate "over by".
 // Events and elapsed blocks never appear: they aren't in the board to begin with.
-export function eligibleTargets(board: ReviewBoard, taskId: string, fromZone: string): MoveTarget[] {
-    const source = fromZone === UNSCHEDULED_ZONE ? board.unscheduled : board.blocks.find((b) => b.id === fromZone)?.tasks;
+export function eligibleTargets(board: ReviewBoard, taskId: string, from: Zone): MoveTarget[] {
+    const source = from.kind === "unscheduled" ? board.unscheduled : board.blocks.find((b) => b.id === from.blockId)?.tasks;
     const taskMins = source?.find((t) => t.id === taskId)?.remainingMins ?? 0;
 
     const targets: MoveTarget[] = board.blocks
-        .filter((b) => b.id !== fromZone)
+        .filter((b) => from.kind !== "block" || b.id !== from.blockId)
         .map((b) => ({
             kind: "block",
             id: b.id,
@@ -106,8 +114,22 @@ export function eligibleTargets(board: ReviewBoard, taskId: string, fromZone: st
             endTime: b.endTime,
             remainingAfterMoveMins: blockRemainingMins(b) - taskMins,
         }));
-    if (fromZone !== UNSCHEDULED_ZONE) targets.push({ kind: "unscheduled" });
+    if (from.kind !== "unscheduled") targets.push({ kind: "unscheduled" });
     return targets;
+}
+
+export function targetZone(target: MoveTarget): Zone {
+    return target.kind === "block" ? blockZone(target.id) : UNSCHEDULED;
+}
+
+// React Native's accessibilityAction names must be plain strings, so a Zone is encoded to a
+// stable token at that boundary and decoded back when the action fires.
+export function zoneToActionName(zone: Zone): string {
+    return zone.kind === "unscheduled" ? "unscheduled" : `block:${zone.blockId}`;
+}
+
+export function zoneFromActionName(name: string): Zone {
+    return name === "unscheduled" ? UNSCHEDULED : blockZone(name.slice("block:".length));
 }
 
 // The proposal owns the day's blocks — all of them, elapsed and events included — while
