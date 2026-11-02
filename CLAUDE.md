@@ -11,3 +11,7 @@ Linear workflow status: `Backlog` = needs-triage, `Todo` = ready-for-agent/human
 ### Domain docs
 
 Multi-context monorepo — API context (`apps/api/`) and mobile context (`apps/mobile/`). Root `CONTEXT-MAP.md` points to per-context files. See `docs/agents/domain.md`.
+
+### Git & release strategy
+
+`develop` = integration, `main` = production. Ticket branches squash into `develop`; epics ship via a `develop → main` merge. See `docs/agents/git-strategy.md`.

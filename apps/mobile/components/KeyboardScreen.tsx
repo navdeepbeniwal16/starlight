@@ -20,10 +20,8 @@ export function KeyboardScreen({
         <KeyboardAwareScrollView
             style={style}
             contentContainerStyle={contentContainerStyle}
-            bottomOffset={16}
-            // "layout" (spacer view) instead of the default "insets" mode, which has a
-            // known Fabric issue that stops it auto-scrolling to multiline inputs.
-            mode="layout"
+            bottomOffset={76}
+            mode="insets"
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
             showsVerticalScrollIndicator={false}

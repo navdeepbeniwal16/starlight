@@ -23,9 +23,8 @@ import { api } from "../../lib/api";
 import { formatTime } from "../../lib/time";
 import type { BacklogBuckets, BacklogTask, ScheduledTask, TaskDetail } from "../../lib/api.types";
 import { applyCreated, applyProgress, applyToggle, createSequencer, groupForReconcile, patchTask, restoreTask, withoutTask } from "../../lib/backlogState";
-import { usePlanGeneration } from "../../lib/usePlanGeneration";
+import { useTemplateStore } from "../../stores/template.store";
 import CreateTaskModal from "../../components/CreateTaskModal";
-import { PlanGeneratingOverlay } from "../../components/PlanGeneratingOverlay";
 import CircularProgress from "../../components/CircularProgress";
 import ReanimatedSwipeable, { SwipeDirection, type SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 
@@ -37,9 +36,9 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 type GroupKey = 'pickUp' | 'everythingElse' | 'doneToday';
 
 const GROUPS: Array<{ key: GroupKey; label: string; description: string; collapsible: boolean }> = [
-    { key: 'pickUp',         label: 'Pick up where you left off', description: 'Carried over, scheduled, or in progress', collapsible: false },
-    { key: 'everythingElse', label: 'Everything else',            description: 'Other tasks still on your backlog',      collapsible: true  },
-    { key: 'doneToday',      label: 'Done today',                 description: 'Finished today',                          collapsible: true  },
+    { key: 'pickUp', label: 'Pick up where you left off', description: 'Carried over, scheduled, or in progress', collapsible: false },
+    { key: 'everythingElse', label: 'Everything else', description: 'Other tasks still on your backlog', collapsible: true },
+    { key: 'doneToday', label: 'Done today', description: 'Finished today', collapsible: true },
 ];
 
 // Above this, "Everything else" defaults collapsed so the backlog isn't a wall.
@@ -138,7 +137,7 @@ function StatusBadge({ status }: { status: BacklogTask['status'] }) {
 
 function formatDeadline(iso: string): string {
     const d = new Date(iso);
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return `Due ${months[d.getMonth()]} ${d.getDate()}`;
 }
 
@@ -300,11 +299,12 @@ export default function PlanningReviewScreen() {
 
     const [openOverrides, setOpenOverrides] = useState<Partial<Record<GroupKey, boolean>>>({});
 
-    // Agent plan generation: full-screen while the agent runs, retry on error.
-    const { generating, generateError, generateErrorCode, generate, cancel, dismissError } = usePlanGeneration();
-
     // Gates out slow responses that would otherwise clobber an optimistic update.
     const seq = useRef(createSequencer()).current;
+
+    // Bottom of the planning stack, so this unmount is flow-end (Step 2/3 push on top without
+    // unmounting it): adjustments survive in-flow nav but drop when the flow closes.
+    useEffect(() => () => useTemplateStore.getState().clear(), []);
 
     const loadBuckets = useCallback((showLoading: boolean) => {
         const token = seq.next();
@@ -316,17 +316,9 @@ export default function PlanningReviewScreen() {
         });
     }, [seq]);
 
-    const planDay = useCallback(() => {
-        generate(() => router.push('/planning/plan'));
-    }, [generate, router]);
-
-    // Shared by the footer button and the generation-error overlay's "Adjust my day".
-    // Dismiss the error before pushing: review stays mounted under the sheet, so a
-    // lingering overlay would still cover it when the editor is popped back.
-    const adjustDay = useCallback(() => {
-        dismissError();
-        router.push('/day-template');
-    }, [dismissError, router]);
+    const continueToTemplate = useCallback(() => {
+        router.push('/planning/template-pick');
+    }, [router]);
 
     // Refetch on focus so edits made on the task detail screen reflect here.
     useFocusEffect(
@@ -387,7 +379,8 @@ export default function PlanningReviewScreen() {
                 <View style={s.stepEyebrow}>
                     <View style={[s.stepPip, s.stepPipActive]} />
                     <View style={s.stepPip} />
-                    <Text style={s.stepLabel}>Step 1 of 2</Text>
+                    <View style={s.stepPip} />
+                    <Text style={s.stepLabel}>Step 1 of 3</Text>
                 </View>
                 <View style={s.headerRow}>
                     <Text style={s.headerTitle}>Let's plan your day</Text>
@@ -482,15 +475,11 @@ export default function PlanningReviewScreen() {
 
             {!loading && !error && (
                 <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-                    <PressableScale style={s.adjustButton} onPress={adjustDay}>
-                        <Text style={s.adjustPrompt}>Need to reshape your day first?</Text>
-                        <Text style={s.adjustButtonLabel}>Adjust my day</Text>
-                    </PressableScale>
                     <PressableScale
                         style={s.doneButton}
-                        onPress={planDay}
+                        onPress={continueToTemplate}
                     >
-                        <Text style={s.doneButtonLabel}>Plan my day</Text>
+                        <Text style={s.doneButtonLabel}>Continue</Text>
                     </PressableScale>
                 </View>
             )}
@@ -503,16 +492,6 @@ export default function PlanningReviewScreen() {
                     loadBuckets(false);
                     setShowCreateModal(false);
                 }}
-            />
-
-            <PlanGeneratingOverlay
-                generating={generating}
-                error={generateError}
-                errorCode={generateErrorCode}
-                onRetry={planDay}
-                onDismiss={dismissError}
-                onCancel={cancel}
-                onAdjust={adjustDay}
             />
         </SafeAreaView>
     );
@@ -738,24 +717,8 @@ const s = StyleSheet.create({
     footer: {
         paddingHorizontal: 16,
         paddingTop: 16,
-        gap: 16,
         borderTopWidth: 1,
         borderTopColor: 'rgba(42,38,33,0.06)',
-    },
-    adjustButton: {
-        alignItems: 'center',
-        gap: 3,
-    },
-    adjustPrompt: {
-        fontSize: 12,
-        color: 'rgba(122,115,106,0.7)',
-        letterSpacing: -0.1,
-    },
-    adjustButtonLabel: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#5c5248',
-        letterSpacing: -0.2,
     },
     doneButton: {
         backgroundColor: '#2a2621',

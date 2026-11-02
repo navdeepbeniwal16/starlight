@@ -7,9 +7,10 @@ import { api } from "../../lib/api";
 import { colors, radius, spacing, shadow, typography } from "../../lib/theme";
 import type { BlockInput } from "../../lib/api.types";
 import { isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, blockTypeTotals, POINTS_PER_HOUR, type OverlapChange } from "../../lib/templateDraft";
-import { formatDuration, toMins } from "../../lib/time";
+import { formatDuration, toHHmm, toMins } from "../../lib/time";
+import { hasSchedulableBlock } from "../../lib/planTemplate";
 import { BLOCK_TYPE_LABELS, BLOCK_TYPE_LEGEND_HINTS } from "../../lib/templateBlocks";
-import { buildStarterTemplate } from "../../lib/starterTemplate";
+import { buildStarterTemplate, DEFAULT_TEMPLATE_NAME } from "../../lib/starterTemplate";
 import { useTemplateStore } from "../../stores/template.store";
 import { StepEyebrow } from "../../components/StepEyebrow";
 import { TemplateTimeline } from "../../components/TemplateTimeline";
@@ -26,7 +27,7 @@ export default function BuildScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
 
-    const { draft, blockKeys, hydrate, seed, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap } = useTemplateStore();
+    const { draft, blockKeys, templateId, name, hydrate, seed, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap } = useTemplateStore();
     const { undoLabel, offerUndo, undo } = useUndoableEdit();
     const scrollRef = useAnimatedRef<Animated.ScrollView>();
 
@@ -38,16 +39,19 @@ export default function BuildScreen() {
     const [footerHeight, setFooterHeight] = useState(0);
     // Only true when we pre-seeded the example day; a loaded saved template is the user's own.
     const [showStarterHint, setShowStarterHint] = useState(false);
+    const [now, setNow] = useState(() => toHHmm(new Date()));
 
     const load = useCallback(async () => {
         setLoading(true);
         setError(null);
-        const result = await api.getDayTemplate();
+        const result = await api.listDayTemplates();
         if (result.ok) {
-            hydrate(result.data);
-        } else if (result.status === 404) {
-            seed(buildStarterTemplate());
-            setShowStarterHint(true);
+            if (result.data.length > 0) {
+                hydrate(result.data[0]);
+            } else {
+                seed(buildStarterTemplate(), DEFAULT_TEMPLATE_NAME);
+                setShowStarterHint(true);
+            }
         } else {
             setError(result.error);
         }
@@ -62,6 +66,11 @@ export default function BuildScreen() {
         }
         load();
     }, [load]);
+
+    useEffect(() => {
+        const id = setInterval(() => setNow(toHHmm(new Date())), 60_000);
+        return () => clearInterval(id);
+    }, []);
 
     function handleCreateRange(startTime: string, endTime: string) {
         setEditor({ mode: 'create', startTime, endTime });
@@ -97,7 +106,10 @@ export default function BuildScreen() {
         if (!draft) return;
         setSaving(true);
         setSaveError(null);
-        const result = await api.updateDayTemplate(draft);
+        const payload = { name, wakeTime: draft.wakeTime, sleepTime: draft.sleepTime, blocks: draft.blocks };
+        const result = templateId
+            ? await api.updateDayTemplate(templateId, payload)
+            : await api.createDayTemplate(payload);
         setSaving(false);
         if (result.ok) {
             router.push('/(onboarding)/first-task');
@@ -107,6 +119,7 @@ export default function BuildScreen() {
     }
 
     const valid = useMemo(() => isTemplateValid(draft), [draft]);
+    const schedulable = useMemo(() => hasSchedulableBlock(draft, now), [draft, now]);
     const totals = useMemo(() => blockTypeTotals(draft), [draft]);
     const wakeBeforeSleep = isWakeBeforeSleep(draft);
     const outOfBoundsIndexes = useMemo(
@@ -114,7 +127,7 @@ export default function BuildScreen() {
         [draft, wakeBeforeSleep],
     );
 
-    const canContinue = valid && !saving;
+    const canContinue = valid && schedulable && !saving;
 
     // A block ending after sleep overflows below the grid via absolute positioning, which RN leaves
     // out of the scroll's content height — reserve it so the tail (and its "after sleep" note) stays
@@ -198,28 +211,31 @@ export default function BuildScreen() {
                             </View>
                         )}
 
-                            <TemplateValidationBanner draft={draft} />
+                        <TemplateValidationBanner draft={draft} showContainerWarning={false} />
 
-                            <TemplateTimeline
-                                blocks={draft.blocks}
-                                wakeTime={draft.wakeTime}
-                                sleepTime={draft.sleepTime}
-                                blockKeys={blockKeys}
-                                entering={false}
-                                outOfBoundsIndexes={outOfBoundsIndexes}
-                                scrollRef={scrollRef}
-                                onWakeChange={(w) => { setSaveError(null); setWakeSleep(w, draft.sleepTime); }}
-                                onSleepChange={(s) => { setSaveError(null); setWakeSleep(draft.wakeTime, s); }}
-                                onEditBlock={(index) => setEditor({ mode: 'edit', index })}
-                                onCreateRange={handleCreateRange}
-                                onLiveEdit={(snapshot, label) => { setSaveError(null); offerUndo(snapshot, label); }}
-                            />
+                        <TemplateTimeline
+                            blocks={draft.blocks}
+                            wakeTime={draft.wakeTime}
+                            sleepTime={draft.sleepTime}
+                            blockKeys={blockKeys}
+                            entering={false}
+                            outOfBoundsIndexes={outOfBoundsIndexes}
+                            scrollRef={scrollRef}
+                            onWakeChange={(w) => { setSaveError(null); setWakeSleep(w, draft.sleepTime); }}
+                            onSleepChange={(s) => { setSaveError(null); setWakeSleep(draft.wakeTime, s); }}
+                            onEditBlock={(index) => setEditor({ mode: 'edit', index })}
+                            onCreateRange={handleCreateRange}
+                            onLiveEdit={(snapshot, label) => { setSaveError(null); offerUndo(snapshot, label); }}
+                        />
                     </Animated.ScrollView>
 
                     <View
                         style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}
                         onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}
                     >
+                        {!schedulable && (
+                            <Text style={styles.footerHint}>No upcoming Time Block left today. Add at least one after now to continue.</Text>
+                        )}
                         {saveError && <Text style={styles.saveErrorText}>{saveError}</Text>}
                         <PressableScale
                             style={[styles.continueButton, !canContinue && styles.continueButtonDisabled]}
@@ -321,6 +337,7 @@ const styles = StyleSheet.create({
         backgroundColor: colors.surface.page,
         ...shadow.footer,
     },
+    footerHint: { fontSize: 13, fontWeight: '500', color: colors.text.secondary, textAlign: 'center', letterSpacing: -0.1, lineHeight: 18 },
     saveErrorText: { fontSize: 13, color: colors.danger.default, textAlign: 'center' },
     continueButton: { height: 52, backgroundColor: colors.text.primary, borderRadius: radius.md, justifyContent: 'center', alignItems: 'center' },
     continueButtonDisabled: { opacity: 0.4 },

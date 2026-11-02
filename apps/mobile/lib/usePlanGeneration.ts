@@ -1,26 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import type { GeneratePlanRequest } from "./api.types";
 import { usePlanningStore } from "../stores/planning.store";
 
-// Drives the "generate a plan" step shared by the planning-review screen and the
-// onboarding first-task step: runs the agent, stores the proposal, and hands the
-// caller control over where to go next (the two callers navigate differently).
+// The caller owns post-success navigation because the two call sites (planning
+// Step 2 and onboarding first-task) go to different screens from here.
 export function usePlanGeneration() {
     const setProposal = usePlanningStore(s => s.setProposal);
+    const setTemplateId = usePlanningStore(s => s.setTemplateId);
 
     const [generating, setGenerating] = useState(false);
     const [generateError, setGenerateError] = useState<string | null>(null);
     const [generateErrorCode, setGenerateErrorCode] = useState<string | null>(null);
     const run = useRef<AbortController | null>(null);
 
-    const generate = useCallback(async (onSuccess: () => void) => {
+    const generate = useCallback(async (req: GeneratePlanRequest, onSuccess: () => void) => {
         if (run.current) return;
         const active = new AbortController();
         run.current = active;
         setGenerating(true);
         setGenerateError(null);
         setGenerateErrorCode(null);
-        const result = await api.generatePlan(active.signal);
+        const result = await api.generatePlan(req, active.signal);
         // Drop the result if this run was superseded, so an aborted request
         // (cancel) or a stale one never errors or navigates.
         if (run.current !== active) return;
@@ -28,12 +29,14 @@ export function usePlanGeneration() {
         setGenerating(false);
         if (result.ok) {
             setProposal(result.data);
+            // Carry the template forward so confirm echoes the same id.
+            setTemplateId(req.templateId);
             onSuccess();
         } else {
             setGenerateError(result.error);
             setGenerateErrorCode(result.code ?? null);
         }
-    }, [setProposal]);
+    }, [setProposal, setTemplateId]);
 
     const cancel = useCallback(() => {
         run.current?.abort();

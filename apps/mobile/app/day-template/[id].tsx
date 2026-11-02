@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, TextInput } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter, useNavigation } from "expo-router";
+import { useRouter, useNavigation, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, {
-    SlideInDown,
-    SlideOutDown,
     FadeIn,
     FadeInDown,
     FadeOut,
@@ -16,18 +14,19 @@ import Animated, {
     interpolate,
     Extrapolation,
 } from "react-native-reanimated";
-import { api } from "../lib/api";
-import { colors, radius, spacing, shadow } from "../lib/theme";
-import type { BlockInput } from "../lib/api.types";
-import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, blockTypeTotals, POINTS_PER_HOUR, type OverlapChange } from "../lib/templateDraft";
-import { formatDuration, toMins } from "../lib/time";
-import { BLOCK_TYPE_LABELS, BLOCK_TYPE_LEGEND_HINTS } from "../lib/templateBlocks";
-import { useTemplateStore } from "../stores/template.store";
-import { BlockEditorModal } from "../components/BlockEditorModal";
-import { TemplateTimeline } from "../components/TemplateTimeline";
-import { TemplateValidationBanner } from "../components/TemplateValidationBanner";
-import { UndoSnackbar, useUndoableEdit } from "../components/UndoSnackbar";
-import { PressableScale } from "../components/PressableScale";
+import { api } from "../../lib/api";
+import { colors, radius, spacing, shadow } from "../../lib/theme";
+import type { BlockInput } from "../../lib/api.types";
+import { isTemplateDirty, isTemplateValid, isWakeBeforeSleep, blocksOutOfBounds, blockTypeTotals, POINTS_PER_HOUR, type OverlapChange } from "../../lib/templateDraft";
+import { formatDuration, toMins } from "../../lib/time";
+import { BLOCK_TYPE_LABELS, BLOCK_TYPE_LEGEND_HINTS } from "../../lib/templateBlocks";
+import { buildBlankTemplate } from "../../lib/starterTemplate";
+import { useTemplateStore } from "../../stores/template.store";
+import { BlockEditorModal } from "../../components/BlockEditorModal";
+import { TemplateTimeline } from "../../components/TemplateTimeline";
+import { TemplateValidationBanner } from "../../components/TemplateValidationBanner";
+import { UndoSnackbar, useUndoableEdit } from "../../components/UndoSnackbar";
+import { PressableScale } from "../../components/PressableScale";
 
 // What the block editor is open on: an existing block by index, or a new block seeded into a
 // tapped free slot.
@@ -37,32 +36,52 @@ export default function DayTemplateScreen() {
     const router = useRouter();
     const navigation = useNavigation();
     const insets = useSafeAreaInsets();
+    const { id } = useLocalSearchParams<{ id: string }>();
+    const isCreating = id === 'new';
 
-    const { baseline, draft, blockKeys, hydrate, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap, commit, reset, clear } = useTemplateStore();
+    const { baseline, draft, blockKeys, name, baselineName, templateId, hydrate, seed, setTemplateId, setName, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap, commit, reset, clear } = useTemplateStore();
     const { undoLabel, offerUndo, undo } = useUndoableEdit();
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [editor, setEditor] = useState<Editor | null>(null);
     const [saving, setSaving] = useState(false);
+    const [deleting, setDeleting] = useState(false);
     const [saveError, setSaveError] = useState<string | null>(null);
+    const [nameError, setNameError] = useState<string | null>(null);
     const [savedVisible, setSavedVisible] = useState(false);
     const [entering, setEntering] = useState(false);
-    // Measured so the scroll can reserve exactly the dirty-state footer's height,
-    // keeping the last row (sleep) reachable above it rather than hidden behind.
+    // Measured so the scroll can reserve exactly the footer's height, keeping the
+    // last row (sleep) reachable above it rather than hidden behind.
     const [footerHeight, setFooterHeight] = useState(0);
 
     const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const nameInputRef = useRef<TextInput>(null);
+    // Set before a delete navigates back, to suppress the unsaved-changes guard
+    // that would otherwise prompt to discard pending edits.
+    const deletedRef = useRef(false);
 
     // Memoized so the serialize-and-validate work reruns only when the draft or
     // baseline changes, not on every toast, flash, or saving update.
-    const dirty = useMemo(() => isTemplateDirty(baseline, draft), [baseline, draft]);
+    const trimmedName = name.trim();
+    const nameValid = trimmedName.length > 0 && trimmedName.length <= 50;
+    const dirty = useMemo(() => isTemplateDirty(baseline, draft) || trimmedName !== baselineName, [baseline, draft, trimmedName, baselineName]);
     const valid = useMemo(() => isTemplateValid(draft), [draft]);
+    const isUnsaved = templateId === null;
+    const canSave = valid && nameValid && !saving && (isUnsaved || dirty);
+    const guardUnsaved = dirty || (isUnsaved && valid);
 
     const load = useCallback(async () => {
+        if (isCreating) {
+            // The store is seeded before navigation; a cold entry (deep link / reload) arrives unseeded.
+            if (!useTemplateStore.getState().draft) seed(buildBlankTemplate(), '');
+            setEntering(true);
+            setLoading(false);
+            return;
+        }
         setLoading(true);
         setError(null);
-        const result = await api.getDayTemplate();
+        const result = await api.getDayTemplate(id);
         if (result.ok) {
             hydrate(result.data);
             setEntering(true);
@@ -70,7 +89,7 @@ export default function DayTemplateScreen() {
             setError(result.error);
         }
         setLoading(false);
-    }, [hydrate]);
+    }, [hydrate, seed, isCreating, id]);
 
     useEffect(() => {
         if (!entering) return;
@@ -92,13 +111,13 @@ export default function DayTemplateScreen() {
     // beforeRemove guard below, so disable the gesture while there are unsaved
     // edits — the back button (which the guard intercepts) becomes the only exit.
     useEffect(() => {
-        navigation.setOptions({ gestureEnabled: !dirty });
-    }, [navigation, dirty]);
+        navigation.setOptions({ gestureEnabled: !guardUnsaved });
+    }, [navigation, guardUnsaved]);
 
     // Confirm before discarding unsaved edits on any back navigation.
     useEffect(() => {
         const sub = navigation.addListener('beforeRemove', (e: any) => {
-            if (!dirty) return;
+            if (deletedRef.current || !guardUnsaved) return;
             e.preventDefault();
             Alert.alert(
                 'Discard changes?',
@@ -110,7 +129,7 @@ export default function DayTemplateScreen() {
             );
         });
         return sub;
-    }, [navigation, dirty, reset]);
+    }, [navigation, guardUnsaved, reset]);
 
     function handleWakeSleep(wake: string, sleep: string) {
         setSaveError(null);
@@ -147,22 +166,42 @@ export default function DayTemplateScreen() {
 
     async function handleSave() {
         if (!draft) return;
+        if (!nameValid) {
+            setNameError('Name must be 1–50 characters');
+            return;
+        }
         setSaving(true);
         setSaveError(null);
-        const result = await api.updateDayTemplate(draft);
+        setNameError(null);
+        const payload = {
+            name: trimmedName,
+            wakeTime: draft.wakeTime,
+            sleepTime: draft.sleepTime,
+            blocks: draft.blocks,
+        };
+        const result = templateId
+            ? await api.updateDayTemplate(templateId, payload)
+            : await api.createDayTemplate(payload);
         setSaving(false);
         if (result.ok) {
+            if (!templateId) setTemplateId(result.data.id);
             // Adopt the draft as the new baseline so the screen is no longer dirty.
             commit();
             setSavedVisible(true);
             if (savedTimer.current) clearTimeout(savedTimer.current);
             savedTimer.current = setTimeout(() => setSavedVisible(false), 1800);
+        } else if (result.status === 409) {
+            setNameError('You already have a template with that name');
         } else {
             setSaveError(result.error);
         }
     }
 
     function handleCancel() {
+        if (!guardUnsaved) {
+            router.back();
+            return;
+        }
         Alert.alert(
             'Discard changes?',
             'You have unsaved edits to your day template.',
@@ -171,6 +210,32 @@ export default function DayTemplateScreen() {
                 { text: 'Discard', style: 'destructive', onPress: reset },
             ],
         );
+    }
+
+    function confirmDelete() {
+        Alert.alert(
+            'Delete template?',
+            'Plans already generated from it stay unchanged. This cannot be undone.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Delete', style: 'destructive', onPress: handleDelete },
+            ],
+        );
+    }
+
+    async function handleDelete() {
+        if (!templateId) return;
+        setDeleting(true);
+        const result = await api.deleteDayTemplate(templateId);
+        if (result.ok) {
+            deletedRef.current = true;
+            router.back();
+        } else {
+            setDeleting(false);
+            // The last-template guard is the server's rule; surface its message
+            // rather than re-deriving the threshold on the client.
+            Alert.alert("Couldn't delete template", result.error);
+        }
     }
 
     const totals = useMemo(() => blockTypeTotals(draft), [draft]);
@@ -193,8 +258,6 @@ export default function DayTemplateScreen() {
         return ((maxEnd - sleep) / 60) * POINTS_PER_HOUR;
     }, [draft]);
 
-    const canSave = dirty && valid && !saving;
-
     const scrollRef = useAnimatedRef<Animated.ScrollView>();
     const scrollY = useSharedValue(0);
     const scrollHandler = useAnimatedScrollHandler((e) => { scrollY.value = e.contentOffset.y; });
@@ -206,10 +269,10 @@ export default function DayTemplateScreen() {
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <View style={styles.header}>
                 <View style={styles.headerEyebrow}>
-                    <Text style={styles.headerEyebrowLabel}>Day Template</Text>
+                    <Text style={styles.headerEyebrowLabel}>{isCreating ? 'New Day Template' : 'Day Template'}</Text>
                 </View>
                 <View style={styles.headerRow}>
-                    <Text style={styles.headerTitle}>Reshape your day</Text>
+                    <Text style={styles.headerTitle}>{isCreating ? 'Shape your day' : 'Reshape your day'}</Text>
                     <TouchableOpacity onPress={() => router.back()} activeOpacity={0.6} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                         <Ionicons name="close" size={22} color={colors.text.primary} />
                     </TouchableOpacity>
@@ -238,11 +301,34 @@ export default function DayTemplateScreen() {
                     <Animated.ScrollView
                         ref={scrollRef}
                         style={styles.scroll}
-                        contentContainerStyle={[styles.content, dirty && { paddingBottom: (footerHeight || 160) + spacing.md + bottomOverflow }]}
+                        contentContainerStyle={[styles.content, { paddingBottom: (footerHeight || 160) + spacing.md + bottomOverflow }]}
                         showsVerticalScrollIndicator={false}
                         onScroll={scrollHandler}
                         scrollEventThrottle={16}
                     >
+                        <View style={styles.nameRow}>
+                            <TextInput
+                                ref={nameInputRef}
+                                style={[styles.nameTitle, nameError ? styles.nameTitleError : null]}
+                                value={name}
+                                onChangeText={(t) => { setName(t); setNameError(null); setSaveError(null); }}
+                                placeholder="Name this template"
+                                placeholderTextColor={colors.text.muted}
+                                maxLength={50}
+                                multiline
+                                blurOnSubmit
+                                returnKeyType="done"
+                            />
+                            <TouchableOpacity
+                                onPress={() => nameInputRef.current?.focus()}
+                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                activeOpacity={0.6}
+                            >
+                                <Ionicons name="pencil-outline" size={18} color={colors.text.muted} />
+                            </TouchableOpacity>
+                        </View>
+                        {nameError && <Text style={styles.nameErrorText}>{nameError}</Text>}
+
                         <Animated.View
                             style={styles.legend}
                             entering={entering ? FadeInDown.duration(300) : undefined}
@@ -295,35 +381,43 @@ export default function DayTemplateScreen() {
                             onCreateRange={handleCreateRange}
                             onLiveEdit={(snapshot, label) => { setSaveError(null); offerUndo(snapshot, label); }}
                         />
-                    </Animated.ScrollView>
 
-                    {dirty && (
-                        <Animated.View
-                            style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}
-                            onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}
-                            entering={SlideInDown.springify().damping(20).stiffness(220).mass(0.6)}
-                            exiting={SlideOutDown.duration(180)}
-                        >
-                            {saveError && <Text style={styles.saveErrorText}>{saveError}</Text>}
-                            <PressableScale
-                                style={[styles.saveButton, !canSave && styles.saveButtonDisabled]}
-                                onPress={handleSave}
-                                disabled={!canSave}
-                            >
-                                {saving
-                                    ? <ActivityIndicator color={colors.surface.page} />
-                                    : <Text style={styles.saveButtonText}>Save</Text>}
-                            </PressableScale>
+                        {!isCreating && (
                             <TouchableOpacity
-                                style={styles.cancelButton}
-                                onPress={handleCancel}
-                                disabled={saving}
+                                style={styles.deleteButton}
+                                onPress={confirmDelete}
+                                disabled={deleting || saving}
                                 activeOpacity={0.8}
                             >
-                                <Text style={styles.cancelButtonText}>Cancel</Text>
+                                <Ionicons name="trash-outline" size={16} color={colors.danger.default} />
+                                <Text style={styles.deleteLabel}>Delete</Text>
                             </TouchableOpacity>
-                        </Animated.View>
-                    )}
+                        )}
+                    </Animated.ScrollView>
+
+                    <View
+                        style={[styles.footer, { paddingBottom: Math.max(insets.bottom - 22, 8) }]}
+                        onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}
+                    >
+                        {saveError && <Text style={styles.saveErrorText}>{saveError}</Text>}
+                        <PressableScale
+                            style={[styles.saveButton, !canSave && styles.saveButtonDisabled]}
+                            onPress={handleSave}
+                            disabled={!canSave}
+                        >
+                            {saving
+                                ? <ActivityIndicator color={colors.surface.page} />
+                                : <Text style={styles.saveButtonText}>Save</Text>}
+                        </PressableScale>
+                        <TouchableOpacity
+                            style={styles.cancelButton}
+                            onPress={handleCancel}
+                            disabled={saving}
+                            activeOpacity={0.8}
+                        >
+                            <Text style={styles.cancelButtonText}>Cancel</Text>
+                        </TouchableOpacity>
+                    </View>
                 </Animated.View>
             )}
 
@@ -397,6 +491,18 @@ const styles = StyleSheet.create({
     content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
     timeline: { paddingTop: spacing.lg, paddingBottom: spacing.lg },
 
+    // The name is the first body element, styled as a large borderless heading — matching
+    // the task detail title field — with a trailing pencil as its only edit cue and a danger
+    // baseline surfacing on error.
+    nameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
+    nameTitle: {
+        flex: 1,
+        fontSize: 22, fontWeight: '500', color: colors.text.primary,
+        letterSpacing: -0.4, lineHeight: 30, padding: 0, paddingHorizontal: 4,
+    },
+    nameTitleError: { borderBottomWidth: 1, borderBottomColor: colors.danger.default },
+    nameErrorText: { fontSize: 12, color: colors.danger.default, paddingHorizontal: 4 },
+
     legend: { gap: spacing.sm, backgroundColor: colors.surface.sunken, borderRadius: radius.md, paddingVertical: 10, paddingHorizontal: 12, marginTop: spacing.md },
     legendItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
     legendLabelGroup: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
@@ -408,6 +514,9 @@ const styles = StyleSheet.create({
     legendDesc: { fontWeight: '400', fontStyle: 'italic', color: colors.text.secondary },
     hintStrip: { fontSize: 12, color: colors.text.muted, letterSpacing: -0.2, textAlign: 'center' },
     hintKey: { fontWeight: '600', color: colors.text.primary },
+
+    deleteButton: { height: 48, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, marginTop: 8 },
+    deleteLabel: { fontSize: 15, fontWeight: '500', color: colors.danger.default, letterSpacing: -0.23 },
 
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: spacing.lg },
     errorText: { fontSize: 14, color: colors.text.secondary, textAlign: 'center' },

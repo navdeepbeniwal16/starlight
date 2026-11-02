@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -7,141 +7,71 @@ import {
     Text,
     TouchableOpacity,
     View,
-    type View as RNView,
+    useWindowDimensions,
+    type AccessibilityActionEvent,
 } from "react-native";
-import Animated, {
-    FadeIn,
-    FadeOut,
-    runOnJS,
-    useAnimatedStyle,
-    useSharedValue,
-    withSpring,
-} from "react-native-reanimated";
-import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import {
+    BottomSheetBackdrop,
+    BottomSheetModal,
+    BottomSheetScrollView,
+    type BottomSheetBackdropProps,
+} from "@gorhom/bottom-sheet";
 import { api } from "../lib/api";
-import type { ConfirmAssignment, PlanProposal } from "../lib/api.types";
+import type { PlanProposal, ProposalBlock } from "../lib/api.types";
+import {
+    UNSCHEDULED,
+    blockRemainingMins,
+    blockZone,
+    boardFromProposal,
+    eligibleTargets,
+    moveTask,
+    planFromProposalAndBoard,
+    targetZone,
+    zoneFromActionName,
+    zoneToActionName,
+    type MoveTarget,
+    type ReviewBlock,
+    type ReviewBoard,
+    type ReviewTask,
+    type UnscheduledTask,
+    type Zone,
+} from "../lib/reviewBoard";
+import { buildReviewTimeline } from "../lib/reviewTimeline";
 import { usePlanningStore } from "../stores/planning.store";
 import { useOnboardingTasksStore } from "../stores/onboardingTasks.store";
 import { useSessionStore } from "../stores/session.store";
-import { formatTime, toMins } from "../lib/time";
+import { formatDuration, formatTime, formatTimeRange, toHHmm, toMins } from "../lib/time";
+import { TimelineThread, DayBoundaryMarker } from "./timeline";
+import { colors, radius, spacing, typography } from "../lib/theme";
+import { StepEyebrow } from "./StepEyebrow";
 
-// ─── Local board model ────────────────────────────────────────────────────────
-
-type TaskItem = { id: string; title: string; remainingMins: number };
-type DraftBlock = {
-    id: string;
-    name: string;
-    startTime: string;
-    endTime: string;
-    energyLevel: 'HIGH' | 'MEDIUM' | 'LOW' | null;
-    tasks: TaskItem[];
-};
-type UnscheduledItem = TaskItem & { reason: string | null };
-type Board = { blocks: DraftBlock[]; unscheduled: UnscheduledItem[] };
-
-const UNSCHEDULED_ZONE = 'unscheduled';
-const TASK_GAP = 8; // must match s.taskList `gap`
-// Critically-damped-ish: settles without bounce/overshoot for a calm drop.
-const REORDER_SPRING = { damping: 32, stiffness: 170, mass: 0.9, overshootClamping: true };
-
-function formatMins(mins: number): string {
-    if (mins < 60) return `${mins}m`;
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
-    return m === 0 ? `${h}h` : `${h}h ${m}m`;
+function energyLabel(level: ReviewBlock["energyLevel"]): string | null {
+    return level ? level.charAt(0) + level.slice(1).toLowerCase() + " energy" : null;
 }
 
-function energyLabel(level: DraftBlock['energyLevel']): string | null {
-    return level ? level.charAt(0) + level.slice(1).toLowerCase() + ' energy' : null;
+function capacityLabel(remainingMins: number): string {
+    return remainingMins >= 0 ? `${formatDuration(remainingMins)} left` : `over by ${formatDuration(-remainingMins)}`;
 }
 
-// Moves a task from one zone to another, returning a new board. Appends to the
-// end of the target block (or to the unscheduled list). Pure — never mutates
-// the input board or any block it contains.
-function moveTask(board: Board, taskId: string, fromZone: string, toZone: string): Board {
-    let moved: TaskItem | undefined;
-
-    if (fromZone === UNSCHEDULED_ZONE) {
-        const item = board.unscheduled.find(t => t.id === taskId);
-        if (item) moved = { id: item.id, title: item.title, remainingMins: item.remainingMins };
-    } else {
-        moved = board.blocks.find(b => b.id === fromZone)?.tasks.find(t => t.id === taskId);
-    }
-    if (!moved) return board; // task not found in source — no-op
-    const task = moved;
-
-    const blocks = board.blocks.map(b => {
-        if (b.id === fromZone) return { ...b, tasks: b.tasks.filter(t => t.id !== taskId) };
-        if (b.id === toZone) return { ...b, tasks: [...b.tasks, task] };
-        return b;
-    });
-
-    let unscheduled = board.unscheduled;
-    if (fromZone === UNSCHEDULED_ZONE) {
-        unscheduled = unscheduled.filter(t => t.id !== taskId);
-    }
-    if (toZone === UNSCHEDULED_ZONE) {
-        unscheduled = [...unscheduled, { ...task, reason: null }];
-    }
-
-    return { blocks, unscheduled };
+function moveFitLabel(remainingAfterMoveMins: number): string {
+    if (remainingAfterMoveMins === 0) return "Fits exactly";
+    return remainingAfterMoveMins > 0
+        ? `Fits · ${formatDuration(remainingAfterMoveMins)} left`
+        : `Over by ${formatDuration(-remainingAfterMoveMins)}`;
 }
 
-// Ordered task ids for a section (a block, or the unscheduled list).
-function sectionIds(board: Board | null, sectionId: string): string[] {
-    if (!board) return [];
-    if (sectionId === UNSCHEDULED_ZONE) return board.unscheduled.map(t => t.id);
-    return board.blocks.find(b => b.id === sectionId)?.tasks.map(t => t.id) ?? [];
+function moveActionsFor(board: ReviewBoard, taskId: string, from: Zone) {
+    return eligibleTargets(board, taskId, from).map((t) => ({
+        name: zoneToActionName(targetZone(t)),
+        label: t.kind === "block" ? `Move to ${t.name}` : "Move to Not scheduled",
+    }));
 }
 
-// Reorders a section's items to match `orderedIds`, returning a new board. Pure.
-function reorderSection(board: Board, sectionId: string, orderedIds: string[]): Board {
-    const pos = new Map(orderedIds.map((id, i) => [id, i]));
-    const sort = <T extends { id: string }>(items: T[]): T[] =>
-        [...items].sort((a, b) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0));
-    if (sectionId === UNSCHEDULED_ZONE) return { ...board, unscheduled: sort(board.unscheduled) };
-    return { ...board, blocks: board.blocks.map(b => (b.id === sectionId ? { ...b, tasks: sort(b.tasks) } : b)) };
-}
-
-function sameOrder(a: string[], b: string[]): boolean {
-    return a.length === b.length && a.every((id, i) => id === b[i]);
-}
-
-// Board zone ids are the proposal's template block ids, which is what the
-// confirm endpoint expects assignments to reference.
-function boardFromProposal(proposal: PlanProposal): Board {
-    return {
-        blocks: proposal.blocks
-            .filter(b => b.type === 'CONTAINER')
-            .sort((a, b) => toMins(a.startTime) - toMins(b.startTime))
-            .map(b => ({
-                id: b.blockId,
-                name: b.name,
-                startTime: b.startTime,
-                endTime: b.endTime,
-                energyLevel: b.energyLevel,
-                tasks: b.tasks.map(t => ({ id: t.id, title: t.title, remainingMins: t.remainingMins })),
-            })),
-        unscheduled: proposal.unschedulable.map(u => ({
-            id: u.taskId,
-            title: u.title,
-            remainingMins: u.remainingMins,
-            reason: u.reason,
-        })),
-    };
-}
-
-// Flattens the board into the confirm payload: every scheduled task with its
-// block (template block id) and position.
-function assignmentsFromBoard(board: Board): ConfirmAssignment[] {
-    return board.blocks.flatMap(block =>
-        block.tasks.map((task, i) => ({ taskId: task.id, blockId: block.id, blockOrder: i }))
-    );
-}
+type Moving = { taskId: string; fromZone: Zone; title: string; mins: number };
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -150,130 +80,28 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
     const insets = useSafeAreaInsets();
     const isOnboarding = onboarding;
     const proposal = usePlanningStore(s => s.proposal);
+    const templateId = usePlanningStore(s => s.templateId);
     const clearProposal = usePlanningStore(s => s.clear);
 
-    // The board is derived from the store-held proposal once on mount; edits
-    // stay local until confirm. The store survives remounts, so re-entering
-    // this screen rebuilds the board.
-    const [board, setBoardState] = useState<Board | null>(() => (proposal ? boardFromProposal(proposal) : null));
-    const boardRef = useRef<Board | null>(board);
-    const applyBoard = useCallback((next: Board) => {
-        boardRef.current = next;
-        setBoardState(next);
+    // The board — the task placement the user edits — is derived once from the
+    // store-held proposal; edits stay local until confirm. The proposal itself owns the
+    // day's structure (blocks, times, elapsed/event state), so the timeline reads from it.
+    const [board, setBoard] = useState<ReviewBoard | null>(() => (proposal ? boardFromProposal(proposal) : null));
+
+    // The review is a short-lived snapshot of the day, so `now` is fixed at mount —
+    // the now-line and elapsed greying shouldn't shift under the user mid-review.
+    const now = useMemo(() => toHHmm(new Date()), []);
+    const timeline = useMemo(() => (proposal ? buildReviewTimeline(proposal, now) : []), [proposal, now]);
+
+    const [moving, setMoving] = useState<Moving | null>(null);
+    const openMove = useCallback((taskId: string, fromZone: Zone, title: string, mins: number) => {
+        setMoving({ taskId, fromZone, title, mins });
     }, []);
-
-    const [dragging, setDragging] = useState(false);
-
-    // ─ Shared drag state (one drag at a time) ─
-    const activeId = useSharedValue<string | null>(null);
-    const activeSection = useSharedValue<string | null>(null);
-    const crossSection = useSharedValue(false); // finger is over a different zone
-    const committed = useSharedValue(false);     // the gesture ended in a move/reorder
-    const tx = useSharedValue(0);
-    const ty = useSharedValue(0);
-    const startCenterY = useSharedValue(0);
-    const hoveredZone = useSharedValue<string | null>(null);
-    const zones = useSharedValue<{ id: string; top: number; bottom: number }[]>([]);
-
-    // Live within-section ordering. `order` is the dragged section's task ids in
-    // their current drag-time order; each sibling animates to the slot it implies.
-    // The geometry arrays are the section's at-rest measurements (window space),
-    // captured once at drag start and index-aligned to `secIds`.
-    const order = useSharedValue<string[]>([]);
-    const secIds = useSharedValue<string[]>([]);
-    const secTops = useSharedValue<number[]>([]);
-    const secHeights = useSharedValue<number[]>([]);
-    const secCenters = useSharedValue<number[]>([]);
-
-    // Refs to drop-zone and card host views, for window-space measurement.
-    const zoneRefs = useRef<Map<string, RNView>>(new Map());
-    const cardRefs = useRef<Map<string, RNView>>(new Map());
-
-    const measureZones = useCallback(() => {
-        const refs = Array.from(zoneRefs.current.entries());
-        const acc: { id: string; top: number; bottom: number }[] = [];
-        let pending = refs.length;
-        if (pending === 0) { zones.value = []; return; }
-        refs.forEach(([id, view]) => {
-            view.measureInWindow((_x, y, _w, h) => {
-                acc.push({ id, top: y, bottom: y + h });
-                pending -= 1;
-                if (pending === 0) zones.value = acc;
-            });
-        });
-    }, [zones]);
-
-    // Snaps all drag shared-values back to rest. Called by the JS move/reorder
-    // handlers *after* the board state is applied, so the reset and the new layout
-    // land on the same render (no flash of the dragged card at its old slot).
-    const resetDragShared = useCallback(() => {
-        activeId.value = null;
-        activeSection.value = null;
-        crossSection.value = false;
-        hoveredZone.value = null;
-        order.value = [];
-        tx.value = 0;
-        ty.value = 0;
-    }, [activeId, activeSection, crossSection, hoveredZone, order, tx, ty]);
-
-    // Bundle the shared values so each card subscribes to the same drag state.
-    const dragShared = useMemo<DragShared>(() => ({
-        activeId, activeSection, crossSection, committed,
-        tx, ty, startCenterY, hoveredZone, zones,
-        order, secIds, secTops, secHeights, secCenters,
-    }), [activeId, activeSection, crossSection, committed, tx, ty, startCenterY, hoveredZone, zones, order, secIds, secTops, secHeights, secCenters]);
-
-    const prepareDrag = useCallback((taskId: string, sectionId: string) => {
-        setDragging(true);
-        measureZones();
-        activeSection.value = sectionId;
-        crossSection.value = false;
-        committed.value = false;
-
-        const ids = sectionIds(boardRef.current, sectionId);
-        const tops: number[] = [];
-        const heights: number[] = [];
-        const centers: number[] = [];
-        let pending = ids.length;
-        const commit = () => {
-            secIds.value = ids;
-            secTops.value = tops;
-            secHeights.value = heights;
-            secCenters.value = centers;
-            order.value = [...ids];
-        };
-        if (pending === 0) { commit(); return; }
-        ids.forEach((id, i) => {
-            const view = cardRefs.current.get(id);
-            if (!view) { pending -= 1; if (pending === 0) commit(); return; }
-            view.measureInWindow((_x, y, _w, h) => {
-                tops[i] = y; heights[i] = h; centers[i] = y + h / 2;
-                if (id === taskId) startCenterY.value = y + h / 2;
-                pending -= 1;
-                if (pending === 0) commit();
-            });
-        });
-    }, [measureZones, activeSection, crossSection, committed, secIds, secTops, secHeights, secCenters, order, startCenterY]);
-
-    const endDrag = useCallback(() => setDragging(false), []);
-
-    // Cross-section move: append the task to the end of the target zone. Edits
-    // stay in local board state until the plan is confirmed.
-    const handleDrop = useCallback((taskId: string, fromZone: string, toZone: string) => {
-        const snapshot = boardRef.current;
-        if (!snapshot) return;
-        applyBoard(moveTask(snapshot, taskId, fromZone, toZone));
-        resetDragShared();
-    }, [applyBoard, resetDragShared]);
-
-    // Within-section reorder. Updates local board state only, like handleDrop.
-    const handleReorder = useCallback((sectionId: string, taskId: string, orderedIds: string[]) => {
-        const snapshot = boardRef.current;
-        if (!snapshot) return;
-        if (sameOrder(sectionIds(snapshot, sectionId), orderedIds)) { resetDragShared(); return; }
-        applyBoard(reorderSection(snapshot, sectionId, orderedIds));
-        resetDragShared();
-    }, [applyBoard, resetDragShared]);
+    const handleMove = useCallback((taskId: string, fromZone: Zone, toZone: Zone) => {
+        setBoard(prev => (prev ? moveTask(prev, taskId, fromZone, toZone) : prev));
+        Haptics.selectionAsync();
+        setMoving(null);
+    }, []);
 
     // Exit to Today and discard the proposal. The default flow is a modal over an
     // already-mounted Today, so dismissTo pops back to it (dismissAll would only
@@ -295,15 +123,13 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
 
     const [confirming, setConfirming] = useState(false);
 
-    // Persist the plan: send the board's placements to the confirm endpoint,
-    // which creates the ACTIVE plan in one transaction. On success, tear down the
-    // modal — the timeline reloads on focus and shows the new plan. On failure,
-    // offer a retry (the board is untouched, so retrying just resends).
+    // Persist the plan: send the board's placements to the confirm endpoint, which
+    // creates the ACTIVE plan in one transaction. On success, tear down — Today reloads
+    // on focus and shows the new plan. On failure, offer a retry (the board is untouched).
     const handleConfirm = useCallback(async () => {
-        const snapshot = boardRef.current;
-        if (!snapshot || confirming) return;
+        if (!board || !proposal || !templateId || confirming) return;
         setConfirming(true);
-        const res = await api.confirmPlan(assignmentsFromBoard(snapshot));
+        const res = await api.confirmPlan({ templateId, plan: planFromProposalAndBoard(proposal, board) });
         if (res.ok) {
             // Stamp completion server-side before tearing down, so any future
             // sign-in (this device or another) resolves straight to Today.
@@ -321,9 +147,9 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
             { text: 'Cancel', style: 'cancel' },
             { text: 'Retry', onPress: () => handleConfirm() },
         ]);
-    }, [confirming, dismissFlow, isOnboarding]);
+    }, [board, confirming, dismissFlow, isOnboarding, proposal, templateId]);
 
-    if (!board) {
+    if (!board || !proposal) {
         return (
             <SafeAreaView style={s.container} edges={['top']}>
                 <Header onClose={handleClose} onboarding={isOnboarding} />
@@ -334,389 +160,438 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
         );
     }
 
+    const blockById = new Map(board.blocks.map(b => [b.id, b]));
+
+    const elements: ReactNode[] = [];
+    timeline.forEach((item, i) => {
+        if (i > 0) elements.push(<TimelineThread key={`thread-${i}`} />);
+
+        if (item.kind === 'boundary') {
+            elements.push(<DayBoundaryMarker key={`item-${i}`} label={item.label} time={item.time} />);
+        } else if (item.kind === 'now') {
+            elements.push(<NowLine key={`item-${i}`} time={now} />);
+        } else if (item.kind === 'gap') {
+            elements.push(<FreeSlot key={`item-${i}`} start={item.start} end={item.end} elapsed={item.elapsed} />);
+        } else if (item.block.type === 'ANCHOR') {
+            elements.push(<AnchorCard key={`item-${i}`} block={item.block} elapsed={item.elapsed} />);
+        } else if (item.elapsed) {
+            // Elapsed container: a greyed, read-only shell with no tasks.
+            elements.push(<ElapsedContainerCard key={`item-${i}`} block={item.block} />);
+        } else {
+            // Upcoming container: tasks come from the (editable) board, not the proposal.
+            const live = blockById.get(item.block.blockId);
+            elements.push(
+                <ContainerCard
+                    key={`item-${i}`}
+                    block={live ?? emptyBlockFrom(item.block)}
+                    board={board}
+                    onOpenMove={openMove}
+                    onMove={handleMove}
+                />,
+            );
+        }
+    });
+
     return (
-        <GestureHandlerRootView style={s.flex}>
-            <SafeAreaView style={s.container} edges={['top']}>
-                <Header onClose={handleClose} onboarding={isOnboarding} />
+        <SafeAreaView style={s.container} edges={['top']}>
+            <Header onClose={handleClose} onboarding={isOnboarding} />
 
-                <ScrollView
-                    contentContainerStyle={s.scrollContent}
-                    showsVerticalScrollIndicator={false}
-                    scrollEnabled={!dragging}
-                >
-                    <Text style={s.hint}>Hold and drag a task to move it between blocks.</Text>
+            <ScrollView contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
+                <View>{elements}</View>
 
-                    {board.blocks.map(block => {
-                        const capacity = toMins(block.endTime) - toMins(block.startTime);
-                        const used = block.tasks.reduce((sum, t) => sum + t.remainingMins, 0);
-                        const remaining = capacity - used;
-                        return (
-                        <DropZone
-                            key={block.id}
-                            zoneId={block.id}
-                            hoveredZone={hoveredZone}
-                            registerRef={(v) => { if (v) zoneRefs.current.set(block.id, v); else zoneRefs.current.delete(block.id); }}
-                        >
-                            <View style={s.blockHeader}>
-                                <View style={s.blockHeaderLeft}>
-                                    <Text style={s.blockName}>{block.name}</Text>
-                                    <Text style={s.blockTime}>
-                                        {formatTime(block.startTime)} – {formatTime(block.endTime)}
-                                        {'  ·  '}
-                                        <Text style={remaining < 0 ? s.blockCapacityOver : s.blockCapacityLeft}>
-                                            {remaining >= 0 ? `${formatMins(remaining)} left` : `over by ${formatMins(-remaining)}`}
-                                        </Text>
-                                    </Text>
-                                </View>
-                                {energyLabel(block.energyLevel) && (
-                                    <View style={s.energyBadge}><Text style={s.energyBadgeText}>{energyLabel(block.energyLevel)}</Text></View>
-                                )}
-                            </View>
-                            {block.tasks.length === 0 ? (
-                                <Text style={s.emptyZone}>Drop a task here</Text>
-                            ) : (
-                                <View style={s.taskList}>
-                                    {block.tasks.map(task => (
-                                        <DraggableTask
-                                            key={task.id}
-                                            task={task}
-                                            sourceZone={block.id}
-                                            drag={dragShared}
-                                            onDragStart={prepareDrag}
-                                            onDrop={handleDrop}
-                                            onReorder={handleReorder}
-                                            onFinalize={endDrag}
-                                            registerRef={(v) => { if (v) cardRefs.current.set(task.id, v); else cardRefs.current.delete(task.id); }}
-                                        />
-                                    ))}
-                                </View>
-                            )}
-                        </DropZone>
-                        );
-                    })}
-
-                    {/* Unscheduled / removed tasks — also a drop target. */}
-                    <DropZone
-                        zoneId={UNSCHEDULED_ZONE}
-                        hoveredZone={hoveredZone}
-                        registerRef={(v) => { if (v) zoneRefs.current.set(UNSCHEDULED_ZONE, v); else zoneRefs.current.delete(UNSCHEDULED_ZONE); }}
-                        variant="unscheduled"
-                    >
-                        <Text style={s.sectionLabel}>NOT SCHEDULED</Text>
-                        {board.unscheduled.length === 0 ? (
-                            <Text style={s.emptyZone}>Drag a task here to remove it from the plan</Text>
-                        ) : (
-                            <View style={s.taskList}>
-                                {board.unscheduled.map(task => (
-                                    <DraggableTask
-                                        key={task.id}
-                                        task={task}
-                                        reason={task.reason}
-                                        sourceZone={UNSCHEDULED_ZONE}
-                                        drag={dragShared}
-                                        onDragStart={prepareDrag}
-                                        onDrop={handleDrop}
-                                        onReorder={handleReorder}
-                                        onFinalize={endDrag}
-                                        registerRef={(v) => { if (v) cardRefs.current.set(task.id, v); else cardRefs.current.delete(task.id); }}
-                                    />
-                                ))}
-                            </View>
-                        )}
-                    </DropZone>
-                </ScrollView>
-
-                <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-                    <TouchableOpacity
-                        style={[s.confirmButton, confirming && s.confirmButtonDisabled]}
-                        activeOpacity={0.85}
-                        onPress={handleConfirm}
-                        disabled={confirming}
-                    >
-                        {confirming
-                            ? <ActivityIndicator size="small" color="#fdfcfa" />
-                            : <Text style={s.confirmButtonLabel}>Confirm my plan</Text>
-                        }
-                    </TouchableOpacity>
-                    {isOnboarding && (
-                        <TouchableOpacity
-                            style={s.footerBack}
-                            onPress={handleClose}
-                            disabled={confirming}
-                            activeOpacity={0.8}
-                        >
-                            <Text style={s.footerBackLabel}>Back</Text>
-                        </TouchableOpacity>
+                <View style={s.unscheduledSection}>
+                    <Text style={s.sectionLabel}>NOT SCHEDULED</Text>
+                    {board.unscheduled.length === 0 ? (
+                        <Text style={s.emptyHint}>Everything found a place in your day.</Text>
+                    ) : (
+                        <View style={s.taskList}>
+                            {board.unscheduled.map(task => (
+                                <UnscheduledRow
+                                    key={task.id}
+                                    task={task}
+                                    board={board}
+                                    onOpenMove={openMove}
+                                    onMove={handleMove}
+                                />
+                            ))}
+                        </View>
                     )}
                 </View>
-            </SafeAreaView>
-        </GestureHandlerRootView>
+            </ScrollView>
+
+            <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+                <TouchableOpacity
+                    style={[s.confirmButton, confirming && s.confirmButtonDisabled]}
+                    activeOpacity={0.85}
+                    onPress={handleConfirm}
+                    disabled={confirming}
+                >
+                    {confirming
+                        ? <ActivityIndicator size="small" color="#fdfcfa" />
+                        : <Text style={s.confirmButtonLabel}>Confirm my plan</Text>
+                    }
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={s.footerBack}
+                    onPress={() => router.back()}
+                    disabled={confirming}
+                    activeOpacity={0.8}
+                >
+                    <Text style={s.footerBackLabel}>Back</Text>
+                </TouchableOpacity>
+            </View>
+
+            <MoveSheet board={board} moving={moving} onMove={handleMove} onClose={() => setMoving(null)} />
+        </SafeAreaView>
     );
+}
+
+// A board block the timeline expected but the board doesn't hold (defensive only) —
+// an empty upcoming container so the card still renders "No tasks yet".
+function emptyBlockFrom(block: ProposalBlock): ReviewBlock {
+    return { id: block.blockId, name: block.name, startTime: block.startTime, endTime: block.endTime, energyLevel: block.energyLevel, tasks: [] };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function Header({ onClose, onboarding }: { onClose: () => void; onboarding?: boolean }) {
+    if (onboarding) {
+        return (
+            <View style={s.onboardingHeader}>
+                <StepEyebrow step={3} total={3} />
+                <Text style={s.onboardingTitle}>Here's your day</Text>
+                <Text style={s.onboardingSubtitle}>Tap a task to move it, then confirm.</Text>
+            </View>
+        );
+    }
     return (
         <View style={s.header}>
-            <View style={s.stepEyebrow}>
-                {onboarding ? (
-                    <>
-                        <View style={[s.stepPip, s.stepPipDone]} />
-                        <View style={[s.stepPip, s.stepPipDone]} />
-                        <View style={[s.stepPip, s.stepPipActive]} />
-                        <Text style={s.stepLabel}>Step 3 of 3</Text>
-                    </>
-                ) : (
-                    <>
-                        <View style={[s.stepPip, s.stepPipDone]} />
-                        <View style={[s.stepPip, s.stepPipActive]} />
-                        <Text style={s.stepLabel}>Step 2 of 2</Text>
-                    </>
-                )}
-            </View>
+            <StepEyebrow step={3} total={3} />
             <View style={s.headerRow}>
-                <Text style={s.headerTitle}>{onboarding ? "Here's your day" : 'Review your plan'}</Text>
-                {!onboarding && (
-                    <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} activeOpacity={0.6}>
-                        <Ionicons name="close" size={22} color="#2a2621" />
-                    </TouchableOpacity>
-                )}
+                <Text style={s.headerTitle}>Review your plan</Text>
+                <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} activeOpacity={0.6}>
+                    <Ionicons name="close" size={22} color="#2a2621" />
+                </TouchableOpacity>
             </View>
-            <Text style={s.headerSubtitle}>Rearrange anything, then confirm.</Text>
+            <Text style={s.headerSubtitle}>Tap a task to move it, then confirm.</Text>
         </View>
     );
 }
 
-type SharedStr = ReturnType<typeof useSharedValue<string | null>>;
-type SharedNum = ReturnType<typeof useSharedValue<number>>;
-type SharedBool = ReturnType<typeof useSharedValue<boolean>>;
-type SharedStrArr = ReturnType<typeof useSharedValue<string[]>>;
-type SharedNumArr = ReturnType<typeof useSharedValue<number[]>>;
-type SharedZones = ReturnType<typeof useSharedValue<{ id: string; top: number; bottom: number }[]>>;
-
-type DragShared = {
-    activeId: SharedStr;
-    activeSection: SharedStr;
-    crossSection: SharedBool;
-    committed: SharedBool;
-    tx: SharedNum;
-    ty: SharedNum;
-    startCenterY: SharedNum;
-    hoveredZone: SharedStr;
-    zones: SharedZones;
-    order: SharedStrArr;
-    secIds: SharedStrArr;
-    secTops: SharedNumArr;
-    secHeights: SharedNumArr;
-    secCenters: SharedNumArr;
-};
-
-function DropZone({
-    zoneId,
-    hoveredZone,
-    registerRef,
-    variant = 'block',
-    children,
-}: {
-    zoneId: string;
-    hoveredZone: SharedStr;
-    registerRef: (v: RNView | null) => void;
-    variant?: 'block' | 'unscheduled';
-    children: React.ReactNode;
-}) {
-    const restBorder = variant === 'unscheduled' ? 'transparent' : 'rgba(42,38,33,0.08)';
-    const highlight = useAnimatedStyle(() => ({
-        borderColor: hoveredZone.value === zoneId ? '#d4a574' : restBorder,
-    }));
+function NowLine({ time }: { time: string }) {
     return (
-        <Animated.View
-            ref={registerRef}
-            style={[variant === 'unscheduled' ? s.unscheduledZone : s.blockZone, s.zoneHighlightBase, highlight]}
-        >
-            {children}
-        </Animated.View>
+        <View style={s.nowRow}>
+            <View style={s.nowDot} />
+            <View style={s.nowRule} />
+            <Text style={s.nowLabel}>Now · {formatTime(time)}</Text>
+        </View>
     );
 }
 
-function DraggableTask({
+function FreeSlot({ start, end, elapsed }: { start: string; end: string; elapsed: boolean }) {
+    return (
+        <View style={[s.freeSlotRow, elapsed && s.elapsed]}>
+            <View style={s.freeSlotThread} />
+            <View style={s.freeSlotPill}>
+                {!elapsed && <Ionicons name="cafe-outline" size={11} color="rgba(122,115,106,0.7)" />}
+                <Text style={s.freeSlotText}>
+                    {formatDuration(Math.max(0, toMins(end) - toMins(start)))}
+                    {!elapsed && ' free'}
+                </Text>
+            </View>
+        </View>
+    );
+}
+
+// Read-only Event card — a fixed routine, never a task target.
+function AnchorCard({ block, elapsed }: { block: ProposalBlock; elapsed: boolean }) {
+    return (
+        <View style={[s.anchorCard, elapsed && s.elapsed]}>
+            <Text style={s.anchorName}>{block.name}</Text>
+            <Text style={s.anchorTime}>{formatTimeRange(block.startTime, block.endTime)}</Text>
+        </View>
+    );
+}
+
+// Elapsed container: a greyed shell with no tasks, so the day reads as a continuous whole
+// without inviting edits to a window that's already closed.
+function ElapsedContainerCard({ block }: { block: ProposalBlock }) {
+    return (
+        <View style={[s.containerCard, s.elapsed]}>
+            <View style={s.containerHeader}>
+                <View style={s.containerHeaderLeft}>
+                    <Text style={s.blockName}>{block.name}</Text>
+                    <Text style={s.blockTime}>{formatTimeRange(block.startTime, block.endTime)}</Text>
+                </View>
+            </View>
+        </View>
+    );
+}
+
+type RowMoveProps = {
+    board: ReviewBoard;
+    onOpenMove: (taskId: string, fromZone: Zone, title: string, mins: number) => void;
+    onMove: (taskId: string, fromZone: Zone, toZone: Zone) => void;
+};
+
+function ContainerCard({
+    block,
+    board,
+    onOpenMove,
+    onMove,
+}: { block: ReviewBlock } & RowMoveProps) {
+    const remaining = blockRemainingMins(block);
+    const label = energyLabel(block.energyLevel);
+    return (
+        <View style={s.containerCard}>
+            <View style={s.containerHeader}>
+                <View style={s.containerHeaderLeft}>
+                    <Text style={s.blockName}>{block.name}</Text>
+                    <Text style={s.blockTime}>
+                        {formatTimeRange(block.startTime, block.endTime)}
+                        {'  ·  '}
+                        <Text style={remaining < 0 ? s.capacityOver : s.capacityLeft}>{capacityLabel(remaining)}</Text>
+                    </Text>
+                </View>
+                {label && (
+                    <View style={s.energyBadge}><Text style={s.energyBadgeText}>{label}</Text></View>
+                )}
+            </View>
+            {block.tasks.length === 0 ? (
+                <View style={s.noTasksRow}>
+                    <View style={s.noTasksDot} />
+                    <Text style={s.noTasksText}>No tasks yet</Text>
+                </View>
+            ) : (
+                <View style={s.taskList}>
+                    {block.tasks.map(task => (
+                        <ScheduledRow
+                            key={task.id}
+                            task={task}
+                            fromZone={blockZone(block.id)}
+                            board={board}
+                            onOpenMove={onOpenMove}
+                            onMove={onMove}
+                        />
+                    ))}
+                </View>
+            )}
+        </View>
+    );
+}
+
+function ScheduledRow({
     task,
-    reason,
-    sourceZone,
-    drag,
-    onDragStart,
-    onDrop,
-    onReorder,
-    onFinalize,
-    registerRef,
+    fromZone,
+    board,
+    onOpenMove,
+    onMove,
+}: { task: ReviewTask; fromZone: Zone } & RowMoveProps) {
+    const actions = useMemo(() => moveActionsFor(board, task.id, fromZone), [board, task.id, fromZone]);
+    return (
+        <TouchableOpacity
+            style={s.taskCard}
+            activeOpacity={0.7}
+            onPress={() => onOpenMove(task.id, fromZone, task.title, task.remainingMins)}
+            accessibilityRole="button"
+            accessibilityLabel={`${task.title}, ${formatDuration(task.remainingMins)}`}
+            accessibilityHint="Opens options to move this task"
+            accessibilityActions={actions}
+            onAccessibilityAction={(e: AccessibilityActionEvent) =>
+                onMove(task.id, fromZone, zoneFromActionName(e.nativeEvent.actionName))
+            }
+        >
+            <View style={s.taskContent}>
+                <Text style={s.taskTitle} numberOfLines={2}>{task.title}</Text>
+            </View>
+            <Text style={s.taskMins}>{formatDuration(task.remainingMins)}</Text>
+            <MoveHint />
+        </TouchableOpacity>
+    );
+}
+
+function UnscheduledRow({ task, board, onOpenMove, onMove }: { task: UnscheduledTask } & RowMoveProps) {
+    const actions = useMemo(() => moveActionsFor(board, task.id, UNSCHEDULED), [board, task.id]);
+    return (
+        <TouchableOpacity
+            style={s.taskCard}
+            activeOpacity={0.7}
+            onPress={() => onOpenMove(task.id, UNSCHEDULED, task.title, task.remainingMins)}
+            accessibilityRole="button"
+            accessibilityLabel={`${task.title}, ${formatDuration(task.remainingMins)}, not scheduled`}
+            accessibilityHint="Opens options to schedule this task"
+            accessibilityActions={actions}
+            onAccessibilityAction={(e: AccessibilityActionEvent) =>
+                onMove(task.id, UNSCHEDULED, zoneFromActionName(e.nativeEvent.actionName))
+            }
+        >
+            <View style={s.taskContent}>
+                <Text style={s.taskTitle} numberOfLines={2}>{task.title}</Text>
+                {task.reason ? <Text style={s.taskReason} numberOfLines={2}>{task.reason}</Text> : null}
+            </View>
+            <Text style={s.taskMins}>{formatDuration(task.remainingMins)}</Text>
+            <MoveHint />
+        </TouchableOpacity>
+    );
+}
+
+// Decorative: the whole row is the button and carries the move hint and actions, so the
+// icon is hidden from the screen reader.
+function MoveHint() {
+    return (
+        <View style={s.moveHint} accessible={false} importantForAccessibility="no-hide-descendants">
+            <Ionicons name="swap-vertical" size={14} color={colors.text.secondary} />
+        </View>
+    );
+}
+
+// ─── Move-to sheet ──────────────────────────────────────────────────────────
+
+function MoveSheet({
+    board,
+    moving,
+    onMove,
+    onClose,
 }: {
-    task: TaskItem;
-    reason?: string | null;
-    sourceZone: string;
-    drag: DragShared;
-    onDragStart: (taskId: string, sectionId: string) => void;
-    onDrop: (taskId: string, fromZone: string, toZone: string) => void;
-    onReorder: (sectionId: string, taskId: string, orderedIds: string[]) => void;
-    onFinalize: () => void;
-    registerRef: (v: RNView | null) => void;
+    board: ReviewBoard;
+    moving: Moving | null;
+    onMove: (taskId: string, fromZone: Zone, toZone: Zone) => void;
+    onClose: () => void;
 }) {
-    const taskId = task.id;
-    const {
-        activeId, activeSection, crossSection, committed,
-        tx, ty, startCenterY, hoveredZone, zones,
-        order, secIds, secTops, secHeights, secCenters,
-    } = drag;
+    const insets = useSafeAreaInsets();
+    const { height: windowHeight } = useWindowDimensions();
+    const sheetRef = useRef<BottomSheetModal>(null);
 
-    const gesture = Gesture.Pan()
-        .activateAfterLongPress(160)
-        .onStart(() => {
-            // Fires once the long-press engages the drag — measure here (not in
-            // onBegin) so merely touching a card to scroll doesn't lock scrolling.
-            activeId.value = taskId;
-            runOnJS(onDragStart)(taskId, sourceZone);
-        })
-        .onUpdate((e) => {
-            tx.value = e.translationX;
-            ty.value = e.translationY;
-            const centerY = startCenterY.value + e.translationY;
+    // `moving` clears the moment a choice is made, but the sheet is still animating out —
+    // keep rendering the last task so the content doesn't blank mid-dismiss.
+    const [shown, setShown] = useState(moving);
+    if (moving && moving !== shown) setShown(moving);
 
-            // Over a *different* zone → cross-section move (zone highlight, append
-            // on drop); collapse any gap opened in the source section.
-            const zone = zones.value.find(z => centerY >= z.top && centerY <= z.bottom);
-            if (zone && zone.id !== activeSection.value) {
-                crossSection.value = true;
-                hoveredZone.value = zone.id;
-                order.value = secIds.value;
-                return;
-            }
-
-            // Within the source section → live reorder: rebuild `order` by dropping
-            // the dragged id and reinserting it past every sibling it now sits below.
-            crossSection.value = false;
-            hoveredZone.value = null;
-            const ids = secIds.value;
-            const centers = secCenters.value;
-            if (ids.length === 0) return;
-            let to = 0;
-            for (let i = 0; i < ids.length; i++) {
-                if (ids[i] !== taskId && centers[i] < centerY) to += 1;
-            }
-            const rest = ids.filter(id => id !== taskId);
-            rest.splice(to, 0, taskId);
-            order.value = rest;
-        })
-        .onEnd(() => {
-            if (crossSection.value && hoveredZone.value && hoveredZone.value !== sourceZone) {
-                committed.value = true;
-                runOnJS(onDrop)(taskId, sourceZone, hoveredZone.value);
-                return;
-            }
-            const ord = order.value;
-            const base = secIds.value;
-            let changed = ord.length !== base.length;
-            for (let i = 0; !changed && i < ord.length; i++) {
-                if (ord[i] !== base[i]) changed = true;
-            }
-            if (changed) {
-                committed.value = true;
-                runOnJS(onReorder)(sourceZone, taskId, ord);
-            }
-        })
-        .onFinalize(() => {
-            // When a move/reorder committed, the JS handler resets the shared values
-            // *after* applying the new board, so the dragged card doesn't flash at
-            // its old slot. A no-op drag just springs back here.
-            if (!committed.value) {
-                activeId.value = null;
-                activeSection.value = null;
-                hoveredZone.value = null;
-                crossSection.value = false;
-                order.value = [];
-                tx.value = 0;
-                ty.value = 0;
-            }
-            runOnJS(onFinalize)();
-        });
-
-    const style = useAnimatedStyle(() => {
-        const isActive = activeId.value === taskId;
-
-        // translateY: the active card tracks the finger 1:1; siblings spring to the
-        // slot the live `order` implies; everything else rests at 0.
-        let translateY = 0;
-        let translateX = 0;
-        if (isActive) {
-            translateX = tx.value;
-            translateY = ty.value;
-        } else if (activeSection.value === sourceZone && !crossSection.value) {
-            const ord = order.value;
-            const ids = secIds.value;
-            const tops = secTops.value;
-            const heights = secHeights.value;
-            const myOrig = ids.indexOf(taskId);
-            if (ord.length > 0 && myOrig >= 0 && tops.length > 0) {
-                // Desired slot top = sum of (height + gap) of everything before me in
-                // the live order — including the dragged card, which reserves its gap.
-                let acc = tops[0];
-                let desired = tops[myOrig];
-                for (let k = 0; k < ord.length; k++) {
-                    const id = ord[k];
-                    if (id === taskId) { desired = acc; break; }
-                    acc += (heights[ids.indexOf(id)] ?? 0) + TASK_GAP;
-                }
-                translateY = withSpring(desired - tops[myOrig], REORDER_SPRING);
-            }
+    // Only dismiss a sheet that's still open: dismissing one that never opened, or already
+    // closed itself, leaves @gorhom/bottom-sheet stuck DISMISSING and blocks every later present.
+    const presented = useRef(false);
+    useEffect(() => {
+        if (moving) {
+            presented.current = true;
+            sheetRef.current?.present();
+        } else if (presented.current) {
+            presented.current = false;
+            sheetRef.current?.dismiss();
         }
-        // else: resting (including just-dropped) → snap to slot, no settle animation.
+    }, [moving]);
 
-        // Every key is returned in all states — omitting a key in a branch leaves its
-        // last value applied (so the lift/shadow would otherwise stick after drop).
-        return {
-            transform: [{ translateX }, { translateY }, { scale: isActive ? 1.03 : 1 }],
-            zIndex: isActive ? 100 : 0,
-            elevation: isActive ? 8 : 0,
-            shadowColor: '#2a2621',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: isActive ? 0.18 : 0,
-            shadowRadius: 10,
-        };
-    });
+    const renderBackdrop = useCallback(
+        (props: BottomSheetBackdropProps) => (
+            <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} opacity={0.3} pressBehavior="close" />
+        ),
+        [],
+    );
 
-    const isScheduled = sourceZone !== UNSCHEDULED_ZONE;
+    const targets = shown ? eligibleTargets(board, shown.taskId, shown.fromZone) : [];
+    // The current location is marked here rather than offered as a target — `eligibleTargets`
+    // already excludes it, so moving a task onto itself can't happen.
+    const from = shown?.fromZone;
+    const currentName = !from
+        ? ""
+        : from.kind === "unscheduled"
+            ? "Not scheduled"
+            : board.blocks.find(b => b.id === from.blockId)?.name ?? "Not scheduled";
 
     return (
-        <GestureDetector gesture={gesture}>
-            <Animated.View
-                ref={registerRef}
-                style={[s.taskCard, style]}
-                entering={FadeIn.duration(180)}
-                exiting={FadeOut.duration(140)}
+        <BottomSheetModal
+            ref={sheetRef}
+            enableDynamicSizing
+            maxDynamicContentSize={windowHeight * 0.8}
+            enablePanDownToClose
+            backdropComponent={renderBackdrop}
+            backgroundStyle={s.sheet}
+            handleIndicatorStyle={s.sheetHandle}
+            onDismiss={() => {
+                presented.current = false;
+                onClose();
+            }}
+        >
+            <BottomSheetScrollView
+                contentContainerStyle={[s.sheetBody, { paddingBottom: Math.max(insets.bottom, 24) }]}
+                showsVerticalScrollIndicator={false}
             >
-                <Ionicons name="reorder-three-outline" size={18} color="rgba(122,115,106,0.5)" />
-                <View style={s.taskContent}>
-                    <Text style={s.taskTitle} numberOfLines={2}>{task.title}</Text>
-                    {reason ? <Text style={s.taskReason} numberOfLines={2}>{reason}</Text> : null}
-                </View>
-                <Text style={s.taskMins}>{formatMins(task.remainingMins)}</Text>
-                {isScheduled && (
+                <View style={s.sheetHeader}>
+                    <Text style={s.sheetTitle} numberOfLines={1} accessibilityRole="header">
+                        Move “{shown?.title}”
+                    </Text>
                     <TouchableOpacity
-                        onPress={() => onDrop(taskId, sourceZone, UNSCHEDULED_ZONE)}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        accessibilityLabel={`Remove ${task.title} from the plan`}
-                        style={s.removeButton}
+                        onPress={onClose}
+                        hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
+                        activeOpacity={0.6}
+                        accessibilityRole="button"
+                        accessibilityLabel="Close move options"
                     >
-                        <Ionicons name="remove" size={16} color="rgba(122,115,106,0.7)" />
+                        <Ionicons name="close" size={20} color={colors.text.primary} />
                     </TouchableOpacity>
-                )}
-            </Animated.View>
-        </GestureDetector>
+                </View>
+                <Text style={s.sheetCurrent}>{shown ? formatDuration(shown.mins) : ""}  ·  Currently in {currentName}</Text>
+                <View style={s.sheetContent}>
+                    {targets.length === 0 ? (
+                        <Text style={s.emptyHint}>No other place to move this task.</Text>
+                    ) : (
+                        targets.map(target => (
+                            <MoveTargetRow
+                                key={target.kind === "block" ? target.id : "unscheduled"}
+                                target={target}
+                                onPress={() => shown && onMove(shown.taskId, shown.fromZone, targetZone(target))}
+                            />
+                        ))
+                    )}
+                </View>
+            </BottomSheetScrollView>
+        </BottomSheetModal>
+    );
+}
+
+function MoveTargetRow({ target, onPress }: { target: MoveTarget; onPress: () => void }) {
+    if (target.kind === "unscheduled") {
+        return (
+            <TouchableOpacity
+                style={[s.targetRow, s.targetRowUnscheduled]}
+                onPress={onPress}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Move to Not scheduled"
+            >
+                <View style={s.targetIcon}>
+                    <Ionicons name="file-tray-outline" size={16} color={colors.text.secondary} />
+                </View>
+                <View style={s.targetMain}>
+                    <Text style={s.targetName}>Not scheduled</Text>
+                    <Text style={s.targetMeta}>Set aside for later</Text>
+                </View>
+            </TouchableOpacity>
+        );
+    }
+    const over = target.remainingAfterMoveMins < 0;
+    return (
+        <TouchableOpacity
+            style={s.targetRow}
+            onPress={onPress}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`Move to ${target.name}, ${formatTimeRange(target.startTime, target.endTime)}, ${moveFitLabel(target.remainingAfterMoveMins)}`}
+        >
+            <View style={s.targetMain}>
+                <Text style={s.targetName}>{target.name}</Text>
+                <Text style={s.targetMeta}>
+                    {formatTimeRange(target.startTime, target.endTime)}
+                    {'  ·  '}
+                    <Text style={over ? s.capacityOver : s.capacityLeft}>{moveFitLabel(target.remainingAfterMoveMins)}</Text>
+                </Text>
+            </View>
+        </TouchableOpacity>
     );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-    flex: { flex: 1 },
     container: { flex: 1, backgroundColor: '#fdfcfa' },
     header: {
         paddingHorizontal: 20,
@@ -725,73 +600,51 @@ const s = StyleSheet.create({
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(42,38,33,0.06)',
     },
-    stepEyebrow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        marginBottom: 10,
-    },
-    stepPip: {
-        width: 5,
-        height: 5,
-        borderRadius: 2.5,
-        backgroundColor: 'rgba(42,38,33,0.14)',
-    },
-    stepPipDone: {
-        backgroundColor: '#d4a574',
-    },
-    stepPipActive: {
-        width: 14,
-        backgroundColor: '#d4a574',
-    },
-    stepLabel: {
-        fontSize: 11,
-        fontWeight: '600',
-        color: 'rgba(122,115,106,0.5)',
-        letterSpacing: 0.5,
-        textTransform: 'uppercase',
-        marginLeft: 2,
-        fontVariant: ['tabular-nums'],
-    },
-    headerRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
+    onboardingHeader: { paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.md },
+    onboardingTitle: { ...typography.title, color: colors.text.primary, letterSpacing: 0.07, marginTop: 4 },
+    onboardingSubtitle: { fontSize: 15, color: colors.text.secondary, lineHeight: 22, letterSpacing: -0.2, marginTop: spacing.sm },
+    headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     headerTitle: { fontSize: 16, fontWeight: '600', color: '#2a2621', letterSpacing: -0.3 },
-    headerSubtitle: {
-        fontSize: 13,
-        color: '#7a736a',
-        lineHeight: 18,
-        marginTop: 6,
-        maxWidth: 320,
-    },
+    headerSubtitle: { fontSize: 13, color: '#7a736a', lineHeight: 18, marginTop: 6, maxWidth: 320 },
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
     muted: { fontSize: 13, color: '#7a736a', textAlign: 'center', lineHeight: 18 },
 
-    scrollContent: { padding: 16, gap: 14, paddingBottom: 24 },
-    hint: { fontSize: 12, color: 'rgba(122,115,106,0.7)', lineHeight: 16, letterSpacing: -0.1, textAlign: 'center' },
+    scrollContent: { padding: 16, paddingBottom: 24 },
 
-    zoneHighlightBase: { borderWidth: 1.5, borderColor: 'transparent' },
-    blockZone: {
-        backgroundColor: 'rgba(232,228,221,0.45)',
+    // Elapsed greying, shared by past blocks, events, and gaps.
+    elapsed: { opacity: 0.45 },
+
+    // Now-line
+    nowRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
+    nowDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#d4a574', marginLeft: 7 },
+    nowRule: { height: 1, flex: 1, backgroundColor: 'rgba(212,165,116,0.5)' },
+    nowLabel: { fontSize: 11, fontWeight: '600', color: '#b07841', letterSpacing: 0.3, fontVariant: ['tabular-nums'] },
+
+    // Free-slot gap (mirrors Today)
+    freeSlotRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+    freeSlotThread: { position: 'absolute', left: 10, top: 0, bottom: 0, width: 1, backgroundColor: 'rgba(42,38,33,0.12)' },
+    freeSlotPill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 4, marginHorizontal: 8 },
+    freeSlotText: { fontSize: 10, color: 'rgba(122,115,106,0.8)', fontVariant: ['tabular-nums'] },
+
+    // Event (anchor) card
+    anchorCard: { backgroundColor: colors.surface.block, borderRadius: 16, padding: 16 },
+    anchorName: { fontSize: 15, fontWeight: '500', color: '#2a2621', letterSpacing: -0.23 },
+    anchorTime: { fontSize: 13, color: '#9a9389', letterSpacing: -0.15, marginTop: 3, fontVariant: ['tabular-nums'] },
+
+    // Container card (mirrors Today's dashed block)
+    containerCard: {
+        borderWidth: 1.5,
+        borderColor: 'rgba(42,38,33,0.16)',
+        borderStyle: 'dashed',
         borderRadius: 16,
         padding: 16,
-        gap: 10,
     },
-    unscheduledZone: {
-        backgroundColor: 'rgba(232,228,221,0.25)',
-        borderRadius: 16,
-        padding: 16,
-        gap: 10,
-    },
-
-    blockHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
-    blockHeaderLeft: { flex: 1, marginRight: 8 },
-    blockName: { fontSize: 15, fontWeight: '600', color: '#2a2621', letterSpacing: -0.23 },
-    blockTime: { fontSize: 12, color: '#9a9389', marginTop: 2 },
-    blockCapacityLeft: { color: '#7a9a6f' },
-    blockCapacityOver: { color: '#c0775f' },
+    containerHeader: { flexDirection: 'row', alignItems: 'flex-start' },
+    containerHeaderLeft: { flex: 1, marginRight: 8 },
+    blockName: { fontSize: 15, fontWeight: '500', color: '#2a2621', letterSpacing: -0.23 },
+    blockTime: { fontSize: 13, color: '#9a9389', letterSpacing: -0.15, marginTop: 3, fontVariant: ['tabular-nums'] },
+    capacityLeft: { color: colors.success.strong },
+    capacityOver: { color: colors.warning.strong },
     energyBadge: {
         backgroundColor: 'rgba(232,223,209,0.4)',
         borderRadius: 999,
@@ -801,32 +654,51 @@ const s = StyleSheet.create({
     },
     energyBadgeText: { fontSize: 12, color: 'rgba(122,115,106,0.7)' },
 
-    sectionLabel: { fontSize: 11, color: 'rgba(122,115,106,0.55)', letterSpacing: 0.5, textTransform: 'uppercase' },
-    emptyZone: { fontSize: 13, color: 'rgba(122,115,106,0.5)', fontStyle: 'italic' },
+    noTasksRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        backgroundColor: 'rgba(232,228,221,0.1)',
+        borderWidth: 1,
+        borderColor: 'rgba(42,38,33,0.04)',
+        borderStyle: 'dashed',
+        borderRadius: 10,
+        paddingHorizontal: 17,
+        paddingVertical: 13,
+        minHeight: 46,
+        marginTop: 12,
+    },
+    noTasksDot: { width: 16, height: 16, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(42,38,33,0.04)' },
+    noTasksText: { fontSize: 14, color: 'rgba(122,115,106,0.4)', letterSpacing: -0.15 },
 
-    taskList: { gap: 8 },
+    taskList: { gap: 6, marginTop: 12 },
     taskCard: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 10,
         backgroundColor: '#ffffff',
         borderWidth: 1,
-        borderColor: 'rgba(42,38,33,0.08)',
-        borderRadius: 14,
-        padding: 14,
+        borderColor: 'rgba(42,38,33,0.04)',
+        borderRadius: 12,
+        paddingHorizontal: 13,
+        paddingVertical: 9,
+        minHeight: 38,
     },
     taskContent: { flex: 1, gap: 3 },
-    taskTitle: { fontSize: 15, color: '#2a2621', letterSpacing: -0.23 },
+    taskTitle: { fontSize: 14, color: '#2a2621', letterSpacing: -0.15 },
     taskReason: { fontSize: 12, color: '#9a8d6f' },
     taskMins: { fontSize: 13, color: '#7a736a', fontVariant: ['tabular-nums'] },
-    removeButton: {
+    moveHint: {
         width: 24,
         height: 24,
-        borderRadius: 12,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(232,228,221,0.5)',
     },
+
+    // Not-scheduled section
+    unscheduledSection: { marginTop: 24, gap: 10 },
+    sectionLabel: { fontSize: 11, color: 'rgba(122,115,106,0.55)', letterSpacing: 0.5, textTransform: 'uppercase' },
+    emptyHint: { fontSize: 13, color: 'rgba(122,115,106,0.5)', fontStyle: 'italic' },
 
     footer: {
         paddingHorizontal: 16,
@@ -839,4 +711,41 @@ const s = StyleSheet.create({
     confirmButtonLabel: { fontSize: 15, fontWeight: '600', color: '#fdfcfa', letterSpacing: -0.2 },
     footerBack: { height: 44, justifyContent: 'center', alignItems: 'center' },
     footerBackLabel: { fontSize: 15, fontWeight: '500', color: '#7a736a', letterSpacing: -0.1 },
+
+    // Move-to sheet
+    sheet: { backgroundColor: colors.surface.page, borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl },
+    sheetHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border.strong },
+    sheetBody: { paddingHorizontal: 20 },
+    sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 6 },
+    sheetTitle: { flex: 1, marginRight: 12, fontSize: 17, fontWeight: '600', color: colors.text.primary, letterSpacing: -0.3 },
+    sheetCurrent: { fontSize: 13, color: colors.text.secondary, marginTop: 4, marginBottom: 12 },
+    sheetContent: { gap: 6 },
+    targetRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        backgroundColor: colors.surface.raised,
+        borderWidth: 1,
+        borderColor: 'rgba(42,38,33,0.06)',
+        borderRadius: 14,
+        paddingHorizontal: 16,
+        paddingVertical: 13,
+    },
+    // "Not scheduled" isn't a place in the day, so it's set apart from the block targets.
+    targetRowUnscheduled: {
+        marginTop: 10,
+        backgroundColor: colors.surface.sunken,
+        borderColor: 'transparent',
+    },
+    targetIcon: {
+        width: 32,
+        height: 32,
+        borderRadius: radius.pill,
+        backgroundColor: colors.surface.raised,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    targetMain: { flex: 1, gap: 3 },
+    targetName: { fontSize: 15, fontWeight: '500', color: colors.text.primary, letterSpacing: -0.2 },
+    targetMeta: { fontSize: 13, color: colors.text.secondary, letterSpacing: -0.15, fontVariant: ['tabular-nums'] },
 });

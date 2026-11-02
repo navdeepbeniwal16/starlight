@@ -1,5 +1,9 @@
 import { TemplateDraft } from "./templateDraft";
 
+// The seed name for a user's first template, matching the server-side migration
+// that backfilled existing single templates.
+export const DEFAULT_TEMPLATE_NAME = 'My Day';
+
 // buildStarterTemplate returns a neutral, valid day for onboarding to pre-seed, so a new
 // user edits a real day instead of a blank slate. Block times are spaced to leave visible
 // free gaps for Starlight to schedule into.
@@ -13,5 +17,13 @@ export function buildStarterTemplate(): TemplateDraft {
             { type: 'CONTAINER', name: 'Afternoon Focus', startTime: '14:00', endTime: '17:00', energyLevel: 'MEDIUM' },
             { type: 'ANCHOR', name: 'Evening Wind-down', startTime: '20:00', endTime: '22:00' },
         ],
+    };
+}
+
+export function buildBlankTemplate(): TemplateDraft {
+    return {
+        wakeTime: '06:00',
+        sleepTime: '22:00',
+        blocks: []
     };
 }

@@ -3,6 +3,7 @@ import { ClerkProvider } from "@clerk/expo";
 import { tokenCache } from "@clerk/expo/token-cache";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { KeyboardProvider, KeyboardToolbar } from "react-native-keyboard-controller";
 import { Caprasimo_400Regular, useFonts } from "@expo-google-fonts/caprasimo";
 import { CLERK_PUBLISHABLE_KEY } from "../lib/clerk";
@@ -22,11 +23,14 @@ export default function RootLayout() {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <KeyboardProvider>
           <QueryClientProvider client={queryClient}>
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="planning" options={{ presentation: "modal" }} />
-              <Stack.Screen name="task/[taskId]" options={{ presentation: "modal" }} />
-              <Stack.Screen name="day-template" options={{ presentation: "modal" }} />
-            </Stack>
+            <BottomSheetModalProvider>
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="planning" options={{ presentation: "modal" }} />
+                <Stack.Screen name="task/[taskId]" options={{ presentation: "modal" }} />
+                <Stack.Screen name="day-templates" />
+                <Stack.Screen name="day-template/[id]" options={{ presentation: "modal" }} />
+              </Stack>
+            </BottomSheetModalProvider>
             <KeyboardToolbar />
           </QueryClientProvider>
         </KeyboardProvider>

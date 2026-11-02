@@ -61,8 +61,8 @@ export default function SettingsScreen() {
                 <View style={styles.card}>
                     <SettingsRow
                         icon="calendar-outline"
-                        label="Day Template"
-                        onPress={() => router.push('/day-template')}
+                        label="Day Templates"
+                        onPress={() => router.push('/day-templates')}
                     />
                 </View>
 
@@ -84,7 +84,6 @@ function SettingsRow({ icon, label, onPress }: { icon: keyof typeof Ionicons.gly
         <PressableScale style={styles.row} onPress={onPress} activeScale={0.98}>
             <Ionicons name={icon} size={18} color={colors.text.secondary} />
             <Text style={styles.rowLabel}>{label}</Text>
-            <Ionicons name="create-outline" size={18} color={colors.text.muted} style={styles.rowChevron} />
         </PressableScale>
     );
 }
@@ -141,7 +140,6 @@ const styles = StyleSheet.create({
         minHeight: 52,
     },
     rowLabel: { fontSize: 15, fontWeight: '500', color: colors.text.primary, letterSpacing: -0.15 },
-    rowChevron: { marginLeft: 'auto' },
     logoutLabel: { fontSize: 15, fontWeight: '500', color: colors.danger.default, letterSpacing: -0.15 },
 
     version: { marginTop: 'auto', paddingVertical: spacing.xl, textAlign: 'center', fontSize: 12, color: colors.text.muted, letterSpacing: -0.1 },
