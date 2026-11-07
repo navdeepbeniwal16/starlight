@@ -10,7 +10,7 @@ export const ENERGY_LEVELS: EnergyLevel[] = ['HIGH', 'MEDIUM', 'LOW'];
 export const MIN_BLOCK_MINUTES = 5;
 
 export const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
-    CONTAINER: 'Time Block',
+    CONTAINER: 'Task Time',
     ANCHOR: 'Event',
 };
 
@@ -126,7 +126,7 @@ export function blockDraftErrorMessage(error: BlockDraftError): string {
         case 'TOO_SHORT': return `A block must be at least ${MIN_BLOCK_MINUTES} minutes long`;
         case 'BEFORE_WAKE': return `Block must start at or after your wake time (${formatTime(error.boundary)})`;
         case 'AFTER_SLEEP': return `Block must end by your sleep time (${formatTime(error.boundary)})`;
-        case 'ENERGY_REQUIRED': return 'Energy level is required for Time Blocks';
+        case 'ENERGY_REQUIRED': return 'Energy level is required for Task Time blocks';
         case 'OVERLAP': return 'This block overlaps with an existing one';
     }
 }

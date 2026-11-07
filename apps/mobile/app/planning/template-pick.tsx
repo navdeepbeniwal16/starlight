@@ -295,7 +295,7 @@ export default function TemplatePickScreen() {
                         onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}
                     >
                         {!schedulable && (
-                            <Text style={styles.footerHint}>No upcoming Time Block left today. Add at least one after now to continue.</Text>
+                            <Text style={styles.footerHint}>No upcoming Task Time left today. Add at least one after now to continue.</Text>
                         )}
                         <PressableScale
                             style={[styles.planButton, !canPlan && styles.planButtonDisabled]}

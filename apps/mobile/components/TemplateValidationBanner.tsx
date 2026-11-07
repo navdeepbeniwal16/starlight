@@ -19,7 +19,7 @@ export function TemplateValidationBanner({ draft, showContainerWarning = true }:
             )}
             {noContainer && (
                 <Text style={styles.boundsError}>
-                    Keep at least one Time Block so Starlight has time to schedule tasks. Add one before saving.
+                    Keep at least one Task Time block so Starlight has time to schedule tasks. Add one before saving.
                 </Text>
             )}
         </View>
