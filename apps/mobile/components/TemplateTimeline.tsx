@@ -1,5 +1,6 @@
 import { Fragment, useMemo, useRef } from "react";
 import { View, Text, StyleSheet, Pressable, type StyleProp, type ViewStyle } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
     FadeInDown,
@@ -14,7 +15,7 @@ import Animated, {
 import type { BlockInput } from "../lib/api.types";
 import { colors, radius, spacing } from "../lib/theme";
 import { formatHourLabel, formatTime, formatTimeRange, formatDuration, durationMins, toMins, fromMins } from "../lib/time";
-import { ENERGY_LABELS, MIN_BLOCK_MINUTES } from "../lib/templateBlocks";
+import { MIN_BLOCK_MINUTES } from "../lib/templateBlocks";
 import {
     computeGridLayout,
     seedBlockRange,
@@ -28,7 +29,6 @@ import {
 } from "../lib/templateDraft";
 import { useTemplateStore } from "../stores/template.store";
 import { BoundaryTimeControl } from "./BoundaryTimeControl";
-import { effortDotColor } from "./TaskFields";
 
 // Left ruler width, sized to hold a compact hour label ("12 PM") at the ruler font.
 const RULER_WIDTH = 44;
@@ -253,7 +253,7 @@ function GapSlot({ free, onTap }: { free: GridFree; onTap: (locationY: number) =
 }
 
 // Anchors render as solid filled events; containers as hollow outlined vessels — the look carries
-// the meaning. The energy pill degrades to a dot when the vessel is too short for it.
+// the meaning.
 function BlockCard({
     laid,
     invalid,
@@ -284,7 +284,6 @@ function BlockCard({
     const { block, top, height, index } = laid;
     const isContainer = block.type === 'CONTAINER';
     const fit = fitToHeight(height);
-    const energy = isContainer && block.energyLevel ? block.energyLevel : null;
     const showEdges = height >= EDGE_HANDLE_MIN_HEIGHT;
 
     const gestures = useMemo(() => {
@@ -339,16 +338,11 @@ function BlockCard({
                         { paddingVertical: fit.padV },
                         isContainer ? styles.cardContainer : styles.cardAnchor,
                         invalid && styles.cardInvalid,
+                        showEdges && styles.cardInset,
                     ]}
                 >
                     <View style={styles.cardHeader}>
                         <Text style={[styles.cardName, { fontSize: fit.nameSize }]} numberOfLines={1}>{block.name}</Text>
-                        {energy && fit.energy === 'pill' && (
-                            <View style={styles.energyPill}><Text style={styles.energyPillText}>{ENERGY_LABELS[energy]} energy</Text></View>
-                        )}
-                        {energy && fit.energy === 'dot' && (
-                            <View style={[styles.energyDot, { backgroundColor: effortDotColor(energy) }]} />
-                        )}
                     </View>
                     {fit.time && (
                         <Text style={styles.cardTime}>
@@ -359,16 +353,25 @@ function BlockCard({
                     {/* Anchored to the edge that crosses the boundary, so the reason reads where the block spills over. */}
                     {beforeWakeText && <Text style={[styles.boundsNote, styles.boundsNoteTop]}>{beforeWakeText}</Text>}
                     {afterSleepText && <Text style={[styles.boundsNote, styles.boundsNoteBottom]}>{afterSleepText}</Text>}
+                    {showEdges && (
+                        <View style={styles.dragHandle} pointerEvents="none">
+                            <Ionicons name="reorder-three-outline" size={16} color={colors.text.muted} />
+                        </View>
+                    )}
                 </View>
             </GestureDetector>
 
             {showEdges && (
                 <>
                     <GestureDetector gesture={gestures.top}>
-                        <View style={[styles.edgeHandle, styles.edgeTop]} />
+                        <View style={[styles.edgeHandle, styles.edgeTop]}>
+                            <View style={[styles.grip, styles.gripTop]} />
+                        </View>
                     </GestureDetector>
                     <GestureDetector gesture={gestures.bottom}>
-                        <View style={[styles.edgeHandle, styles.edgeBottom]} />
+                        <View style={[styles.edgeHandle, styles.edgeBottom]}>
+                            <View style={[styles.grip, styles.gripBottom]} />
+                        </View>
                     </GestureDetector>
                 </>
             )}
@@ -377,13 +380,13 @@ function BlockCard({
 }
 
 // How a block's card fills its true height. Since heights are never inflated, a short block gets
-// a smaller font and sheds detail (time range, then the energy pill) to stay inside its own
-// bounds instead of overrunning the next block — the Apple-Calendar approach.
-function fitToHeight(height: number): { padV: number; nameSize: number; energy: 'pill' | 'dot' | 'none'; time: boolean } {
-    if (height >= 56) return { padV: 10, nameSize: 14, energy: 'pill', time: true };
-    if (height >= 40) return { padV: 8, nameSize: 13, energy: 'dot', time: false };
-    if (height >= 26) return { padV: 5, nameSize: 12, energy: 'none', time: false };
-    return { padV: 3, nameSize: 11, energy: 'none', time: false };
+// a smaller font and drops its time range to stay inside its own bounds instead of overrunning
+// the next block — the Apple-Calendar approach.
+function fitToHeight(height: number): { padV: number; nameSize: number; time: boolean } {
+    if (height >= 56) return { padV: 10, nameSize: 14, time: true };
+    if (height >= 40) return { padV: 8, nameSize: 13, time: false };
+    if (height >= 26) return { padV: 5, nameSize: 12, time: false };
+    return { padV: 3, nameSize: 11, time: false };
 }
 
 const styles = StyleSheet.create({
@@ -407,20 +410,23 @@ const styles = StyleSheet.create({
     cardInvalid: { borderWidth: 1, borderStyle: 'solid', borderColor: colors.danger.border, backgroundColor: colors.danger.tint },
 
     cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+    // Reserve room on the right so the title/time rows never run under the centered drag handle.
+    cardInset: { paddingRight: 32 },
+    dragHandle: { position: 'absolute', right: 10, top: 0, bottom: 0, justifyContent: 'center' },
     cardName: { fontSize: 14, fontWeight: '500', color: colors.text.primary, letterSpacing: -0.2, flexShrink: 1 },
     cardTime: { fontSize: 11, color: '#9a9389', letterSpacing: -0.15, marginTop: 3, fontVariant: ['tabular-nums'] },
     cardDuration: { color: colors.text.secondary, fontWeight: '600' },
-
-    energyPill: { backgroundColor: 'rgba(232,223,209,0.3)', borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start' },
-    energyPillText: { fontSize: 12, color: 'rgba(122,115,106,0.6)' },
-    energyDot: { width: 8, height: 8, borderRadius: 4 },
 
     boundsNote: { fontSize: 11.5, fontWeight: '500', color: colors.danger.default, letterSpacing: -0.1, lineHeight: 15 },
     boundsNoteTop: { marginTop: 3 },
     boundsNoteBottom: { position: 'absolute', left: 14, right: 14, bottom: 8 },
 
-    // Kept inside the card (not overhanging) so abutting blocks never share a resize zone.
-    edgeHandle: { position: 'absolute', left: 0, right: 0, height: EDGE_HANDLE },
-    edgeTop: { top: 0 },
-    edgeBottom: { bottom: 0 },
+    // The hit zone stays inside the card (not overhanging) so abutting blocks never share a resize
+    // zone; the grip bar straddles the card's edge line so it reads as the edge itself, not content.
+    edgeHandle: { position: 'absolute', left: 0, right: 0, height: EDGE_HANDLE, alignItems: 'center' },
+    edgeTop: { top: 0, justifyContent: 'flex-start' },
+    edgeBottom: { bottom: 0, justifyContent: 'flex-end' },
+    grip: { width: 22, height: 3, borderRadius: 1.5, backgroundColor: 'rgba(42,38,33,0.2)' },
+    gripTop: { marginTop: -1.5 },
+    gripBottom: { marginBottom: -1.5 },
 });

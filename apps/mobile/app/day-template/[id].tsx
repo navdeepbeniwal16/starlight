@@ -358,9 +358,9 @@ export default function DayTemplateScreen() {
                             {' add · '}
                             <Text style={styles.hintKey}>Tap</Text>
                             {' edit · '}
-                            <Text style={styles.hintKey}>Hold edge</Text>
+                            <Text style={styles.hintKey}>Drag edges</Text>
                             {' resize · '}
-                            <Text style={styles.hintKey}>Hold</Text>
+                            <Text style={styles.hintKey}>Drag handle</Text>
                             {' move'}
                         </Text>
 
