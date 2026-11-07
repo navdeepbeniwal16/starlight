@@ -11,7 +11,7 @@ export const MIN_BLOCK_MINUTES = 5;
 
 export const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
     CONTAINER: 'Task Time',
-    ANCHOR: 'Event',
+    ANCHOR: 'Events',
 };
 
 export const BLOCK_TYPE_DESCRIPTIONS: Record<BlockType, string> = {
