@@ -183,7 +183,7 @@ export default function BuildScreen() {
                 <StepEyebrow step={1} total={3} />
                 <Text style={styles.headerTitle}>Let's build your day</Text>
                 <Text style={styles.headerSubtitle}>
-                    We've sketched a typical day. Swap in your wake and sleep times. Add or tweak blocks to match yours.
+                    We've sketched a sample day. Swap in your wake and sleep times. Add or tweak blocks to match yours.
                 </Text>
             </View>
 

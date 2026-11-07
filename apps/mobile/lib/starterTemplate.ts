@@ -9,13 +9,16 @@ export const DEFAULT_TEMPLATE_NAME = 'My Day';
 // free gaps for Starlight to schedule into.
 export function buildStarterTemplate(): TemplateDraft {
     return {
-        wakeTime: '07:00',
-        sleepTime: '23:00',
+        wakeTime: '06:30',
+        sleepTime: '22:30',
         blocks: [
-            { type: 'CONTAINER', name: 'Morning Focus', startTime: '09:00', endTime: '12:00', energyLevel: 'HIGH' },
+            { type: 'ANCHOR', name: 'Morning Routine', startTime: '06:30', endTime: '07:30' },
+            { type: 'CONTAINER', name: 'Deep Work', startTime: '09:00', endTime: '12:00', energyLevel: 'HIGH' },
             { type: 'ANCHOR', name: 'Lunch', startTime: '12:00', endTime: '13:00' },
-            { type: 'CONTAINER', name: 'Afternoon Focus', startTime: '14:00', endTime: '17:00', energyLevel: 'MEDIUM' },
-            { type: 'ANCHOR', name: 'Evening Wind-down', startTime: '20:00', endTime: '22:00' },
+            { type: 'CONTAINER', name: 'Client Work', startTime: '14:00', endTime: '16:30', energyLevel: 'MEDIUM' },
+            { type: 'ANCHOR', name: 'Dinner', startTime: '18:30', endTime: '19:30' },
+            { type: 'ANCHOR', name: 'Evening Walk', startTime: '20:00', endTime: '20:30' },
+            { type: 'ANCHOR', name: 'Evening Wind-down', startTime: '21:00', endTime: '22:00' },
         ],
     };
 }
