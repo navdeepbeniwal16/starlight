@@ -183,7 +183,7 @@ export default function BuildScreen() {
                 <StepEyebrow step={1} total={3} />
                 <Text style={styles.headerTitle}>Let's build your day</Text>
                 <Text style={styles.headerSubtitle}>
-                    We've sketched a sample day. Swap in your wake and sleep times. Add or tweak blocks to match yours.
+                    We've sketched a sample day. Swap in your wake and sleep times. Add or tweak time blocks to match yours.
                 </Text>
             </View>
 
@@ -223,16 +223,16 @@ export default function BuildScreen() {
                             </View>
                             <View style={styles.legendRow}>
                                 <View style={styles.legendItem}>
-                                    <View style={[styles.legendSwatch, styles.legendSwatchContainer]} />
+                                    <View style={[styles.legendPill, styles.legendPillContainer]} />
                                     <Text style={styles.legendText} numberOfLines={1}>{BLOCK_TYPE_LABELS['CONTAINER']} {formatDuration(totals.container)}</Text>
                                 </View>
                                 <View style={styles.legendItem}>
-                                    <View style={[styles.legendSwatch, styles.legendSwatchAnchor]} />
+                                    <View style={[styles.legendPill, styles.legendPillAnchor]} />
                                     <Text style={styles.legendText} numberOfLines={1}>{BLOCK_TYPE_LABELS['ANCHOR']} {formatDuration(totals.anchor)}</Text>
                                 </View>
                                 <View style={styles.legendItem}>
-                                    <View style={[styles.legendSwatch, styles.legendSwatchFree]} />
-                                    <Text style={styles.legendText} numberOfLines={1}>Available {formatDuration(free)}</Text>
+                                    <View style={[styles.legendPill, styles.legendPillFree]} />
+                                    <Text style={styles.legendText} numberOfLines={1}>Free {formatDuration(free)}</Text>
                                 </View>
                             </View>
                         </View>
@@ -359,10 +359,10 @@ const styles = StyleSheet.create({
     content: { paddingHorizontal: spacing.xl, paddingTop: spacing.sm, paddingBottom: spacing.xxl, gap: spacing.lg },
 
     legend: {
-        gap: spacing.sm,
+        gap: spacing.xs,
         backgroundColor: colors.surface.sunken,
         borderRadius: radius.md,
-        paddingVertical: 10,
+        paddingVertical: 8,
         paddingHorizontal: 12,
     },
     legendHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
@@ -371,13 +371,13 @@ const styles = StyleSheet.create({
     segContainer: { backgroundColor: colors.accent.default },
     segAnchor: { backgroundColor: 'rgba(42,38,33,0.30)' },
     segFree: { backgroundColor: 'rgba(42,38,33,0.07)' },
-    legendRow: { flexDirection: 'row', flexWrap: 'wrap', columnGap: spacing.md, rowGap: spacing.xs },
-    legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-    legendSwatch: { width: 10, height: 10, borderRadius: 3, backgroundColor: colors.surface.block },
-    legendSwatchContainer: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.16)', borderStyle: 'dashed' },
-    legendSwatchAnchor: { borderWidth: 1, borderColor: colors.border.hairline },
-    legendSwatchFree: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border.strong },
-    legendText: { fontSize: 12, color: colors.text.secondary, letterSpacing: -0.1, fontVariant: ['tabular-nums'] },
+    legendRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+    legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+    legendPill: { width: 12, height: 6, borderRadius: 3 },
+    legendPillContainer: { backgroundColor: colors.accent.default },
+    legendPillAnchor: { backgroundColor: 'rgba(42,38,33,0.30)' },
+    legendPillFree: { backgroundColor: 'rgba(42,38,33,0.07)', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border.strong },
+    legendText: { fontSize: 12, color: colors.text.secondary, letterSpacing: -0.1, flexShrink: 1, fontVariant: ['tabular-nums'] },
 
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: spacing.lg },
     errorText: { fontSize: 14, color: colors.text.secondary, textAlign: 'center' },
