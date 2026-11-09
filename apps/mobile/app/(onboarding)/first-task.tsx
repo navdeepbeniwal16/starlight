@@ -46,7 +46,7 @@ export default function FirstTaskScreen() {
     const [createError, setCreateError] = useState<string | null>(null);
     const [keyboardUp, setKeyboardUp] = useState(false);
 
-    const { generating, generateError, generateErrorCode, generate, dismissError } = usePlanGeneration();
+    const { generating, generateError, generateErrorCode, generate, cancel, dismissError } = usePlanGeneration();
 
     // Seed the pool from the backlog so it reflects tasks a prior "Plan my day"
     // already persisted (the review schedules the backlog, not this local pool).
@@ -309,6 +309,7 @@ export default function FirstTaskScreen() {
                 errorCode={generateErrorCode}
                 onRetry={retryGenerate}
                 onDismiss={dismissError}
+                onCancel={cancel}
                 onAdjust={handleBack}
             />
         </SafeAreaView>

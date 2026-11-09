@@ -1,5 +1,15 @@
-import { ActivityIndicator, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Animated, { FadeIn } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
+import { PlanSlottingLoader } from "./PlanSlottingLoader";
+import { GENERATION_TIMEOUT } from "../lib/api";
+
+// Delayed so a fast generation never offers Cancel at all.
+const CANCEL_REVEAL_MS = 3000;
+
+const SLOW_COPY_MS = 8000;
 
 // Server signals that today's whole day window has already elapsed, so no amount
 // of retrying will help — the fix is to widen the template, not regenerate.
@@ -28,20 +38,38 @@ export function PlanGeneratingOverlay({
     onCancel?: () => void;
     onAdjust?: () => void;
 }) {
+    const insets = useSafeAreaInsets();
+    const [revealCancel, setRevealCancel] = useState(false);
+    const [slow, setSlow] = useState(false);
+
+    // Reset when generation ends, or a later run would start with Cancel and the
+    // slow copy already showing.
+    useEffect(() => {
+        if (!generating) { setRevealCancel(false); setSlow(false); return; }
+        const cancelT = setTimeout(() => setRevealCancel(true), CANCEL_REVEAL_MS);
+        const slowT = setTimeout(() => setSlow(true), SLOW_COPY_MS);
+        return () => { clearTimeout(cancelT); clearTimeout(slowT); };
+    }, [generating]);
+
     if (!generating && !error) return null;
 
     const unschedulable = errorCode === NO_CONTAINER_BLOCKS && !!onAdjust;
+    const timedOut = errorCode === GENERATION_TIMEOUT;
 
     return (
         <View style={s.overlay}>
             {generating ? (
                 <>
-                    <ActivityIndicator color="#d4a574" size="large" />
-                    <Text style={s.subtitle}>Starlight is scheduling your tasks into your day.</Text>
-                    {onCancel && (
-                        <Pressable style={s.cancelButton} onPress={onCancel}>
-                            <Text style={s.cancelButtonLabel}>Cancel</Text>
-                        </Pressable>
+                    <PlanSlottingLoader />
+                    <Text style={[s.subtitle, s.loaderCaption]}>
+                        {slow ? 'Still working on it…' : 'Starlight is scheduling your tasks into your day.'}
+                    </Text>
+                    {onCancel && revealCancel && (
+                        <Animated.View entering={FadeIn.duration(220)} style={[s.cancelButton, { bottom: insets.bottom + 12 }]}>
+                            <Pressable onPress={onCancel} hitSlop={{ top: 10, bottom: 10, left: 16, right: 16 }}>
+                                <Text style={s.cancelButtonLabel}>Cancel</Text>
+                            </Pressable>
+                        </Animated.View>
                     )}
                 </>
             ) : unschedulable ? (
@@ -61,9 +89,9 @@ export function PlanGeneratingOverlay({
             ) : (
                 <>
                     <View style={s.errorIcon}>
-                        <Ionicons name="alert-circle-outline" size={24} color="#d4a574" />
+                        <Ionicons name={timedOut ? 'hourglass-outline' : 'alert-circle-outline'} size={24} color="#d4a574" />
                     </View>
-                    <Text style={s.title}>Couldn't build your plan</Text>
+                    <Text style={s.title}>{timedOut ? 'That took too long' : "Couldn't build your plan"}</Text>
                     <Text style={s.subtitle}>{error}</Text>
                     <Pressable style={s.retryButton} onPress={onRetry}>
                         <Text style={s.retryButtonLabel}>Try again</Text>
@@ -108,6 +136,9 @@ const s = StyleSheet.create({
         lineHeight: 18,
         maxWidth: 260,
     },
+    loaderCaption: {
+        marginTop: 8,
+    },
     retryButton: {
         backgroundColor: '#2a2621',
         borderRadius: 14,
@@ -128,15 +159,17 @@ const s = StyleSheet.create({
         marginTop: 4,
     },
     cancelButton: {
-        marginTop: 8,
-        paddingVertical: 10,
-        paddingHorizontal: 20,
-        borderRadius: 12,
-        backgroundColor: '#f5f3ef',
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        height: 44,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     cancelButtonLabel: {
-        fontSize: 14,
+        fontSize: 15,
         fontWeight: '500',
         color: '#7a736a',
+        letterSpacing: -0.1,
     },
 });
