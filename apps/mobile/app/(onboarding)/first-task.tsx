@@ -167,7 +167,7 @@ export default function FirstTaskScreen() {
                     <StepEyebrow step={2} total={3} />
                     <Text style={styles.title}>Add a few tasks</Text>
                     <Text style={styles.subtitle}>
-                        Jot down what's on your mind, and Starlight will fit them into your day.
+                        Add what's on your mind. Starlight will fit it into your day.
                     </Text>
                 </View>
 
@@ -184,6 +184,7 @@ export default function FirstTaskScreen() {
                             onChangeText={setDraftTitle}
                             placeholder="What needs to be done?"
                             placeholderTextColor="rgba(122,115,106,0.3)"
+                            autoCapitalize="sentences"
                             autoFocus
                             returnKeyType="done"
                         />
