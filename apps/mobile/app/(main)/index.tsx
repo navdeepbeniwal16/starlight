@@ -728,7 +728,7 @@ const styles = StyleSheet.create({
     },
     containerCard: {
         borderWidth: 1.5,
-        borderColor: 'rgba(42,38,33,0.16)',
+        borderColor: colors.border.container,
         borderStyle: 'dashed',
         borderRadius: 16,
         padding: 16,

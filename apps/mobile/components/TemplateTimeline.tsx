@@ -423,7 +423,7 @@ const styles = StyleSheet.create({
     blockBand: { position: 'absolute', left: CONTENT_LEFT, right: 0 },
     card: { flex: 1, borderRadius: radius.lg, paddingLeft: 14, paddingRight: 32, overflow: 'hidden' },
     cardAnchor: { backgroundColor: colors.surface.block, borderWidth: 1, borderColor: colors.border.warm },
-    cardContainer: { borderWidth: 1.5, borderColor: 'rgba(212,165,116,0.55)', borderStyle: 'dashed' },
+    cardContainer: { borderWidth: 1.5, borderColor: colors.border.container, borderStyle: 'dashed' },
     cardInvalid: { borderWidth: 1, borderStyle: 'solid', borderColor: colors.danger.border, backgroundColor: colors.danger.tint },
 
     cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },

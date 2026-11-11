@@ -507,7 +507,7 @@ const styles = StyleSheet.create({
 
     // Swatches mirror the day-template legend so the toggle previews how each block type reads on the timeline.
     blockSwatch: { width: 12, height: 12, borderRadius: 3, backgroundColor: colors.surface.block },
-    blockSwatchContainer: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.16)', borderStyle: 'dashed' },
+    blockSwatchContainer: { borderWidth: 1, borderColor: colors.border.container, borderStyle: 'dashed' },
     blockSwatchAnchor: { borderWidth: 1, borderColor: colors.border.hairline },
 
     typeDescription: { fontSize: 13, color: 'rgba(122,115,106,0.75)' },

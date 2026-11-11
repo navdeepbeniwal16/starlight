@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
     ActivityIndicator,
     Alert,
+    Animated,
     ScrollView,
     StyleSheet,
     Text,
@@ -9,11 +10,13 @@ import {
     View,
     useWindowDimensions,
     type AccessibilityActionEvent,
+    type LayoutChangeEvent,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Rect } from "react-native-svg";
 import {
     BottomSheetBackdrop,
     BottomSheetModal,
@@ -73,11 +76,15 @@ function moveActionsFor(board: ReviewBoard, taskId: string, from: Zone) {
 
 type Moving = { taskId: string; fromZone: Zone; title: string; mins: number };
 
+const NOW_HEADROOM = 112;
+const TOP_FADE_H = 64;
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
     const router = useRouter();
     const insets = useSafeAreaInsets();
+    const { width: windowWidth } = useWindowDimensions();
     const isOnboarding = onboarding;
     const proposal = usePlanningStore(s => s.proposal);
     const templateId = usePlanningStore(s => s.templateId);
@@ -92,6 +99,25 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
     // the now-line and elapsed greying shouldn't shift under the user mid-review.
     const now = useMemo(() => toHHmm(new Date()), []);
     const timeline = useMemo(() => (proposal ? buildReviewTimeline(proposal, now) : []), [proposal, now]);
+
+    // Jump to the now-line once, on first layout — a later re-layout (e.g. after a move,
+    // which only touches blocks below the line) must not yank the scroll back.
+    const scrollRef = useRef<ScrollView>(null);
+    const didScrollToNow = useRef(false);
+    const onNowLayout = useCallback((e: LayoutChangeEvent) => {
+        if (didScrollToNow.current) return;
+        didScrollToNow.current = true;
+        scrollRef.current?.scrollTo({ y: Math.max(0, e.nativeEvent.layout.y - NOW_HEADROOM), animated: false });
+    }, []);
+
+    // Transparent at the top and fading in only once content scrolls under it, so the
+    // Wake row at the very top is never dimmed.
+    const scrollY = useRef(new Animated.Value(0)).current;
+    const fadeOpacity = scrollY.interpolate({
+        inputRange: [0, TOP_FADE_H],
+        outputRange: [0, 1],
+        extrapolate: 'clamp',
+    });
 
     const [moving, setMoving] = useState<Moving | null>(null);
     const openMove = useCallback((taskId: string, fromZone: Zone, title: string, mins: number) => {
@@ -162,6 +188,8 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
 
     const blockById = new Map(board.blocks.map(b => [b.id, b]));
 
+    const hasHistory = timeline.findIndex(it => it.kind === 'now') > 0;
+
     const elements: ReactNode[] = [];
     timeline.forEach((item, i) => {
         if (i > 0) elements.push(<TimelineThread key={`thread-${i}`} />);
@@ -169,7 +197,12 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
         if (item.kind === 'boundary') {
             elements.push(<DayBoundaryMarker key={`item-${i}`} label={item.label} time={item.time} />);
         } else if (item.kind === 'now') {
-            elements.push(<NowLine key={`item-${i}`} time={now} />);
+            if (hasHistory) elements.push(<ScrollUpHint key="scroll-hint" />);
+            elements.push(
+                <View key={`item-${i}`} onLayout={hasHistory ? onNowLayout : undefined}>
+                    <NowLine time={now} />
+                </View>,
+            );
         } else if (item.kind === 'gap') {
             elements.push(<FreeSlot key={`item-${i}`} start={item.start} end={item.end} elapsed={item.elapsed} />);
         } else if (item.block.type === 'ANCHOR') {
@@ -196,13 +229,23 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
         <SafeAreaView style={s.container} edges={['top']}>
             <Header onClose={handleClose} onboarding={isOnboarding} />
 
-            <ScrollView contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
+            <View style={s.scrollWrap}>
+            <Animated.ScrollView
+                ref={scrollRef}
+                contentContainerStyle={s.scrollContent}
+                showsVerticalScrollIndicator={false}
+                scrollEventThrottle={16}
+                onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
+            >
                 <View>{elements}</View>
 
                 <View style={s.unscheduledSection}>
                     <Text style={s.sectionLabel}>NOT SCHEDULED</Text>
                     {board.unscheduled.length === 0 ? (
-                        <Text style={s.emptyHint}>Everything found a place in your day.</Text>
+                        <View style={s.emptyState}>
+                            <MaterialCommunityIcons name="party-popper" size={16} color={colors.accent.default} />
+                            <Text style={s.emptyHint}>Everything found a place in your day. Nice!</Text>
+                        </View>
                     ) : (
                         <View style={s.taskList}>
                             {board.unscheduled.map(task => (
@@ -217,7 +260,9 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
                         </View>
                     )}
                 </View>
-            </ScrollView>
+            </Animated.ScrollView>
+            {hasHistory && <TopFade width={windowWidth} opacity={fadeOpacity} />}
+            </View>
 
             <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
                 <TouchableOpacity
@@ -260,7 +305,7 @@ function Header({ onClose, onboarding }: { onClose: () => void; onboarding?: boo
             <View style={s.onboardingHeader}>
                 <StepEyebrow step={3} total={3} />
                 <Text style={s.onboardingTitle}>Here's your day</Text>
-                <Text style={s.onboardingSubtitle}>Tap a task to move it, then confirm.</Text>
+                <Text style={s.onboardingSubtitle}>Your tasks are in your Task Time, and your events are untouched. Tap a task to move it.</Text>
             </View>
         );
     }
@@ -275,6 +320,31 @@ function Header({ onClose, onboarding }: { onClose: () => void; onboarding?: boo
             </View>
             <Text style={s.headerSubtitle}>Tap a task to move it, then confirm.</Text>
         </View>
+    );
+}
+
+function ScrollUpHint() {
+    return (
+        <View style={s.scrollHint}>
+            <Ionicons name="chevron-up" size={13} color="rgba(122,115,106,0.55)" />
+            <Text style={s.scrollHintText}>Scroll up for earlier</Text>
+        </View>
+    );
+}
+
+function TopFade({ width, opacity }: { width: number; opacity: Animated.AnimatedInterpolation<number> }) {
+    return (
+        <Animated.View style={[s.topFade, { opacity }]} pointerEvents="none">
+            <Svg width={width} height={TOP_FADE_H}>
+                <Defs>
+                    <SvgLinearGradient id="reviewTopFade" x1="0" y1="0" x2="0" y2="1">
+                        <Stop offset="0" stopColor="#fdfcfa" stopOpacity={1} />
+                        <Stop offset="1" stopColor="#fdfcfa" stopOpacity={0} />
+                    </SvgLinearGradient>
+                </Defs>
+                <Rect x="0" y="0" width={width} height={TOP_FADE_H} fill="url(#reviewTopFade)" />
+            </Svg>
+        </Animated.View>
     );
 }
 
@@ -609,7 +679,12 @@ const s = StyleSheet.create({
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
     muted: { fontSize: 13, color: '#7a736a', textAlign: 'center', lineHeight: 18 },
 
+    scrollWrap: { flex: 1 },
     scrollContent: { padding: 16, paddingBottom: 24 },
+    topFade: { position: 'absolute', top: 0, left: 0, right: 0, height: TOP_FADE_H },
+
+    scrollHint: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 8 },
+    scrollHintText: { fontSize: 12, color: 'rgba(122,115,106,0.6)', letterSpacing: -0.1 },
 
     // Elapsed greying, shared by past blocks, events, and gaps.
     elapsed: { opacity: 0.45 },
@@ -634,7 +709,7 @@ const s = StyleSheet.create({
     // Container card (mirrors Today's dashed block)
     containerCard: {
         borderWidth: 1.5,
-        borderColor: 'rgba(42,38,33,0.16)',
+        borderColor: colors.border.container,
         borderStyle: 'dashed',
         borderRadius: 16,
         padding: 16,
@@ -698,6 +773,7 @@ const s = StyleSheet.create({
     // Not-scheduled section
     unscheduledSection: { marginTop: 24, gap: 10 },
     sectionLabel: { fontSize: 11, color: 'rgba(122,115,106,0.55)', letterSpacing: 0.5, textTransform: 'uppercase' },
+    emptyState: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     emptyHint: { fontSize: 13, color: 'rgba(122,115,106,0.5)', fontStyle: 'italic' },
 
     footer: {

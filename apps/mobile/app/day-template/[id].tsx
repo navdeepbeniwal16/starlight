@@ -507,7 +507,7 @@ const styles = StyleSheet.create({
     legendItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
     legendLabelGroup: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
     legendSwatch: { width: 12, height: 12, borderRadius: 3, backgroundColor: colors.surface.block },
-    legendSwatchContainer: { borderWidth: 1, borderColor: 'rgba(42,38,33,0.16)', borderStyle: 'dashed' },
+    legendSwatchContainer: { borderWidth: 1, borderColor: colors.border.container, borderStyle: 'dashed' },
     legendSwatchAnchor: { borderWidth: 1, borderColor: colors.border.hairline },
     legendText: { fontSize: 12, fontWeight: '600', color: colors.text.primary, letterSpacing: -0.1, flexShrink: 1 },
     legendTotal: { fontSize: 12, color: colors.text.muted, letterSpacing: -0.1, fontVariant: ['tabular-nums'] },
