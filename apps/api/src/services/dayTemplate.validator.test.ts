@@ -104,10 +104,10 @@ describe("validateDayTemplate", () => {
     });
 
     describe("container rules", () => {
-        it("rejects a CONTAINER block without an energyLevel", () => {
+        it("accepts a CONTAINER block without an energyLevel", () => {
             const t = validTemplate();
             t.blocks[0] = { type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00" };
-            expect(() => validateDayTemplate(t)).toThrow(/CONTAINER.*energyLevel/);
+            expect(() => validateDayTemplate(t)).not.toThrow();
         });
 
         it("rejects a template with no CONTAINER block", () => {
@@ -176,12 +176,10 @@ describe("validateDayShape", () => {
             expect(call).toThrow(/start before it ends/);
         });
 
-        it("rejects a CONTAINER block without an energyLevel", () => {
+        it("accepts a CONTAINER block without an energyLevel", () => {
             const s = validShape();
             s.blocks[0] = { id: "b1", type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00" };
-            const call = () => validateDayShape(s);
-            expect(call).toThrow(DayShapeValidationError);
-            expect(call).toThrow(/CONTAINER.*energyLevel/);
+            expect(() => validateDayShape(s)).not.toThrow();
         });
 
         it("rejects a block outside the wake/sleep window", () => {

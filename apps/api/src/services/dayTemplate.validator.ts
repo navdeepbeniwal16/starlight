@@ -50,7 +50,6 @@ function validateStructure(
         if (!isValidHHmm(block.endTime)) fail(`Block at index ${i} has invalid endTime`);
         if (toMins(block.startTime) >= toMins(block.endTime)) fail(`Block at index ${i} must start before it ends`);
         if (block.energyLevel !== undefined && !validEnergyLevels.includes(block.energyLevel)) fail(`Block at index ${i} has invalid energyLevel`);
-        if (block.type === "CONTAINER" && !block.energyLevel) fail(`Block at index ${i} (CONTAINER) requires an energyLevel`);
         if (toMins(block.startTime) < toMins(wakeTime) || toMins(block.endTime) > toMins(sleepTime)) fail(`Block at index ${i} falls outside the wake/sleep window`);
     });
 

@@ -226,7 +226,7 @@ describe("createDayTemplate", () => {
 
     it("routes through the structural validator and never persists an invalid template", async () => {
         const t = validTemplate();
-        t.blocks[0] = { type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00" };
+        t.blocks[0] = { type: "CONTAINER", name: "Deep Work", startTime: "12:00", endTime: "09:00" };
 
         await expect(createDayTemplate({ userId, name: "Bad", ...t })).rejects.toBeInstanceOf(DayTemplateValidationError);
         expect(await prisma.dayTemplate.count({ where: { userId } })).toBe(0);
@@ -278,7 +278,7 @@ describe("updateDayTemplate", () => {
         const created = await createDayTemplate({ userId, name: "Workday", ...validTemplate() });
 
         const invalid = validTemplate();
-        invalid.blocks[0] = { type: "CONTAINER", name: "Deep Work", startTime: "09:00", endTime: "12:00" };
+        invalid.blocks[0] = { type: "CONTAINER", name: "Deep Work", startTime: "12:00", endTime: "09:00" };
 
         await expect(updateDayTemplate({ userId, id: created.id, name: "Workday", ...invalid }))
             .rejects.toBeInstanceOf(DayTemplateValidationError);
