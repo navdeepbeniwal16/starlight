@@ -390,9 +390,9 @@ const styles = StyleSheet.create({
     },
     errorText: { fontSize: 13, color: colors.danger.default, textAlign: 'center' },
     footerHint: { fontSize: 13, fontWeight: '500', color: colors.text.secondary, textAlign: 'center', letterSpacing: -0.1, lineHeight: 18 },
-    planButton: { height: 52, backgroundColor: colors.text.primary, borderRadius: radius.md, justifyContent: 'center', alignItems: 'center' },
+    planButton: { height: 48, backgroundColor: colors.text.primary, borderRadius: radius.md, justifyContent: 'center', alignItems: 'center' },
     planButtonDisabled: { opacity: 0.4 },
     planButtonText: { fontSize: 15, fontWeight: '600', color: colors.surface.page, letterSpacing: -0.1 },
-    backButton: { height: 44, justifyContent: 'center', alignItems: 'center' },
+    backButton: { height: 40, justifyContent: 'center', alignItems: 'center' },
     backLabel: { fontSize: 15, fontWeight: '500', color: colors.text.secondary, letterSpacing: -0.1 },
 });

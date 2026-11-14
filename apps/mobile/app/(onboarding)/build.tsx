@@ -339,7 +339,7 @@ const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: colors.surface.page },
 
     header: { paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.md },
-    backButton: { height: 44, justifyContent: 'center', alignItems: 'center' },
+    backButton: { height: 40, justifyContent: 'center', alignItems: 'center' },
     backLabel: { fontSize: 15, fontWeight: '500', color: colors.text.secondary, letterSpacing: -0.1 },
     headerTitle: { ...typography.title, color: colors.text.primary, letterSpacing: 0.07, marginTop: 4 },
     headerSubtitle: { fontSize: 15, color: colors.text.secondary, lineHeight: 22, letterSpacing: -0.2, marginTop: spacing.sm },
@@ -395,7 +395,7 @@ const styles = StyleSheet.create({
     },
     footerHint: { fontSize: 13, fontWeight: '500', color: colors.text.secondary, textAlign: 'center', letterSpacing: -0.1, lineHeight: 18 },
     saveErrorText: { fontSize: 13, color: colors.danger.default, textAlign: 'center' },
-    continueButton: { height: 52, backgroundColor: colors.text.primary, borderRadius: radius.md, justifyContent: 'center', alignItems: 'center' },
+    continueButton: { height: 48, backgroundColor: colors.text.primary, borderRadius: radius.md, justifyContent: 'center', alignItems: 'center' },
     continueButtonDisabled: { opacity: 0.4 },
     continueButtonText: { fontSize: 15, fontWeight: '600', color: colors.surface.page, letterSpacing: -0.1 },
 });

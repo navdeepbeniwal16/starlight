@@ -803,10 +803,10 @@ const s = StyleSheet.create({
         borderTopWidth: 1,
         borderTopColor: 'rgba(42,38,33,0.06)',
     },
-    confirmButton: { backgroundColor: '#2a2621', borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
+    confirmButton: { backgroundColor: '#2a2621', borderRadius: 14, height: 48, justifyContent: 'center', alignItems: 'center' },
     confirmButtonDisabled: { opacity: 0.6 },
     confirmButtonLabel: { fontSize: 15, fontWeight: '600', color: '#fdfcfa', letterSpacing: -0.2 },
-    footerBack: { height: 44, justifyContent: 'center', alignItems: 'center' },
+    footerBack: { height: 40, justifyContent: 'center', alignItems: 'center' },
     footerBackLabel: { fontSize: 15, fontWeight: '500', color: '#7a736a', letterSpacing: -0.1 },
 
     // Move-to sheet
