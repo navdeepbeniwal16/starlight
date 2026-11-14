@@ -380,10 +380,10 @@ function FreeSlot({ start, end, elapsed }: { start: string; end: string; elapsed
         <View style={[s.freeSlotRow, elapsed && s.elapsed]}>
             <View style={s.freeSlotThread} />
             <View style={s.freeSlotPill}>
-                {!elapsed && <Ionicons name="cafe-outline" size={11} color="rgba(122,115,106,0.7)" />}
+                <Ionicons name="cafe-outline" size={11} color="rgba(122,115,106,0.7)" />
                 <Text style={s.freeSlotText}>
                     {formatDuration(Math.max(0, toMins(end) - toMins(start)))}
-                    {!elapsed && ' free'}
+                    {' free'}
                 </Text>
             </View>
         </View>
@@ -446,7 +446,6 @@ function ContainerCard({
             </View>
             {block.tasks.length === 0 ? (
                 <View style={s.noTasksRow}>
-                    <View style={s.noTasksDot} />
                     <Text style={s.noTasksText}>No tasks yet</Text>
                 </View>
             ) : (
@@ -488,11 +487,11 @@ function ScheduledRow({
                 onMove(task.id, fromZone, zoneFromActionName(e.nativeEvent.actionName))
             }
         >
+            <MoveHint />
             <View style={s.taskContent}>
                 <Text style={s.taskTitle} numberOfLines={2}>{task.title}</Text>
             </View>
             <Text style={s.taskMins}>{formatDuration(task.remainingMins)}</Text>
-            <MoveHint />
         </TouchableOpacity>
     );
 }
@@ -512,12 +511,12 @@ function UnscheduledRow({ task, board, onOpenMove, onMove }: { task: Unscheduled
                 onMove(task.id, UNSCHEDULED, zoneFromActionName(e.nativeEvent.actionName))
             }
         >
+            <MoveHint />
             <View style={s.taskContent}>
                 <Text style={s.taskTitle} numberOfLines={2}>{task.title}</Text>
                 {task.reason ? <Text style={s.taskReason} numberOfLines={2}>{task.reason}</Text> : null}
             </View>
             <Text style={s.taskMins}>{formatDuration(task.remainingMins)}</Text>
-            <MoveHint />
         </TouchableOpacity>
     );
 }
@@ -740,9 +739,8 @@ const s = StyleSheet.create({
     capacityOver: { color: colors.warning.strong },
 
     noTasksRow: {
-        flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        justifyContent: 'center',
         backgroundColor: 'rgba(232,228,221,0.1)',
         borderWidth: 1,
         borderColor: 'rgba(42,38,33,0.04)',
@@ -753,8 +751,7 @@ const s = StyleSheet.create({
         minHeight: 46,
         marginTop: 12,
     },
-    noTasksDot: { width: 16, height: 16, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(42,38,33,0.04)' },
-    noTasksText: { fontSize: 14, color: 'rgba(122,115,106,0.4)', letterSpacing: -0.15 },
+    noTasksText: { fontSize: 14, fontStyle: 'italic', color: 'rgba(122,115,106,0.4)', letterSpacing: -0.15 },
 
     taskList: { gap: 6, marginTop: 12 },
     taskCard: {

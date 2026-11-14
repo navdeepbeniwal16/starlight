@@ -12,6 +12,7 @@ import Animated, {
     useReducedMotion,
     useSharedValue,
     withDelay,
+    withSequence,
     withSpring,
     withTiming,
 } from "react-native-reanimated";
@@ -23,12 +24,16 @@ import { PressableScale } from "../../components/PressableScale";
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+const AnimatedG = Animated.createAnimatedComponent(G);
 
 // These redraw the Starlight logo at screen scale: ARC_PATH is the logo's beam, STAR (from
 // Logo) its star. The star's scale and offset are tuned to seat it on the arc's apex so the
 // two read as one mark, not chosen freely.
 const ARC_PATH = "M8 80C8 80 24 56 50 56C76 56 92 80 92 80";
 const STAR_TRANSFORM = "translate(37,29.5) scale(0.26)";
+// Seats a small white copy of the star on the upper-left facet as a glint. Nested inside
+// STAR_TRANSFORM, so these are star-local units.
+const GLINT_TRANSFORM = "translate(28,26) scale(0.22)";
 const VIEW_W = 100;
 const VIEW_MIN_Y = 28;
 const VIEW_H = 54;
@@ -37,11 +42,12 @@ const VIEW_BOX = `0 ${VIEW_MIN_Y} ${VIEW_W} ${VIEW_H}`;
 const ARC_LEN = 101;
 const END_Y = 80;
 
-const ARC_DRAW_MS = 900;
+const ARC_DRAW_MS = 1300;
 // The star drops as the arc lands (STAR_DELAY mirrors ARC_DRAW), and the text follows once
 // the mark is whole.
-const STAR_DELAY_MS = 900;
-const TEXT_DELAY_MS = 1450;
+const STAR_DELAY_MS = 1300;
+const TEXT_DELAY_MS = 2000;
+const GLINT_DELAY_MS = 1600;
 
 export default function AllSetScreen() {
     const router = useRouter();
@@ -82,6 +88,7 @@ export default function AllSetScreen() {
     const progress = useSharedValue(reduceMotion ? 1 : 0);
     const starDrop = useSharedValue(reduceMotion ? 0 : 1); // 0 settled, 1 lifted above the apex
     const textOpacity = useSharedValue(reduceMotion ? 1 : 0);
+    const glint = useSharedValue(reduceMotion ? 0.5 : 0);
 
     const celebrate = () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const tick = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -111,6 +118,10 @@ export default function AllSetScreen() {
             }),
         );
         textOpacity.value = withDelay(TEXT_DELAY_MS, withTiming(1, { duration: 300 }));
+        glint.value = withDelay(
+            GLINT_DELAY_MS,
+            withSequence(withTiming(1, { duration: 160 }), withTiming(0.5, { duration: 340 })),
+        );
     }, []);
 
     const arcProps = useAnimatedProps(() => ({ strokeDashoffset: ARC_LEN * (1 - progress.value) }));
@@ -118,6 +129,7 @@ export default function AllSetScreen() {
     const endDotProps = useAnimatedProps(() => ({
         opacity: Math.max(0, Math.min(1, (progress.value - 0.85) / 0.15)),
     }));
+    const glintProps = useAnimatedProps(() => ({ opacity: glint.value }));
     const starStyle = useAnimatedStyle(() => ({
         opacity: 1 - starDrop.value,
         transform: [{ translateY: -starDrop.value * arcH * 0.3 }],
@@ -155,6 +167,9 @@ export default function AllSetScreen() {
                                     </Defs>
                                     <G transform={STAR_TRANSFORM}>
                                         <Path d={STAR} fill="url(#starFill)" />
+                                        <AnimatedG transform={GLINT_TRANSFORM} animatedProps={glintProps}>
+                                            <Path d={STAR} fill="#ffffff" />
+                                        </AnimatedG>
                                     </G>
                                 </Svg>
                             </Animated.View>

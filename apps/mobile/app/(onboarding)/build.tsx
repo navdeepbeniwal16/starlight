@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, useWindowDimensions } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useAuth } from "@clerk/expo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
-import Animated, { useAnimatedRef } from "react-native-reanimated";
+import Animated, { useAnimatedRef, useSharedValue, useAnimatedScrollHandler, useAnimatedStyle, interpolate, Extrapolation } from "react-native-reanimated";
+import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Rect } from "react-native-svg";
 import { api } from "../../lib/api";
 import { colors, radius, spacing, shadow, typography } from "../../lib/theme";
 import type { BlockInput } from "../../lib/api.types";
@@ -26,6 +27,8 @@ import { BlockTypesIntroOverlay } from "../../components/BlockTypesIntroOverlay"
 // Shown once per user; the key is namespaced by user id so a shared device teaches each.
 const INTRO_SEEN_KEY = (userId: string) => `blockTypesIntroSeen:${userId}`;
 
+const TOP_FADE_H = 64;
+
 // What the block editor is open on: an existing block by index, or a new block seeded into a
 // tapped free slot.
 type Editor = { mode: 'edit'; index: number } | { mode: 'create'; startTime: string; endTime: string };
@@ -33,11 +36,18 @@ type Editor = { mode: 'edit'; index: number } | { mode: 'create'; startTime: str
 export default function BuildScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
+    const { width: windowWidth } = useWindowDimensions();
     const { userId } = useAuth();
 
     const { draft, blockKeys, templateId, name, hydrate, seed, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap } = useTemplateStore();
     const { undoLabel, offerUndo, undo } = useUndoableEdit();
     const scrollRef = useAnimatedRef<Animated.ScrollView>();
+
+    const scrollY = useSharedValue(0);
+    const onScroll = useAnimatedScrollHandler((e) => { scrollY.value = e.contentOffset.y; });
+    const fadeStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(scrollY.value, [0, TOP_FADE_H], [0, 1], Extrapolation.CLAMP),
+    }));
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -204,7 +214,8 @@ export default function BuildScreen() {
 
             {!loading && !error && draft && (
                 <>
-                    <Animated.ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={[styles.content, bottomOverflow > 0 && { paddingBottom: spacing.xxl + bottomOverflow }]} showsVerticalScrollIndicator={false}>
+                    <View style={styles.scrollWrap}>
+                    <Animated.ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={[styles.content, bottomOverflow > 0 && { paddingBottom: spacing.xxl + bottomOverflow }]} showsVerticalScrollIndicator={false} onScroll={onScroll} scrollEventThrottle={16}>
                         <View style={styles.legend}>
                             <View style={styles.legendHeader}>
                                 <View style={styles.bar}>
@@ -277,6 +288,18 @@ export default function BuildScreen() {
                             onLiveEdit={(snapshot, label) => { setSaveError(null); offerUndo(snapshot, label); }}
                         />
                     </Animated.ScrollView>
+                    <Animated.View style={[styles.topFade, fadeStyle]} pointerEvents="none">
+                        <Svg width={windowWidth} height={TOP_FADE_H}>
+                            <Defs>
+                                <SvgLinearGradient id="buildTopFade" x1="0" y1="0" x2="0" y2="1">
+                                    <Stop offset="0" stopColor={colors.surface.page} stopOpacity={1} />
+                                    <Stop offset="1" stopColor={colors.surface.page} stopOpacity={0} />
+                                </SvgLinearGradient>
+                            </Defs>
+                            <Rect x="0" y="0" width={windowWidth} height={TOP_FADE_H} fill="url(#buildTopFade)" />
+                        </Svg>
+                    </Animated.View>
+                    </View>
 
                     <View
                         style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}
@@ -355,7 +378,9 @@ const styles = StyleSheet.create({
     starterHintLead: { fontWeight: '600', color: colors.accent.strong },
     starterHintDismiss: { fontSize: 18, lineHeight: 18, color: colors.text.muted },
 
+    scrollWrap: { flex: 1 },
     scroll: { flex: 1 },
+    topFade: { position: 'absolute', top: 0, left: 0, right: 0, height: TOP_FADE_H },
     content: { paddingHorizontal: spacing.xl, paddingTop: spacing.sm, paddingBottom: spacing.xxl, gap: spacing.lg },
 
     legend: {
