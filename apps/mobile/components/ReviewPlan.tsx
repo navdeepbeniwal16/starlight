@@ -57,7 +57,7 @@ function energyLabel(level: ReviewBlock["energyLevel"]): string | null {
 }
 
 function capacityLabel(remainingMins: number): string {
-    return remainingMins >= 0 ? `${formatDuration(remainingMins)} left` : `over by ${formatDuration(-remainingMins)}`;
+    return remainingMins >= 0 ? `${formatDuration(remainingMins)} free` : `over by ${formatDuration(-remainingMins)}`;
 }
 
 function moveFitLabel(remainingAfterMoveMins: number): string {
@@ -325,7 +325,7 @@ function Header({ onClose, onboarding }: { onClose: () => void; onboarding?: boo
         return (
             <View style={s.onboardingHeader}>
                 <StepEyebrow step={3} total={3} />
-                <Text style={s.onboardingTitle}>Here's your day</Text>
+                <Text style={s.onboardingTitle}>Here's a proposed day for you</Text>
                 <Text style={s.onboardingSubtitle}>Your tasks are in your Task Time, and your events are untouched. Tap a task to move it.</Text>
             </View>
         );
@@ -398,8 +398,11 @@ function FreeSlot({ start, end, elapsed }: { start: string; end: string; elapsed
 function AnchorCard({ block, elapsed }: { block: ProposalBlock; elapsed: boolean }) {
     return (
         <View style={[s.anchorCard, elapsed && s.elapsed]}>
-            <Text style={s.anchorName}>{block.name}</Text>
-            <Text style={s.anchorTime}>{formatTimeRange(block.startTime, block.endTime)}</Text>
+            <View style={s.anchorText}>
+                <Text style={s.anchorName}>{block.name}</Text>
+                <Text style={s.anchorTime}>{formatTimeRange(block.startTime, block.endTime)}</Text>
+            </View>
+            <Ionicons name="lock-closed" size={14} color="#b5996f" />
         </View>
     );
 }
@@ -414,6 +417,7 @@ function ElapsedContainerCard({ block }: { block: ProposalBlock }) {
                     <Text style={s.blockName}>{block.name}</Text>
                     <Text style={s.blockTime}>{formatTimeRange(block.startTime, block.endTime)}</Text>
                 </View>
+                <Ionicons name="lock-closed" size={14} color="#b5996f" />
             </View>
         </View>
     );
@@ -723,7 +727,8 @@ const s = StyleSheet.create({
     freeSlotText: { fontSize: 10, color: 'rgba(122,115,106,0.8)', fontVariant: ['tabular-nums'] },
 
     // Event (anchor) card
-    anchorCard: { backgroundColor: colors.surface.block, borderRadius: 16, padding: 16 },
+    anchorCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.surface.block, borderRadius: 16, padding: 16 },
+    anchorText: { flex: 1 },
     anchorName: { fontSize: 15, fontWeight: '500', color: '#2a2621', letterSpacing: -0.23 },
     anchorTime: { fontSize: 13, color: '#9a9389', letterSpacing: -0.15, marginTop: 3, fontVariant: ['tabular-nums'] },
 

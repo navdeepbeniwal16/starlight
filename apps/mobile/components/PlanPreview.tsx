@@ -29,16 +29,16 @@ type Point = { x: number; y: number };
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
-type AnchorRow = { id: string; kind: 'anchor'; gutter: string; icon: IoniconName; name: string; time: string };
+type AnchorRow = { id: string; kind: 'anchor'; gutter: string; name: string; time: string };
 type ContainerRow = { id: string; kind: 'container'; gutter: string; name: string; time: string };
 type TimelineRow = AnchorRow | ContainerRow;
 
 const TIMELINE: TimelineRow[] = [
-    { id: 'walk', kind: 'anchor', gutter: '7 am', icon: 'walk', name: 'Morning walk', time: '7:00 – 7:45' },
+    { id: 'walk', kind: 'anchor', gutter: '7 am', name: 'Morning walk', time: '7:00 – 7:45' },
     { id: 'morning', kind: 'container', gutter: '9 am', name: 'Morning Focus', time: '9 – 12' },
-    { id: 'lunch', kind: 'anchor', gutter: '12 pm', icon: 'restaurant', name: 'Lunch', time: '12:00 – 1:00' },
+    { id: 'lunch', kind: 'anchor', gutter: '12 pm', name: 'Lunch', time: '12:00 – 1:00' },
     { id: 'afternoon', kind: 'container', gutter: '2 pm', name: 'Afternoon Focus', time: '2 – 4' },
-    { id: 'family', kind: 'anchor', gutter: '6 pm', icon: 'heart', name: 'Family time', time: '6:30 – 8:30' },
+    { id: 'family', kind: 'anchor', gutter: '6 pm', name: 'Family time', time: '6:30 – 8:30' },
 ];
 
 type TaskDef = { id: string; title: string; dur: string; block: string };
@@ -106,7 +106,6 @@ function KeptTag() {
 function AnchorCard({ row, kept }: { row: AnchorRow; kept: boolean }) {
     return (
         <View style={styles.anchorCard}>
-            <Ionicons name={row.icon} size={15} color="#6f685e" style={styles.anchorIcon} />
             <Text style={styles.anchorName}>{row.name}</Text>
             <Text style={styles.anchorTime}>{row.time}</Text>
             <View style={styles.flexSpacer} />
@@ -562,9 +561,6 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         paddingHorizontal: 13,
         paddingVertical: 12,
-    },
-    anchorIcon: {
-        marginRight: 9,
     },
     anchorName: {
         fontSize: 14,

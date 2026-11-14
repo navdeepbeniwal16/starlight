@@ -28,7 +28,7 @@ import { useOnboardingTasksStore, type OnboardingTask } from "../../stores/onboa
 
 const EMPTY_DRAFT: FirstTaskDraft = { title: '', estimatedMins: null };
 
-const SUGGESTIONS_HIDE_AT = 2;
+const SUGGESTIONS_HIDE_AT = 3;
 
 export default function FirstTaskScreen() {
     const router = useRouter();
