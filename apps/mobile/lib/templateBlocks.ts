@@ -3,7 +3,6 @@ import { toMins, formatTime } from "./time";
 
 // Shared presentation constants for day-template block editing.
 export const BLOCK_TYPES: BlockType[] = ['CONTAINER', 'ANCHOR'];
-export const ENERGY_LEVELS: EnergyLevel[] = ['HIGH', 'MEDIUM', 'LOW'];
 
 // Shortest block the grid allows, in minutes — unified across create, move, and resize
 // so a block can capture a brief routine (medication) but never collapse to nothing.
@@ -22,12 +21,6 @@ export const BLOCK_TYPE_DESCRIPTIONS: Record<BlockType, string> = {
 export const BLOCK_TYPE_LEGEND_HINTS: Record<BlockType, string> = {
     CONTAINER: 'time for scheduling tasks',
     ANCHOR: 'a fixed routine to track',
-};
-
-export const ENERGY_LABELS: Record<EnergyLevel, string> = {
-    HIGH: 'High',
-    MEDIUM: 'Medium',
-    LOW: 'Low',
 };
 
 /** A block being edited, before it is known to be valid (times may be unset). */
@@ -73,12 +66,11 @@ export type BlockDraftError =
     | { code: 'TOO_SHORT' }
     | { code: 'BEFORE_WAKE'; boundary: string }
     | { code: 'AFTER_SLEEP'; boundary: string }
-    | { code: 'ENERGY_REQUIRED' }
     | { code: 'OVERLAP' };
 
 /**
  * Validates a single block draft against the rules the editor UI enforces:
- * name, time range, wake/sleep bounds, container energy, and overlap.
+ * name, time range, wake/sleep bounds, and overlap.
  *
  * @param draft - The in-progress block being added or edited.
  * @param ctx - The surrounding template state to validate against (wake/sleep
@@ -108,9 +100,6 @@ export function validateBlockDraft(draft: BlockDraft, ctx: BlockValidationContex
     if (ctx.sleepTime && toMins(draft.endTime) > toMins(ctx.sleepTime)) {
         return { code: 'AFTER_SLEEP', boundary: ctx.sleepTime };
     }
-    if (draft.type === 'CONTAINER' && !draft.energyLevel) {
-        return { code: 'ENERGY_REQUIRED' };
-    }
     if (hasOverlap({ startTime: draft.startTime, endTime: draft.endTime }, ctx.existingBlocks, ctx.excludeIndex)) {
         return { code: 'OVERLAP' };
     }
@@ -126,7 +115,6 @@ export function blockDraftErrorMessage(error: BlockDraftError): string {
         case 'TOO_SHORT': return `A block must be at least ${MIN_BLOCK_MINUTES} minutes long`;
         case 'BEFORE_WAKE': return `Block must start at or after your wake time (${formatTime(error.boundary)})`;
         case 'AFTER_SLEEP': return `Block must end by your sleep time (${formatTime(error.boundary)})`;
-        case 'ENERGY_REQUIRED': return 'Energy level is required for Task Time blocks';
         case 'OVERLAP': return 'This block overlaps with an existing one';
     }
 }

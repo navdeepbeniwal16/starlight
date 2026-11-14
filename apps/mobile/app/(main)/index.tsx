@@ -60,10 +60,6 @@ function GhostAnchorBlock({ block }: { block: DayTemplateBlock }) {
 }
 
 function GhostContainerBlock({ block }: { block: DayTemplateBlock }) {
-    const energyLabel = block.energyLevel
-        ? block.energyLevel.charAt(0) + block.energyLevel.slice(1).toLowerCase() + ' energy'
-        : null;
-
     return (
         <View style={styles.ghostContainerCard}>
             <View style={styles.ghostContainerHeader}>
@@ -71,11 +67,6 @@ function GhostContainerBlock({ block }: { block: DayTemplateBlock }) {
                     <Text style={styles.ghostContainerName}>{block.name}</Text>
                     <Text style={styles.ghostContainerTime}>{formatTime(block.startTime)} – {formatTime(block.endTime)}</Text>
                 </View>
-                {energyLabel && (
-                    <View style={styles.energyBadge}>
-                        <Text style={styles.energyBadgeText}>{energyLabel}</Text>
-                    </View>
-                )}
             </View>
             <View style={styles.noTasksRow}>
                 <View style={styles.noTasksDot} />
@@ -278,10 +269,6 @@ function TaskDoneToggle({ task, onDone }: { task: PlannedTask; onDone: () => voi
 }
 
 function ContainerBlockCard({ block, elapsed, active, progress, onTaskDone, onTaskPress }: { block: PlannedBlock; elapsed: boolean; active: boolean; progress: number; onTaskDone: (taskId: string) => void; onTaskPress: (taskId: string) => void }) {
-    const energyLabel = block.energyLevel
-        ? block.energyLevel.charAt(0) + block.energyLevel.slice(1).toLowerCase() + ' energy'
-        : null;
-
     return (
         <View style={[styles.containerCard, elapsed && styles.elapsedOpacity, active && styles.blockCardActive]}>
             {active && <BlockProgressFill progress={progress} gradientId={`blockProgressFill-${block.id}`} />}
@@ -290,11 +277,6 @@ function ContainerBlockCard({ block, elapsed, active, progress, onTaskDone, onTa
                     <Text style={[styles.blockName, active && styles.blockNameActive]}>{block.name}</Text>
                     <BlockTimeMeta block={block} isActive={active} progress={progress} />
                 </View>
-                {energyLabel && (
-                    <View style={styles.energyBadge}>
-                        <Text style={styles.energyBadgeText}>{energyLabel}</Text>
-                    </View>
-                )}
             </View>
             {block.tasks.length > 0 && (
                 <View style={styles.taskList}>
@@ -891,17 +873,6 @@ const styles = StyleSheet.create({
         letterSpacing: -0.15,
         marginTop: 2,
         fontVariant: ['tabular-nums'],
-    },
-    energyBadge: {
-        backgroundColor: 'rgba(232,223,209,0.3)',
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        alignSelf: 'flex-start',
-    },
-    energyBadgeText: {
-        fontSize: 12,
-        color: 'rgba(122,115,106,0.6)',
     },
     noTasksRow: {
         flexDirection: 'row',

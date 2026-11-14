@@ -13,19 +13,19 @@ import { useLocalSearchParams, useRouter, useNavigation } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../lib/api";
 import { colors, radius } from "../../lib/theme";
-import type { TaskDetail, EnergyLevel, Project, UpdateTaskInput } from "../../lib/api.types";
+import type { TaskDetail, Project, UpdateTaskInput } from "../../lib/api.types";
 import { KeyboardScreen } from "../../components/KeyboardScreen";
 import {
     ESTIMATE_OPTIONS, PROGRESS_PRESETS,
     FieldRow, ProgressSlider, DeadlineExpanded, ProjectField,
-    getEstimateLabel, formatDeadlineValue, effortDotColor,
+    getEstimateLabel, formatDeadlineValue,
     defaultTime,
     tf,
 } from "../../components/TaskFields";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-type FieldKey = 'estimate' | 'project' | 'effort' | 'deadline' | 'progress';
+type FieldKey = 'estimate' | 'project' | 'deadline' | 'progress';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 function deadlineToParts(iso: string): { day: Date; time: Date } {
@@ -51,7 +51,6 @@ export default function TaskDetailScreen() {
     const [title, setTitle] = useState('');
     const [notes, setNotes] = useState('');
     const [estimatedMins, setEstimatedMins] = useState(15);
-    const [effort, setEffort] = useState<EnergyLevel | null>(null);
     const [projects, setProjects] = useState<Project[]>([]);
     const [projectId, setProjectId] = useState<string | null>(null);
     const [deadlineDay, setDeadlineDay] = useState<Date | null>(null);
@@ -78,7 +77,6 @@ export default function TaskDetailScreen() {
         setTitle(t.title);
         setNotes(t.notes ?? '');
         setEstimatedMins(t.estimatedMins);
-        setEffort(t.effort);
         setProjectId(t.projectId ?? null);
         setProgress(t.progress ?? 0);
         if (t.deadline) {
@@ -179,12 +177,6 @@ export default function TaskDetailScreen() {
         setEstimatedMins(mins);
         setActiveField(null);
         save({ estimatedMins: mins });
-    }
-
-    function handleEffortSelect(e: EnergyLevel | null) {
-        setEffort(e);
-        setActiveField(null);
-        save({ effort: e });
     }
 
     function handleProjectSelect(id: string | null) {
@@ -363,36 +355,6 @@ export default function TaskDetailScreen() {
                             onToggle={() => toggleField('project')}
                             onSelect={handleProjectSelect}
                         />
-
-                        <View style={s.sep} />
-
-                        <FieldRow
-                            label="Effort" subLabel="Est. energy required"
-                            value={effort ? effort.charAt(0) + effort.slice(1).toLowerCase() : 'Not set'}
-                            isOpen={activeField === 'effort'}
-                            onPress={() => toggleField('effort')}
-                        />
-                        {activeField === 'effort' && (
-                            <View style={tf.pills}>
-                                {(['HIGH', 'MEDIUM', 'LOW'] as EnergyLevel[]).map(e => (
-                                    <TouchableOpacity
-                                        key={e}
-                                        style={[tf.pill, effort === e && tf.pillOn]}
-                                        onPress={() => handleEffortSelect(e)}
-                                    >
-                                        <View style={[tf.dot, { backgroundColor: effortDotColor(e) }]} />
-                                        <Text style={[tf.pillTxt, effort === e && tf.pillTxtOn]}>
-                                            {e.charAt(0) + e.slice(1).toLowerCase()}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                                {effort !== null && (
-                                    <TouchableOpacity style={tf.pill} onPress={() => handleEffortSelect(null)}>
-                                        <Text style={tf.pillTxt}>Clear</Text>
-                                    </TouchableOpacity>
-                                )}
-                            </View>
-                        )}
 
                         <View style={s.sep} />
 

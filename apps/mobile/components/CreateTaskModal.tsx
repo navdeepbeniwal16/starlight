@@ -12,16 +12,16 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardProvider, KeyboardToolbar, KeyboardAwareScrollView, type KeyboardAwareScrollViewRef } from "react-native-keyboard-controller";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../lib/api";
-import type { BacklogTask, EnergyLevel, Project } from "../lib/api.types";
+import type { BacklogTask, Project } from "../lib/api.types";
 import {
     ESTIMATE_OPTIONS, PROGRESS_PRESETS,
     FieldRow, ProgressSlider, DeadlineExpanded, ProjectField,
-    getEstimateLabel, formatDeadlineValue, effortDotColor,
+    getEstimateLabel, formatDeadlineValue,
     defaultTime,
     tf,
 } from "./TaskFields";
 
-type FieldKey = 'estimate' | 'project' | 'effort' | 'deadline' | 'progress';
+type FieldKey = 'estimate' | 'project' | 'deadline' | 'progress';
 
 type Props = { visible: boolean; onClose: () => void; onCreated: (task: BacklogTask) => void; };
 
@@ -34,7 +34,6 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
     const [title, setTitle] = useState('');
     const [notes, setNotes] = useState('');
     const [estimatedMins, setEstimatedMins] = useState<number | null>(null);
-    const [effort, setEffort] = useState<EnergyLevel | null>(null);
     const [projects, setProjects] = useState<Project[]>([]);
     const [projectId, setProjectId] = useState<string | null>(null);
     const [deadlineDay, setDeadlineDay] = useState<Date | null>(null);
@@ -60,7 +59,7 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
 
     function resetForm() {
         setActiveField('estimate'); setTitle(''); setNotes('');
-        setEstimatedMins(null); setEffort(null); setProjectId(null);
+        setEstimatedMins(null); setProjectId(null);
         setDeadlineDay(null); setDeadlineTime(defaultTime()); setTempDay(new Date()); setShowTimePicker(false);
         setProgress(0);
         setSubmitting(false); setTitleError(false); setEstimateError(false); setSubmitError(null);
@@ -96,7 +95,6 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
 
         const result = await api.createTask({
             title: title.trim(), estimatedMins,
-            ...(effort && { effort }),
             ...(deadline && { deadline }),
             progress,
             ...(notes.trim() && { notes: notes.trim() }),
@@ -180,36 +178,6 @@ export default function CreateTaskModal({ visible, onClose, onCreated }: Props) 
                                 onToggle={() => toggleField('project')}
                                 onSelect={(id) => { setProjectId(id); setActiveField(null); }}
                             />
-
-                            <View style={s.sep} />
-
-                            <FieldRow
-                                label="Effort" subLabel="Est. energy required"
-                                value={effort ? effort.charAt(0) + effort.slice(1).toLowerCase() : 'Not set'}
-                                isOpen={activeField === 'effort'}
-                                onPress={() => toggleField('effort')}
-                            />
-                            {activeField === 'effort' && (
-                                <View style={tf.pills}>
-                                    {(['HIGH', 'MEDIUM', 'LOW'] as EnergyLevel[]).map(e => (
-                                        <TouchableOpacity
-                                            key={e}
-                                            style={[tf.pill, effort === e && tf.pillOn]}
-                                            onPress={() => { setEffort(e); setActiveField(null); }}
-                                        >
-                                            <View style={[tf.dot, { backgroundColor: effortDotColor(e) }]} />
-                                            <Text style={[tf.pillTxt, effort === e && tf.pillTxtOn]}>
-                                                {e.charAt(0) + e.slice(1).toLowerCase()}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                    {effort !== null && (
-                                        <TouchableOpacity style={tf.pill} onPress={() => { setEffort(null); setActiveField(null); }}>
-                                            <Text style={tf.pillTxt}>Clear</Text>
-                                        </TouchableOpacity>
-                                    )}
-                                </View>
-                            )}
 
                             <View style={s.sep} />
 

@@ -65,10 +65,6 @@ describe("validateBlockDraft", () => {
         expect(validateBlockDraft(draft({ startTime: '22:00', endTime: '23:30' }), CTX)).toEqual({ code: 'AFTER_SLEEP', boundary: '23:00' });
     });
 
-    it("requires energy on container blocks", () => {
-        expect(validateBlockDraft(draft({ type: 'CONTAINER', energyLevel: undefined }), CTX)).toEqual({ code: 'ENERGY_REQUIRED' });
-    });
-
     it("rejects an overlapping block", () => {
         expect(validateBlockDraft(draft({ startTime: '11:00', endTime: '11:30' }), CTX)).toEqual({ code: 'OVERLAP' });
     });

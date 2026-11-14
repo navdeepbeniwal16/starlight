@@ -9,15 +9,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import Animated, { useAnimatedStyle, withTiming } from "react-native-reanimated";
 import { Feather } from "@expo/vector-icons";
-import { BlockInput, BlockType, EnergyLevel } from "../lib/api.types";
+import { BlockInput, BlockType } from "../lib/api.types";
 import { toHHmm, hhMmToDate, parseDisplayTime } from "../lib/time";
 import {
-    BLOCK_TYPES, ENERGY_LEVELS, BLOCK_TYPE_LABELS, BLOCK_TYPE_DESCRIPTIONS, ENERGY_LABELS,
+    BLOCK_TYPES, BLOCK_TYPE_LABELS, BLOCK_TYPE_DESCRIPTIONS,
     validateBlockDraft, blockDraftErrorMessage, toBlockInput,
 } from "../lib/templateBlocks";
 import { computeGaps, MIN_GAP_MINUTES, computeOverlapPlan, describeOverlapPlan, type OverlapChange } from "../lib/templateDraft";
 import { colors, radius, spacing, shadow } from "../lib/theme";
-import { tf, effortDotColor } from "./TaskFields";
+import { tf } from "./TaskFields";
 
 type PickerTarget = 'start' | 'end' | null;
 
@@ -122,8 +122,11 @@ export function BlockEditorModal({
     const [name, setName] = useState('');
     const [startTime, setStartTime] = useState<string | null>(null);
     const [endTime, setEndTime] = useState<string | null>(null);
-    const [energyLevel, setEnergyLevel] = useState<EnergyLevel>('HIGH');
     const [error, setError] = useState<string | null>(null);
+
+    // No editor control sets this: an existing block's level is carried through untouched so a
+    // name or time edit never drops what the backend uses to match tasks.
+    const energyLevel = initialValues?.energyLevel;
     const [pickerTarget, setPickerTarget] = useState<PickerTarget>(null);
     const [pickerValue, setPickerValue] = useState(new Date());
     // A resolution awaiting confirmation: seating this block means trimming/removing neighbours.
@@ -135,7 +138,6 @@ export function BlockEditorModal({
             setName(initialValues?.name ?? '');
             setStartTime(initialValues?.startTime ?? null);
             setEndTime(initialValues?.endTime ?? null);
-            setEnergyLevel(initialValues?.energyLevel ?? 'HIGH');
             setError(null);
             setPickerTarget(null);
             setPendingPlan(null);
@@ -152,7 +154,6 @@ export function BlockEditorModal({
         setName('');
         setStartTime(null);
         setEndTime(null);
-        setEnergyLevel('HIGH');
         setError(null);
         setPickerTarget(null);
         setPendingPlan(null);
@@ -378,33 +379,8 @@ export function BlockEditorModal({
                                     )}
                                 </View>
 
-                                <View style={styles.modalDividerLight} />
-
-                                {/* Energy level (Container only) */}
-                                {type === 'CONTAINER' && (
-                                    <View style={styles.modalSection}>
-                                        <Text style={styles.modalLabel}>Energy level</Text>
-                                        <Text style={styles.energySubtitle}>Starlight uses this to match tasks to your capacity.</Text>
-                                        <View style={styles.pillWrap}>
-                                            {ENERGY_LEVELS.map((e) => (
-                                                <TouchableOpacity
-                                                    key={e}
-                                                    style={[tf.pill, energyLevel === e && tf.pillOn]}
-                                                    onPress={() => setEnergyLevel(e)}
-                                                >
-                                                    <View style={[tf.dot, { backgroundColor: effortDotColor(e) }]} />
-                                                    <Text style={[tf.pillTxt, energyLevel === e && tf.pillTxtOn]}>
-                                                        {ENERGY_LABELS[e]}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            ))}
-                                        </View>
-                                    </View>
-                                )}
-
                             </KeyboardAwareScrollView>
 
-                            {/* Pinned footer: keeps the actions in a fixed spot instead of shifting with the Energy section, which only shows for containers. */}
                             <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
                                 {pendingPlan ? (
                                     <>
@@ -534,7 +510,6 @@ const styles = StyleSheet.create({
     chipText: { fontSize: 12, fontWeight: '500', color: colors.text.secondary, fontVariant: ['tabular-nums'] },
     chipTextActive: { color: colors.accent.strong },
 
-    energySubtitle: { fontSize: 12, color: 'rgba(122,115,106,0.6)', marginTop: -4 },
 
     footer: { paddingHorizontal: 24, paddingTop: spacing.md, backgroundColor: colors.surface.page, ...shadow.footer },
     addButton: { height: 48, backgroundColor: colors.text.primary, borderRadius: radius.md, justifyContent: 'center', alignItems: 'center' },

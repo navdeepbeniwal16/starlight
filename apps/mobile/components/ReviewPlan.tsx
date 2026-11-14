@@ -52,10 +52,6 @@ import { TimelineThread, DayBoundaryMarker } from "./timeline";
 import { colors, radius, spacing, typography } from "../lib/theme";
 import { StepEyebrow } from "./StepEyebrow";
 
-function energyLabel(level: ReviewBlock["energyLevel"]): string | null {
-    return level ? level.charAt(0) + level.slice(1).toLowerCase() + " energy" : null;
-}
-
 function capacityLabel(remainingMins: number): string {
     return remainingMins >= 0 ? `${formatDuration(remainingMins)} free` : `over by ${formatDuration(-remainingMins)}`;
 }
@@ -436,7 +432,6 @@ function ContainerCard({
     onMove,
 }: { block: ReviewBlock } & RowMoveProps) {
     const remaining = blockRemainingMins(block);
-    const label = energyLabel(block.energyLevel);
     return (
         <View style={s.containerCard}>
             <View style={s.containerHeader}>
@@ -448,9 +443,6 @@ function ContainerCard({
                         <Text style={remaining < 0 ? s.capacityOver : s.capacityLeft}>{capacityLabel(remaining)}</Text>
                     </Text>
                 </View>
-                {label && (
-                    <View style={s.energyBadge}><Text style={s.energyBadgeText}>{label}</Text></View>
-                )}
             </View>
             {block.tasks.length === 0 ? (
                 <View style={s.noTasksRow}>
@@ -746,14 +738,6 @@ const s = StyleSheet.create({
     blockTime: { fontSize: 13, color: '#9a9389', letterSpacing: -0.15, marginTop: 3, fontVariant: ['tabular-nums'] },
     capacityLeft: { color: colors.success.strong },
     capacityOver: { color: colors.warning.strong },
-    energyBadge: {
-        backgroundColor: 'rgba(232,223,209,0.4)',
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        alignSelf: 'flex-start',
-    },
-    energyBadgeText: { fontSize: 12, color: 'rgba(122,115,106,0.7)' },
 
     noTasksRow: {
         flexDirection: 'row',

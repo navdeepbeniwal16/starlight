@@ -65,12 +65,6 @@ describe("isTemplateValid", () => {
         expect(isTemplateValid(d)).toBe(false);
     });
 
-    it("is false when a CONTAINER block has no energy level", () => {
-        const d = draft();
-        d.blocks[0] = { type: 'CONTAINER', name: 'Deep Work', startTime: '09:00', endTime: '12:00' };
-        expect(isTemplateValid(d)).toBe(false);
-    });
-
     it("is false when wake is not before sleep", () => {
         const d = draft();
         d.wakeTime = '23:30';
