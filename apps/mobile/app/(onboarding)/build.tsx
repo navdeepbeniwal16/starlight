@@ -39,7 +39,7 @@ export default function BuildScreen() {
     const { width: windowWidth } = useWindowDimensions();
     const { userId } = useAuth();
 
-    const { draft, blockKeys, templateId, name, hydrate, seed, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap } = useTemplateStore();
+    const { draft, blockKeys, templateId, name, hydrate, seed, setTemplateId, setWakeSleep, updateBlock, addBlock, removeBlock, resolveOverlap } = useTemplateStore();
     const { undoLabel, offerUndo, undo } = useUndoableEdit();
     const scrollRef = useAnimatedRef<Animated.ScrollView>();
 
@@ -156,6 +156,9 @@ export default function BuildScreen() {
             : await api.createDayTemplate(payload);
         setSaving(false);
         if (result.ok) {
+            // Stepping back and confirming again re-enters here with the draft still in the
+            // store; without the saved id it re-creates and collides on the unique name.
+            if (!templateId) setTemplateId(result.data.id);
             router.push('/(onboarding)/first-task');
         } else {
             setSaveError(result.error);
