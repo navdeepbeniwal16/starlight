@@ -47,7 +47,7 @@ import { buildReviewTimeline } from "../lib/reviewTimeline";
 import { usePlanningStore } from "../stores/planning.store";
 import { useOnboardingTasksStore } from "../stores/onboardingTasks.store";
 import { useSessionStore } from "../stores/session.store";
-import { formatDuration, formatTime, formatTimeRange, toHHmm, toMins } from "../lib/time";
+import { durationMins, formatDuration, formatTime, formatTimeRange, toHHmm, toMins } from "../lib/time";
 import { TimelineThread, DayBoundaryMarker } from "./timeline";
 import { colors, radius, spacing, typography } from "../lib/theme";
 import { StepEyebrow } from "./StepEyebrow";
@@ -163,6 +163,27 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
                 const done = await api.completeOnboarding();
                 if (done.ok) useSessionStore.getState().setOnboardedAt(done.data.onboardedAt);
                 useOnboardingTasksStore.getState().reset();
+
+                // The all-set screen fires the celebratory haptic as its animation lands, so
+                // this path skips the one the shared path below fires.
+                const minsByType = (type: ProposalBlock['type']) =>
+                    proposal.blocks
+                        .filter((b) => b.type === type)
+                        .reduce((mins, b) => mins + durationMins(b.startTime, b.endTime), 0);
+                const tasksPlanned = board.blocks.reduce((n, b) => n + b.tasks.length, 0);
+
+                clearProposal();
+                router.replace({
+                    pathname: '/(onboarding)/all-set',
+                    params: {
+                        wakeTime: proposal.wakeTime,
+                        sleepTime: proposal.sleepTime,
+                        taskTimeMins: String(minsByType('CONTAINER')),
+                        tasksPlanned: String(tasksPlanned),
+                        eventsMins: String(minsByType('ANCHOR')),
+                    },
+                });
+                return;
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             dismissFlow();
@@ -173,7 +194,7 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
             { text: 'Cancel', style: 'cancel' },
             { text: 'Retry', onPress: () => handleConfirm() },
         ]);
-    }, [board, confirming, dismissFlow, isOnboarding, proposal, templateId]);
+    }, [board, clearProposal, confirming, dismissFlow, isOnboarding, proposal, router, templateId]);
 
     if (!board || !proposal) {
         return (
