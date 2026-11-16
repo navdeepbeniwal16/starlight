@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
     View,
     Text,
@@ -19,19 +19,16 @@ import { colors, radius, spacing, shadow, typography } from "../../lib/theme";
 import { canPlanFirstTask, canPlanTasks, type FirstTaskDraft } from "../../lib/firstTaskDraft";
 import { usePlanGeneration } from "../../lib/usePlanGeneration";
 import { templateToShape } from "../../lib/planTemplate";
+import { selectTaskSuggestions, type TaskSuggestion } from "../../lib/taskSuggestions";
 import { ESTIMATE_OPTIONS, getEstimateLabel } from "../../components/TaskFields";
 import { StepEyebrow } from "../../components/StepEyebrow";
 import { PressableScale } from "../../components/PressableScale";
 import { PlanGeneratingOverlay } from "../../components/PlanGeneratingOverlay";
 import { useOnboardingTasksStore, type OnboardingTask } from "../../stores/onboardingTasks.store";
 
-const SUGGESTIONS: (FirstTaskDraft & { id: string })[] = [
-    { id: 'emails', title: 'Reply to important emails', estimatedMins: 30 },
-    { id: 'presentation', title: 'Prepare for the presentation', estimatedMins: 45 },
-    { id: 'weekly-update', title: 'Write the weekly update', estimatedMins: 30 },
-];
-
 const EMPTY_DRAFT: FirstTaskDraft = { title: '', estimatedMins: null };
+
+const SUGGESTIONS_HIDE_AT = 3;
 
 export default function FirstTaskScreen() {
     const router = useRouter();
@@ -44,12 +41,12 @@ export default function FirstTaskScreen() {
     const markCreated = useOnboardingTasksStore(s => s.markCreated);
 
     const [draft, setDraft] = useState<FirstTaskDraft>(EMPTY_DRAFT);
-    const [usedSuggestions, setUsedSuggestions] = useState<string[]>([]);
+    const [templateBlockNames, setTemplateBlockNames] = useState<string[]>([]);
     const [submitting, setSubmitting] = useState(false);
     const [createError, setCreateError] = useState<string | null>(null);
     const [keyboardUp, setKeyboardUp] = useState(false);
 
-    const { generating, generateError, generateErrorCode, generate, dismissError } = usePlanGeneration();
+    const { generating, generateError, generateErrorCode, generate, cancel, dismissError } = usePlanGeneration();
 
     // Seed the pool from the backlog so it reflects tasks a prior "Plan my day"
     // already persisted (the review schedules the backlog, not this local pool).
@@ -65,6 +62,22 @@ export default function FirstTaskScreen() {
         return () => { cancelled = true; };
     }, [hydratePool]);
 
+    // Onboarding has exactly one template — the one just built — so read its
+    // CONTAINER block names from data[0].
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            const res = await api.listDayTemplates();
+            if (cancelled || !res.ok) return;
+            const template = res.data[0];
+            if (!template) return;
+            setTemplateBlockNames(
+                template.blocks.filter(b => b.type === 'CONTAINER').map(b => b.name),
+            );
+        })();
+        return () => { cancelled = true; };
+    }, []);
+
     // Drives hiding the footer while the keyboard is up, so the CTA doesn't show
     // behind the keyboard's input accessory bar.
     useEffect(() => {
@@ -77,8 +90,12 @@ export default function FirstTaskScreen() {
 
     const draftReady = canPlanFirstTask(draft);
     const canPlan = canPlanTasks(pool);
-    const visibleSuggestions = SUGGESTIONS.filter(
-        s => !usedSuggestions.includes(s.id) && !pool.some(t => t.title === s.title),
+
+    const suggestions = useMemo(
+        () => (pool.length >= SUGGESTIONS_HIDE_AT
+            ? []
+            : selectTaskSuggestions(templateBlockNames, pool.map(t => t.title))),
+        [templateBlockNames, pool],
     );
 
     const setDraftTitle = useCallback((title: string) => {
@@ -91,9 +108,8 @@ export default function FirstTaskScreen() {
         setCreateError(null);
     }, []);
 
-    const applySuggestion = useCallback((s: (typeof SUGGESTIONS)[number]) => {
+    const applySuggestion = useCallback((s: TaskSuggestion) => {
         setDraft({ title: s.title, estimatedMins: s.estimatedMins });
-        setUsedSuggestions(prev => [...prev, s.id]);
         setCreateError(null);
     }, []);
 
@@ -167,7 +183,7 @@ export default function FirstTaskScreen() {
                     <StepEyebrow step={2} total={3} />
                     <Text style={styles.title}>Add a few tasks</Text>
                     <Text style={styles.subtitle}>
-                        Jot down what's on your mind, and Starlight will fit them into your day.
+                        Add what's on your mind. Starlight will fit it into your day.
                     </Text>
                 </View>
 
@@ -184,6 +200,7 @@ export default function FirstTaskScreen() {
                             onChangeText={setDraftTitle}
                             placeholder="What needs to be done?"
                             placeholderTextColor="rgba(122,115,106,0.3)"
+                            autoCapitalize="sentences"
                             autoFocus
                             returnKeyType="done"
                         />
@@ -240,13 +257,13 @@ export default function FirstTaskScreen() {
                         </View>
                     )}
 
-                    {visibleSuggestions.length > 0 && (
+                    {suggestions.length > 0 && (
                         <View style={styles.suggestionBlock}>
                             <Text style={styles.suggestionLabel}>Need a nudge? Tap to fill</Text>
                             <View style={styles.suggestionChips}>
-                                {visibleSuggestions.map((s) => (
+                                {suggestions.map((s) => (
                                     <TouchableOpacity
-                                        key={s.id}
+                                        key={s.title}
                                         style={styles.suggestionChip}
                                         onPress={() => applySuggestion(s)}
                                         activeOpacity={0.7}
@@ -292,6 +309,7 @@ export default function FirstTaskScreen() {
                 errorCode={generateErrorCode}
                 onRetry={retryGenerate}
                 onDismiss={dismissError}
+                onCancel={cancel}
                 onAdjust={handleBack}
             />
         </SafeAreaView>
@@ -372,9 +390,9 @@ const styles = StyleSheet.create({
     },
     errorText: { fontSize: 13, color: colors.danger.default, textAlign: 'center' },
     footerHint: { fontSize: 13, fontWeight: '500', color: colors.text.secondary, textAlign: 'center', letterSpacing: -0.1, lineHeight: 18 },
-    planButton: { height: 52, backgroundColor: colors.text.primary, borderRadius: radius.md, justifyContent: 'center', alignItems: 'center' },
+    planButton: { height: 48, backgroundColor: colors.text.primary, borderRadius: radius.md, justifyContent: 'center', alignItems: 'center' },
     planButtonDisabled: { opacity: 0.4 },
     planButtonText: { fontSize: 15, fontWeight: '600', color: colors.surface.page, letterSpacing: -0.1 },
-    backButton: { height: 44, justifyContent: 'center', alignItems: 'center' },
+    backButton: { height: 40, justifyContent: 'center', alignItems: 'center' },
     backLabel: { fontSize: 15, fontWeight: '500', color: colors.text.secondary, letterSpacing: -0.1 },
 });

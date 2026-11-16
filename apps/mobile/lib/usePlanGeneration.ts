@@ -3,6 +3,11 @@ import { api } from "./api";
 import type { GeneratePlanRequest } from "./api.types";
 import { usePlanningStore } from "../stores/planning.store";
 
+// A floor on the loader's on-screen time so a fast response doesn't flash it.
+const MIN_VISIBLE_MS = 1200;
+
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
 // The caller owns post-success navigation because the two call sites (planning
 // Step 2 and onboarding first-task) go to different screens from here.
 export function usePlanGeneration() {
@@ -21,10 +26,17 @@ export function usePlanGeneration() {
         setGenerating(true);
         setGenerateError(null);
         setGenerateErrorCode(null);
+        const startedAt = Date.now();
         const result = await api.generatePlan(req, active.signal);
         // Drop the result if this run was superseded, so an aborted request
         // (cancel) or a stale one never errors or navigates.
         if (run.current !== active) return;
+        const remaining = MIN_VISIBLE_MS - (Date.now() - startedAt);
+        if (remaining > 0) {
+            await sleep(remaining);
+            // Re-check the guard: a cancel during the floor wait must still be honoured.
+            if (run.current !== active) return;
+        }
         run.current = null;
         setGenerating(false);
         if (result.ok) {

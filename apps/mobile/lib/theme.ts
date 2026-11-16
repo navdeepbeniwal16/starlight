@@ -33,6 +33,8 @@ export const colors = {
         // Warm, softer edge for the flat beige blocks (anchor / no-task) — the cool `strong`
         // border looks harsh against their warm fill.
         warm: 'rgba(122,115,106,0.22)',
+        // Amber dashed edge that marks a Task Time (container) block.
+        container: 'rgba(212,165,116,0.55)',
     },
     danger: {
         default: '#c0392b',

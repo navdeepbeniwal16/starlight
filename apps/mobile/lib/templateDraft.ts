@@ -42,6 +42,10 @@ export const SNAP_MINUTES = 5;
 // render as bare background. Governs labelling only — not what is creatable.
 export const FREE_LABEL_MIN_MINUTES = 30;
 
+// Free spans at least this long spell out the "Tap to add a block" hint; shorter ones show a bare
+// "+" so a run of small gaps doesn't repeat the full sentence down the column.
+export const FREE_HINT_MIN_MINUTES = 60;
+
 export function offsetForTime(time: string, wakeTime: string, pointsPerHour = POINTS_PER_HOUR): number {
     return ((toMins(time) - toMins(wakeTime)) / 60) * pointsPerHour;
 }

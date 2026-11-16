@@ -34,7 +34,7 @@ export function TemplateCard({
     // read piecemeal; the colored bar is purely decorative so the legend text carries it.
     const label =
         `${template.name}. ${formatTime(template.wakeTime)} to ${formatTime(template.sleepTime)}. ` +
-        `Time Blocks ${formatDuration(container)}, Events ${formatDuration(anchor)}, Available ${formatDuration(free)}. ${recency}`;
+        `Task Time ${formatDuration(container)}, Events ${formatDuration(anchor)}, Available ${formatDuration(free)}. ${recency}`;
 
     return (
         <PressableScale
@@ -74,7 +74,7 @@ export function TemplateCard({
             <View style={styles.legend}>
                 <View style={styles.legendItem}>
                     <View style={[styles.dot, styles.segContainer]} />
-                    <Text style={styles.legendText}>Time Blocks {formatDuration(container)}</Text>
+                    <Text style={styles.legendText}>Task Time {formatDuration(container)}</Text>
                 </View>
                 <View style={styles.legendItem}>
                     <View style={[styles.dot, styles.segAnchor]} />

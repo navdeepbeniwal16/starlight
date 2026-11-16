@@ -3,6 +3,10 @@ import { getToken } from "./clerk";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
 
+const GENERATE_TIMEOUT_MS = 20_000;
+// A timeout returns this code so the UI can show the "took too long" copy specifically.
+export const GENERATION_TIMEOUT = 'TIMEOUT';
+
 export const api = {
   getAppName: async (): Promise<{ name: string }> => {
     const res = await fetch(`${API_URL}/app/name`);
@@ -312,6 +316,17 @@ export const api = {
   generatePlan: async (req: GeneratePlanRequest, signal?: AbortSignal): Promise<GeneratePlanResponse> => {
     const token = await getToken();
     if (!token) return { ok: false, error: 'No token found' };
+
+    // Abort on a stall of our own, while still honouring a caller's cancel: the
+    // caller's signal is forwarded into the same controller that drives the fetch.
+    const timeout = new AbortController();
+    const timer = setTimeout(() => timeout.abort(), GENERATE_TIMEOUT_MS);
+    const forwardAbort = () => timeout.abort();
+    if (signal) {
+      if (signal.aborted) timeout.abort();
+      else signal.addEventListener('abort', forwardAbort);
+    }
+
     try {
       const response = await fetch(`${API_URL}/day-plan/generate`, {
         method: 'POST',
@@ -321,7 +336,7 @@ export const api = {
           'X-Timezone-Offset': String(-new Date().getTimezoneOffset()),
         },
         body: JSON.stringify(req),
-        signal,
+        signal: timeout.signal,
       });
       const responseJson = await response.json();
       if (!response.ok) {
@@ -329,7 +344,15 @@ export const api = {
       }
       return { ok: true, data: responseJson.data };
     } catch (error) {
+      // A caller-driven cancel is discarded by the hook's stale-run guard, so its
+      // message never shows; a timeout, though, must read as a retryable error.
+      if (timeout.signal.aborted && !signal?.aborted) {
+        return { ok: false, error: 'Starlight couldn’t finish planning in time.', code: GENERATION_TIMEOUT };
+      }
       return { ok: false, error: 'Network error. Please check your connection.' };
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', forwardAbort);
     }
   },
 

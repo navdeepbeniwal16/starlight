@@ -1,8 +1,10 @@
-import { View, Text, StyleSheet, Image } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { colors, radius, spacing } from "../../lib/theme";
 import { PressableScale } from "../../components/PressableScale";
+import { PlanPreview } from "../../components/PlanPreview";
 
 // No progress eyebrow — the onboarding cover reads as a cover, not a working step.
 export default function WelcomeScreen() {
@@ -11,22 +13,24 @@ export default function WelcomeScreen() {
     return (
         <SafeAreaView style={styles.safeArea}>
             <View style={styles.container}>
-                <View style={styles.content}>
-                    <View style={styles.logoRow}>
-                        <Image source={require('../../assets/splash-icon.png')} style={styles.logo} resizeMode="contain" />
-                        <Text style={styles.logoText}>Starlight</Text>
-                    </View>
+                {/* Show the outcome first: a planned day forming before we ask for any input. */}
+                <View style={styles.previewWrap}>
+                    <PlanPreview />
+                </View>
 
+                <View style={styles.content}>
                     <View style={styles.promiseBlock}>
-                        <Text style={styles.heading}>Tell us how your days go, and Starlight will plan one for you.</Text>
+                        <Text style={styles.heading}>No more figuring out{"\n"}when to do it all.</Text>
                         <Text style={styles.body}>
-                            Sketch a typical day, add a task or two, and watch Starlight fit it in. Takes about a minute.
+                            You know your day better than any app does. Just sketch it out once, drop
+                            in what's on your plate, and Starlight will figure out when to do what.
                         </Text>
                     </View>
                 </View>
 
                 <PressableScale style={styles.button} onPress={() => router.push('/(onboarding)/build')}>
                     <Text style={styles.buttonText}>Get started</Text>
+                    <Ionicons name="arrow-forward" size={18} color={colors.surface.page} />
                 </PressableScale>
             </View>
         </SafeAreaView>
@@ -45,25 +49,13 @@ const styles = StyleSheet.create({
         paddingBottom: 32,
         justifyContent: 'space-between',
     },
+    // space-between spreads the three groups: preview up top, promise in the
+    // middle, button at the bottom — filling the space the cover used to waste.
+    previewWrap: {
+        paddingTop: spacing.sm,
+    },
     content: {
-        flex: 1,
-        justifyContent: 'center',
-        gap: 40,
-    },
-    logoRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.sm,
-    },
-    logo: {
-        width: 44,
-        height: 44,
-    },
-    logoText: {
-        fontFamily: 'Caprasimo_400Regular',
-        fontSize: 30,
-        color: colors.text.primary,
-        letterSpacing: -0.5,
+        gap: spacing.xxl,
     },
     promiseBlock: {
         gap: 16,
@@ -73,16 +65,18 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: colors.text.primary,
         letterSpacing: -0.3,
-        lineHeight: 34,
+        lineHeight: 30,
     },
     body: {
         fontSize: 15,
         color: colors.text.secondary,
-        lineHeight: 24,
-        letterSpacing: -0.23,
+        lineHeight: 22,
+        letterSpacing: -0.1,
     },
     button: {
         height: 52,
+        flexDirection: 'row',
+        gap: spacing.sm,
         backgroundColor: colors.text.primary,
         borderRadius: radius.md,
         justifyContent: 'center',
