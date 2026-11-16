@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
     ActivityIndicator,
     Alert,
+    Animated,
     ScrollView,
     StyleSheet,
     Text,
@@ -9,11 +10,13 @@ import {
     View,
     useWindowDimensions,
     type AccessibilityActionEvent,
+    type LayoutChangeEvent,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Rect } from "react-native-svg";
 import {
     BottomSheetBackdrop,
     BottomSheetModal,
@@ -44,17 +47,13 @@ import { buildReviewTimeline } from "../lib/reviewTimeline";
 import { usePlanningStore } from "../stores/planning.store";
 import { useOnboardingTasksStore } from "../stores/onboardingTasks.store";
 import { useSessionStore } from "../stores/session.store";
-import { formatDuration, formatTime, formatTimeRange, toHHmm, toMins } from "../lib/time";
+import { durationMins, formatDuration, formatTime, formatTimeRange, toHHmm, toMins } from "../lib/time";
 import { TimelineThread, DayBoundaryMarker } from "./timeline";
 import { colors, radius, spacing, typography } from "../lib/theme";
 import { StepEyebrow } from "./StepEyebrow";
 
-function energyLabel(level: ReviewBlock["energyLevel"]): string | null {
-    return level ? level.charAt(0) + level.slice(1).toLowerCase() + " energy" : null;
-}
-
 function capacityLabel(remainingMins: number): string {
-    return remainingMins >= 0 ? `${formatDuration(remainingMins)} left` : `over by ${formatDuration(-remainingMins)}`;
+    return remainingMins >= 0 ? `${formatDuration(remainingMins)} free` : `over by ${formatDuration(-remainingMins)}`;
 }
 
 function moveFitLabel(remainingAfterMoveMins: number): string {
@@ -73,11 +72,15 @@ function moveActionsFor(board: ReviewBoard, taskId: string, from: Zone) {
 
 type Moving = { taskId: string; fromZone: Zone; title: string; mins: number };
 
+const NOW_HEADROOM = 112;
+const TOP_FADE_H = 64;
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
     const router = useRouter();
     const insets = useSafeAreaInsets();
+    const { width: windowWidth } = useWindowDimensions();
     const isOnboarding = onboarding;
     const proposal = usePlanningStore(s => s.proposal);
     const templateId = usePlanningStore(s => s.templateId);
@@ -92,6 +95,25 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
     // the now-line and elapsed greying shouldn't shift under the user mid-review.
     const now = useMemo(() => toHHmm(new Date()), []);
     const timeline = useMemo(() => (proposal ? buildReviewTimeline(proposal, now) : []), [proposal, now]);
+
+    // Jump to the now-line once, on first layout — a later re-layout (e.g. after a move,
+    // which only touches blocks below the line) must not yank the scroll back.
+    const scrollRef = useRef<ScrollView>(null);
+    const didScrollToNow = useRef(false);
+    const onNowLayout = useCallback((e: LayoutChangeEvent) => {
+        if (didScrollToNow.current) return;
+        didScrollToNow.current = true;
+        scrollRef.current?.scrollTo({ y: Math.max(0, e.nativeEvent.layout.y - NOW_HEADROOM), animated: false });
+    }, []);
+
+    // Transparent at the top and fading in only once content scrolls under it, so the
+    // Wake row at the very top is never dimmed.
+    const scrollY = useRef(new Animated.Value(0)).current;
+    const fadeOpacity = scrollY.interpolate({
+        inputRange: [0, TOP_FADE_H],
+        outputRange: [0, 1],
+        extrapolate: 'clamp',
+    });
 
     const [moving, setMoving] = useState<Moving | null>(null);
     const openMove = useCallback((taskId: string, fromZone: Zone, title: string, mins: number) => {
@@ -137,6 +159,27 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
                 const done = await api.completeOnboarding();
                 if (done.ok) useSessionStore.getState().setOnboardedAt(done.data.onboardedAt);
                 useOnboardingTasksStore.getState().reset();
+
+                // The all-set screen fires the celebratory haptic as its animation lands, so
+                // this path skips the one the shared path below fires.
+                const minsByType = (type: ProposalBlock['type']) =>
+                    proposal.blocks
+                        .filter((b) => b.type === type)
+                        .reduce((mins, b) => mins + durationMins(b.startTime, b.endTime), 0);
+                const tasksPlanned = board.blocks.reduce((n, b) => n + b.tasks.length, 0);
+
+                clearProposal();
+                router.replace({
+                    pathname: '/(onboarding)/all-set',
+                    params: {
+                        wakeTime: proposal.wakeTime,
+                        sleepTime: proposal.sleepTime,
+                        taskTimeMins: String(minsByType('CONTAINER')),
+                        tasksPlanned: String(tasksPlanned),
+                        eventsMins: String(minsByType('ANCHOR')),
+                    },
+                });
+                return;
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             dismissFlow();
@@ -147,7 +190,7 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
             { text: 'Cancel', style: 'cancel' },
             { text: 'Retry', onPress: () => handleConfirm() },
         ]);
-    }, [board, confirming, dismissFlow, isOnboarding, proposal, templateId]);
+    }, [board, clearProposal, confirming, dismissFlow, isOnboarding, proposal, router, templateId]);
 
     if (!board || !proposal) {
         return (
@@ -162,6 +205,8 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
 
     const blockById = new Map(board.blocks.map(b => [b.id, b]));
 
+    const hasHistory = timeline.findIndex(it => it.kind === 'now') > 0;
+
     const elements: ReactNode[] = [];
     timeline.forEach((item, i) => {
         if (i > 0) elements.push(<TimelineThread key={`thread-${i}`} />);
@@ -169,7 +214,12 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
         if (item.kind === 'boundary') {
             elements.push(<DayBoundaryMarker key={`item-${i}`} label={item.label} time={item.time} />);
         } else if (item.kind === 'now') {
-            elements.push(<NowLine key={`item-${i}`} time={now} />);
+            if (hasHistory) elements.push(<ScrollUpHint key="scroll-hint" />);
+            elements.push(
+                <View key={`item-${i}`} onLayout={hasHistory ? onNowLayout : undefined}>
+                    <NowLine time={now} />
+                </View>,
+            );
         } else if (item.kind === 'gap') {
             elements.push(<FreeSlot key={`item-${i}`} start={item.start} end={item.end} elapsed={item.elapsed} />);
         } else if (item.block.type === 'ANCHOR') {
@@ -196,13 +246,23 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
         <SafeAreaView style={s.container} edges={['top']}>
             <Header onClose={handleClose} onboarding={isOnboarding} />
 
-            <ScrollView contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
+            <View style={s.scrollWrap}>
+            <Animated.ScrollView
+                ref={scrollRef}
+                contentContainerStyle={s.scrollContent}
+                showsVerticalScrollIndicator={false}
+                scrollEventThrottle={16}
+                onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
+            >
                 <View>{elements}</View>
 
                 <View style={s.unscheduledSection}>
                     <Text style={s.sectionLabel}>NOT SCHEDULED</Text>
                     {board.unscheduled.length === 0 ? (
-                        <Text style={s.emptyHint}>Everything found a place in your day.</Text>
+                        <View style={s.emptyState}>
+                            <MaterialCommunityIcons name="party-popper" size={16} color={colors.accent.default} />
+                            <Text style={s.emptyHint}>Everything found a place in your day. Nice!</Text>
+                        </View>
                     ) : (
                         <View style={s.taskList}>
                             {board.unscheduled.map(task => (
@@ -217,7 +277,9 @@ export function ReviewPlan({ onboarding = false }: { onboarding?: boolean }) {
                         </View>
                     )}
                 </View>
-            </ScrollView>
+            </Animated.ScrollView>
+            {hasHistory && <TopFade width={windowWidth} opacity={fadeOpacity} />}
+            </View>
 
             <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
                 <TouchableOpacity
@@ -259,8 +321,8 @@ function Header({ onClose, onboarding }: { onClose: () => void; onboarding?: boo
         return (
             <View style={s.onboardingHeader}>
                 <StepEyebrow step={3} total={3} />
-                <Text style={s.onboardingTitle}>Here's your day</Text>
-                <Text style={s.onboardingSubtitle}>Tap a task to move it, then confirm.</Text>
+                <Text style={s.onboardingTitle}>Here's a proposed day for you</Text>
+                <Text style={s.onboardingSubtitle}>Your tasks are in your Task Time, and your events are untouched. Tap a task to move it.</Text>
             </View>
         );
     }
@@ -275,6 +337,31 @@ function Header({ onClose, onboarding }: { onClose: () => void; onboarding?: boo
             </View>
             <Text style={s.headerSubtitle}>Tap a task to move it, then confirm.</Text>
         </View>
+    );
+}
+
+function ScrollUpHint() {
+    return (
+        <View style={s.scrollHint}>
+            <Ionicons name="chevron-up" size={13} color="rgba(122,115,106,0.55)" />
+            <Text style={s.scrollHintText}>Scroll up for earlier</Text>
+        </View>
+    );
+}
+
+function TopFade({ width, opacity }: { width: number; opacity: Animated.AnimatedInterpolation<number> }) {
+    return (
+        <Animated.View style={[s.topFade, { opacity }]} pointerEvents="none">
+            <Svg width={width} height={TOP_FADE_H}>
+                <Defs>
+                    <SvgLinearGradient id="reviewTopFade" x1="0" y1="0" x2="0" y2="1">
+                        <Stop offset="0" stopColor="#fdfcfa" stopOpacity={1} />
+                        <Stop offset="1" stopColor="#fdfcfa" stopOpacity={0} />
+                    </SvgLinearGradient>
+                </Defs>
+                <Rect x="0" y="0" width={width} height={TOP_FADE_H} fill="url(#reviewTopFade)" />
+            </Svg>
+        </Animated.View>
     );
 }
 
@@ -293,10 +380,10 @@ function FreeSlot({ start, end, elapsed }: { start: string; end: string; elapsed
         <View style={[s.freeSlotRow, elapsed && s.elapsed]}>
             <View style={s.freeSlotThread} />
             <View style={s.freeSlotPill}>
-                {!elapsed && <Ionicons name="cafe-outline" size={11} color="rgba(122,115,106,0.7)" />}
+                <Ionicons name="cafe-outline" size={11} color="rgba(122,115,106,0.7)" />
                 <Text style={s.freeSlotText}>
                     {formatDuration(Math.max(0, toMins(end) - toMins(start)))}
-                    {!elapsed && ' free'}
+                    {' free'}
                 </Text>
             </View>
         </View>
@@ -307,8 +394,11 @@ function FreeSlot({ start, end, elapsed }: { start: string; end: string; elapsed
 function AnchorCard({ block, elapsed }: { block: ProposalBlock; elapsed: boolean }) {
     return (
         <View style={[s.anchorCard, elapsed && s.elapsed]}>
-            <Text style={s.anchorName}>{block.name}</Text>
-            <Text style={s.anchorTime}>{formatTimeRange(block.startTime, block.endTime)}</Text>
+            <View style={s.anchorText}>
+                <Text style={s.anchorName}>{block.name}</Text>
+                <Text style={s.anchorTime}>{formatTimeRange(block.startTime, block.endTime)}</Text>
+            </View>
+            <Ionicons name="lock-closed" size={14} color="#b5996f" />
         </View>
     );
 }
@@ -323,6 +413,7 @@ function ElapsedContainerCard({ block }: { block: ProposalBlock }) {
                     <Text style={s.blockName}>{block.name}</Text>
                     <Text style={s.blockTime}>{formatTimeRange(block.startTime, block.endTime)}</Text>
                 </View>
+                <Ionicons name="lock-closed" size={14} color="#b5996f" />
             </View>
         </View>
     );
@@ -341,7 +432,6 @@ function ContainerCard({
     onMove,
 }: { block: ReviewBlock } & RowMoveProps) {
     const remaining = blockRemainingMins(block);
-    const label = energyLabel(block.energyLevel);
     return (
         <View style={s.containerCard}>
             <View style={s.containerHeader}>
@@ -353,13 +443,9 @@ function ContainerCard({
                         <Text style={remaining < 0 ? s.capacityOver : s.capacityLeft}>{capacityLabel(remaining)}</Text>
                     </Text>
                 </View>
-                {label && (
-                    <View style={s.energyBadge}><Text style={s.energyBadgeText}>{label}</Text></View>
-                )}
             </View>
             {block.tasks.length === 0 ? (
                 <View style={s.noTasksRow}>
-                    <View style={s.noTasksDot} />
                     <Text style={s.noTasksText}>No tasks yet</Text>
                 </View>
             ) : (
@@ -401,11 +487,11 @@ function ScheduledRow({
                 onMove(task.id, fromZone, zoneFromActionName(e.nativeEvent.actionName))
             }
         >
+            <MoveHint />
             <View style={s.taskContent}>
                 <Text style={s.taskTitle} numberOfLines={2}>{task.title}</Text>
             </View>
             <Text style={s.taskMins}>{formatDuration(task.remainingMins)}</Text>
-            <MoveHint />
         </TouchableOpacity>
     );
 }
@@ -425,12 +511,12 @@ function UnscheduledRow({ task, board, onOpenMove, onMove }: { task: Unscheduled
                 onMove(task.id, UNSCHEDULED, zoneFromActionName(e.nativeEvent.actionName))
             }
         >
+            <MoveHint />
             <View style={s.taskContent}>
                 <Text style={s.taskTitle} numberOfLines={2}>{task.title}</Text>
                 {task.reason ? <Text style={s.taskReason} numberOfLines={2}>{task.reason}</Text> : null}
             </View>
             <Text style={s.taskMins}>{formatDuration(task.remainingMins)}</Text>
-            <MoveHint />
         </TouchableOpacity>
     );
 }
@@ -609,7 +695,12 @@ const s = StyleSheet.create({
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
     muted: { fontSize: 13, color: '#7a736a', textAlign: 'center', lineHeight: 18 },
 
+    scrollWrap: { flex: 1 },
     scrollContent: { padding: 16, paddingBottom: 24 },
+    topFade: { position: 'absolute', top: 0, left: 0, right: 0, height: TOP_FADE_H },
+
+    scrollHint: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 8 },
+    scrollHintText: { fontSize: 12, color: 'rgba(122,115,106,0.6)', letterSpacing: -0.1 },
 
     // Elapsed greying, shared by past blocks, events, and gaps.
     elapsed: { opacity: 0.45 },
@@ -627,14 +718,15 @@ const s = StyleSheet.create({
     freeSlotText: { fontSize: 10, color: 'rgba(122,115,106,0.8)', fontVariant: ['tabular-nums'] },
 
     // Event (anchor) card
-    anchorCard: { backgroundColor: colors.surface.block, borderRadius: 16, padding: 16 },
+    anchorCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.surface.block, borderRadius: 16, padding: 16 },
+    anchorText: { flex: 1 },
     anchorName: { fontSize: 15, fontWeight: '500', color: '#2a2621', letterSpacing: -0.23 },
     anchorTime: { fontSize: 13, color: '#9a9389', letterSpacing: -0.15, marginTop: 3, fontVariant: ['tabular-nums'] },
 
     // Container card (mirrors Today's dashed block)
     containerCard: {
         borderWidth: 1.5,
-        borderColor: 'rgba(42,38,33,0.16)',
+        borderColor: colors.border.container,
         borderStyle: 'dashed',
         borderRadius: 16,
         padding: 16,
@@ -645,19 +737,10 @@ const s = StyleSheet.create({
     blockTime: { fontSize: 13, color: '#9a9389', letterSpacing: -0.15, marginTop: 3, fontVariant: ['tabular-nums'] },
     capacityLeft: { color: colors.success.strong },
     capacityOver: { color: colors.warning.strong },
-    energyBadge: {
-        backgroundColor: 'rgba(232,223,209,0.4)',
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        alignSelf: 'flex-start',
-    },
-    energyBadgeText: { fontSize: 12, color: 'rgba(122,115,106,0.7)' },
 
     noTasksRow: {
-        flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        justifyContent: 'center',
         backgroundColor: 'rgba(232,228,221,0.1)',
         borderWidth: 1,
         borderColor: 'rgba(42,38,33,0.04)',
@@ -668,8 +751,7 @@ const s = StyleSheet.create({
         minHeight: 46,
         marginTop: 12,
     },
-    noTasksDot: { width: 16, height: 16, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(42,38,33,0.04)' },
-    noTasksText: { fontSize: 14, color: 'rgba(122,115,106,0.4)', letterSpacing: -0.15 },
+    noTasksText: { fontSize: 14, fontStyle: 'italic', color: 'rgba(122,115,106,0.4)', letterSpacing: -0.15 },
 
     taskList: { gap: 6, marginTop: 12 },
     taskCard: {
@@ -698,6 +780,7 @@ const s = StyleSheet.create({
     // Not-scheduled section
     unscheduledSection: { marginTop: 24, gap: 10 },
     sectionLabel: { fontSize: 11, color: 'rgba(122,115,106,0.55)', letterSpacing: 0.5, textTransform: 'uppercase' },
+    emptyState: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     emptyHint: { fontSize: 13, color: 'rgba(122,115,106,0.5)', fontStyle: 'italic' },
 
     footer: {
@@ -706,10 +789,10 @@ const s = StyleSheet.create({
         borderTopWidth: 1,
         borderTopColor: 'rgba(42,38,33,0.06)',
     },
-    confirmButton: { backgroundColor: '#2a2621', borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
+    confirmButton: { backgroundColor: '#2a2621', borderRadius: 14, height: 48, justifyContent: 'center', alignItems: 'center' },
     confirmButtonDisabled: { opacity: 0.6 },
     confirmButtonLabel: { fontSize: 15, fontWeight: '600', color: '#fdfcfa', letterSpacing: -0.2 },
-    footerBack: { height: 44, justifyContent: 'center', alignItems: 'center' },
+    footerBack: { height: 40, justifyContent: 'center', alignItems: 'center' },
     footerBackLabel: { fontSize: 15, fontWeight: '500', color: '#7a736a', letterSpacing: -0.1 },
 
     // Move-to sheet
