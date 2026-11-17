@@ -4,6 +4,18 @@
     "appVersionSource": "remote",
   },
   "build": {
+    "preview": {
+      "node": "26.0.0",
+      "environment": "production",
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://starlightapi-production.up.railway.app",
+        "EXPO_NO_YARN": "1"
+      }
+    },
     "production": {
       "node": "26.0.0",
       "environment": "production",
