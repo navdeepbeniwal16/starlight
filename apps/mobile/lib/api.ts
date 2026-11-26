@@ -3,7 +3,8 @@ import { getToken } from "./clerk";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
 
-const GENERATE_TIMEOUT_MS = 20_000;
+// Keeping it at 14 minutes because a large-context generate can legitimately run for minutes.
+const GENERATE_TIMEOUT_MS = 14 * 60 * 1000;
 // A timeout returns this code so the UI can show the "took too long" copy specifically.
 export const GENERATION_TIMEOUT = 'TIMEOUT';
 
@@ -501,7 +502,7 @@ export const api = {
   getOnboarding: async (): Promise<OnboardingResponse> => {
     const token = await getToken();
 
-    if(!token) {
+    if (!token) {
       return { ok: false, error: 'No token found' };
     }
 
@@ -512,20 +513,20 @@ export const api = {
       });
 
       const responseJson = await response.json();
-      if(!response.ok) {
+      if (!response.ok) {
         return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
       }
 
       return { ok: true, data: responseJson.data };
     } catch (error) {
-      return { ok: false, error: 'Network error. Please check your connection.'};
+      return { ok: false, error: 'Network error. Please check your connection.' };
     }
   },
 
   completeOnboarding: async (): Promise<OnboardingResponse> => {
     const token = await getToken();
 
-    if(!token) {
+    if (!token) {
       return { ok: false, error: 'No token found' };
     }
 
@@ -536,13 +537,13 @@ export const api = {
       });
 
       const responseJson = await response.json();
-      if(!response.ok) {
+      if (!response.ok) {
         return { ok: false, error: responseJson.error ?? `HTTP ${response.status}`, status: response.status };
       }
 
       return { ok: true, data: responseJson.data };
     } catch (error) {
-      return { ok: false, error: 'Network error. Please check your connection.'};
+      return { ok: false, error: 'Network error. Please check your connection.' };
     }
   },
 };
